@@ -1,0 +1,880 @@
+[gd_scene format=3 uid="uid://kjcmv8a5d6d8"]
+
+[ext_resource type="Script" uid="uid://ctjuo0d2rk8xn" path="res://Scripts/ui/terminal/terminalMain.gd" id="1_28y5k"]
+[ext_resource type="Theme" uid="uid://dknpyc8k8uut1" path="res://assets/themes/ui/CasWindowTheme.tres" id="1_qw8t2"]
+[ext_resource type="Script" uid="uid://3nlr337l3jd1" path="res://Scripts/ui/windowController.gd" id="2_kw77j"]
+[ext_resource type="Theme" uid="uid://cle2qxvhrms2" path="res://assets/themes/ui/CasMenuTheme.tres" id="2_wtw42"]
+[ext_resource type="Script" uid="uid://p4inwor7gtoo" path="res://addons/godot-console/scripts/console_container.gd" id="3_scr57"]
+[ext_resource type="Theme" uid="uid://cmcg2kh8tp34j" path="res://assets/themes/ui/ConsoleTheme.tres" id="3_wtw42"]
+[ext_resource type="Script" uid="uid://c3r5eniiimc5u" path="res://Scripts/ui/terminal/settingsView.gd" id="5_hiern"]
+[ext_resource type="PackedScene" uid="uid://5ulb0y10omfc" path="res://scenes/ui/widgets/wgCheck.tscn" id="5_hils5"]
+[ext_resource type="Script" uid="uid://b0qgye7edenfk" path="res://Scripts/ui/terminal/skinsView.gd" id="7_fbkat"]
+[ext_resource type="Script" uid="uid://0ybgns1h0vg0" path="res://Scripts/ui/buttons/btnQuit.gd" id="7_fjui6"]
+[ext_resource type="Script" uid="uid://n46o8xnuf1fi" path="res://Scripts/ui/buttons/btnOpenFolder.gd" id="7_onf55"]
+[ext_resource type="Texture2D" uid="uid://oyvhsg2ukamx" path="res://assets/textures/ui/uiResize.png" id="7_u87i0"]
+[ext_resource type="PackedScene" uid="uid://g6u2oy10y4g4" path="res://scenes/ui/widgets/wgExpie.tscn" id="8_fbkat"]
+[ext_resource type="PackedScene" uid="uid://bjcybvcgu670s" path="res://scenes/ui/widgets/wgSlider.tscn" id="9_r80vr"]
+[ext_resource type="PackedScene" uid="uid://bjaud4bo61wh3" path="res://scenes/ui/widgets/wgInput.tscn" id="12_qw8t2"]
+[ext_resource type="Script" uid="uid://8lhbbrprbbpc" path="res://Scripts/ui/terminal/itemsView.gd" id="15_0e1f5"]
+[ext_resource type="PackedScene" uid="uid://ci0xelx1tte0f" path="res://scenes/ui/widgets/wgItem.tscn" id="15_r80vr"]
+[ext_resource type="Texture2D" uid="uid://btgnk8vpemq7w" path="res://assets/objectSpr/Site-logo.png" id="17_1d1gl"]
+[ext_resource type="Texture2D" uid="uid://hdmwpweu6cqv" path="res://assets/misc/newlogo.png" id="17_qxisp"]
+[ext_resource type="Texture2D" uid="uid://dt85xunyle8kl" path="res://assets/misc/Icon.png" id="18_1d1gl"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_4tatb"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_72ypp"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qw8t2"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+expand_margin_left = 2.0
+expand_margin_right = 2.0
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_8hy2h"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qxisp"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+expand_margin_left = 2.0
+expand_margin_top = 2.0
+expand_margin_right = 2.0
+expand_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1d1gl"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_cbexo"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_ri3og"]
+
+[node name="ConsoleWindowPanel" type="Panel" unique_id=2084845338 node_paths=PackedStringArray("windowControl", "submenuButton", "submenuPanels")]
+offset_right = 580.0
+offset_bottom = 320.0
+theme = ExtResource("1_qw8t2")
+script = ExtResource("1_28y5k")
+windowControl = NodePath("WindowController")
+submenuButton = NodePath("TitleBar/SubmenuPicker")
+submenuPanels = [NodePath("MarginContainer/ViewportPanel/ConsoleView"), NodePath("MarginContainer/ViewportPanel/SettingsView"), NodePath("MarginContainer/ViewportPanel/SkinsView"), NodePath("MarginContainer/ViewportPanel/ItemsView")]
+metadata/_edit_horizontal_guides_ = [-55.0]
+
+[node name="WindowController" type="Node" parent="." unique_id=203241263 node_paths=PackedStringArray("TitleBar", "CloseButton", "ResizeButton")]
+script = ExtResource("2_kw77j")
+TitleBar = NodePath("../TitleBar")
+CloseButton = NodePath("../TitleBar/Close")
+ResizeButton = NodePath("../Resize")
+minimumWindowSize = Vector2(412, 224)
+metadata/_custom_type_script = "uid://3nlr337l3jd1"
+
+[node name="TitleBar" type="Button" parent="." unique_id=535690638]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 40.0
+grow_horizontal = 2
+theme = ExtResource("1_qw8t2")
+
+[node name="Close" type="Button" parent="TitleBar" unique_id=48987244]
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -35.0
+offset_top = -13.0
+offset_right = -8.0
+offset_bottom = 15.0
+grow_horizontal = 0
+grow_vertical = 2
+theme = ExtResource("2_wtw42")
+theme_override_font_sizes/font_size = 18
+text = "X"
+text_overrun_behavior = 2
+autowrap_mode = 1
+clip_text = true
+
+[node name="SubmenuPicker" type="OptionButton" parent="TitleBar" unique_id=856406396]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -69.5
+offset_top = -15.0
+offset_right = 69.5
+offset_bottom = 15.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_wtw42")
+flat = true
+alignment = 1
+selected = 0
+item_count = 4
+popup/item_0/text = "Console"
+popup/item_0/id = 0
+popup/item_1/text = "Settings"
+popup/item_1/id = 3
+popup/item_2/text = "Skins"
+popup/item_2/id = 2
+popup/item_3/text = "Items"
+popup/item_3/id = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=212749622]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 36.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="ViewportPanel" type="Panel" parent="MarginContainer" unique_id=726533421]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_4tatb")
+
+[node name="ConsoleView" type="VBoxContainer" parent="MarginContainer/ViewportPanel" unique_id=368875547]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+theme = ExtResource("3_wtw42")
+theme_override_constants/separation = 4
+alignment = 1
+script = ExtResource("3_scr57")
+metadata/_edit_use_anchors_ = true
+
+[node name="SettingsView" type="Panel" parent="MarginContainer/ViewportPanel" unique_id=1702886988 node_paths=PackedStringArray("TabButtons", "TabPanels")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_wtw42")
+theme_override_styles/panel = SubResource("StyleBoxEmpty_72ypp")
+script = ExtResource("5_hiern")
+TabButtons = [NodePath("MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer/BehaviorTab"), NodePath("MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer/AudioTab"), NodePath("MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer/GeneralTab"), NodePath("MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer/DebugTab")]
+TabPanels = [NodePath("MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel"), NodePath("MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel"), NodePath("MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel"), NodePath("MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel")]
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SettingsView" unique_id=261895549]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 2
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 2
+theme_override_constants/margin_bottom = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer" unique_id=1611902223]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="TabsScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer" unique_id=726487962]
+layout_mode = 2
+vertical_scroll_mode = 0
+scroll_horizontal_by_default = true
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/TabsScrollContainer" unique_id=870323139]
+layout_mode = 2
+size_flags_horizontal = 2
+size_flags_vertical = 0
+theme_override_constants/separation = 2
+alignment = 1
+
+[node name="BehaviorTab" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer" unique_id=937542500]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+toggle_mode = true
+text = "Behavior"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="AudioTab" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer" unique_id=2060769132]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+toggle_mode = true
+text = "Audio"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="GeneralTab" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer" unique_id=1874330593]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+toggle_mode = true
+text = "General
+"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="DebugTab" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/TabsScrollContainer/HBoxContainer" unique_id=317966934]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+toggle_mode = true
+text = "Debug"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="SettingsPanel" type="Panel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer" unique_id=1107480456]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_qw8t2")
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel" unique_id=2054702051]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+metadata/_edit_use_anchors_ = true
+
+[node name="BehaviorPanel" type="Panel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer" unique_id=1184851105]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxEmpty_8hy2h")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel" unique_id=1528933412]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer" unique_id=1012535432]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = -1
+
+[node name="TitleCard" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=2051856741 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Invincible 
+[i]Prevents death, mood loss, hunger, trust loss...[/i]"
+key = "invincible"
+
+[node name="Lobotomy" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1319685572 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Enable mood"
+key = "lobotomize"
+flipValue = true
+defaultValue = true
+
+[node name="Hungry" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1390057350 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Enable hunger"
+key = "hungerEnabled"
+
+[node name="Sleepy" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=62469743 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Enable sleep cycles"
+key = "sleepEnabled"
+
+[node name="Silence" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=877578037 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Disable ALL speech"
+key = "mute"
+
+[node name="SilenceSoft" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1248303193 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Disable passive speech"
+key = "mutePassive"
+
+[node name="MinDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227112 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Minimum time between passive dialouge"
+key = "minDialogueTime"
+defaultValue = "30.0"
+
+[node name="MaxDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=628375292 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Maximum time between passive dialouge"
+key = "maxDialogueTime"
+defaultValue = "60.0"
+
+[node name="AudioPanel" type="Panel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer" unique_id=68479689]
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxEmpty_8hy2h")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel" unique_id=973358876]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer" unique_id=1696394867]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = -1
+
+[node name="MasterVolume" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=706210843 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Master Volume"
+key = "soundVolume"
+valueType = "percentage"
+updateVolume = true
+
+[node name="MuteDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=450165030 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Mute dialogue sounds"
+key = "dialogueSoundEnabled"
+flipValue = true
+
+[node name="MuteWhine" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=1936769998 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Mute whining sounds"
+key = "whiningSoundEnabled"
+flipValue = true
+
+[node name="MuteBark" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=23294389 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Mute barking sounds"
+key = "barkSoundEnabled"
+flipValue = true
+
+[node name="MutePet" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=55793242 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Mute petting sounds"
+key = "pettingSoundEnabled"
+flipValue = true
+
+[node name="MuteEating" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=369630809 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Mute eating sounds"
+key = "eatingSoundEnabled"
+flipValue = true
+
+[node name="GeneralPanel" type="Panel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer" unique_id=1035660472]
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxEmpty_8hy2h")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel" unique_id=1481478214]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer" unique_id=238564360]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = -1
+
+[node name="Monitor" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=27978876 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Default monitor"
+key = "defaultMonitor"
+sliderMaximum = 9.0
+sliderStep = 1.0
+valueType = "int"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=816225973]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="FPSIdle" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer/HBoxContainer" unique_id=1765739864 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Max FPS: Idle"
+key = "maxFPSIdle"
+defaultValue = 45.0
+sliderMinimum = 30.0
+sliderMaximum = 144.0
+sliderStep = 1.0
+valueType = "int"
+
+[node name="FPSInteract" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer/HBoxContainer" unique_id=1759542382 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Max FPS: Interacting"
+key = "maxFPSInteract"
+defaultValue = 60.0
+sliderMinimum = 30.0
+sliderMaximum = 144.0
+sliderStep = 1.0
+valueType = "int"
+
+[node name="Persistence" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=671056008 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Keep spawned expies across sessions"
+key = "expiePersistence"
+defaultValue = true
+
+[node name="UpdateNotif" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967685 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Update notification"
+key = "updNotif"
+defaultValue = true
+
+[node name="NoPersPopup" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=783160364 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Disable 'too many expies!?' popup"
+key = "noPersPopup"
+
+[node name="FontSize" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1753755982 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Dialogue font size"
+key = "expieDialogueSize"
+sliderMinimum = 3.0
+sliderMaximum = 12.0
+sliderStep = 1.0
+valueType = "int"
+
+[node name="Pixel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1687074210 instance=ExtResource("5_hils5")]
+visible = false
+layout_mode = 2
+label = "Enable pixel rendering"
+key = "pixel"
+
+[node name="Vulkan" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1691357632 instance=ExtResource("5_hils5")]
+visible = false
+layout_mode = 2
+label = "Use Vulkan [rainbow](Doesn't work!)[/rainbow]"
+key = "useVulkan"
+
+[node name="OpenFolder" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1666032789]
+layout_mode = 2
+size_flags_vertical = 8
+offset_transform_enabled = true
+text = "Open save data folder"
+autowrap_mode = 3
+script = ExtResource("7_onf55")
+
+[node name="Quit" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=842687199]
+layout_mode = 2
+size_flags_vertical = 8
+offset_transform_enabled = true
+text = "Close Application"
+autowrap_mode = 3
+script = ExtResource("7_fjui6")
+
+[node name="DebugPanel" type="Panel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer" unique_id=41489675]
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxEmpty_8hy2h")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel" unique_id=184663970]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer" unique_id=646339879]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = -1
+
+[node name="OiYou" type="RichTextLabel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=336281227]
+layout_mode = 2
+bbcode_enabled = true
+text = "Hello! You shouldn't mess with these ones [i]unless you know what you're doing.[/i]"
+fit_content = true
+horizontal_alignment = 1
+
+[node name="SkinName" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=737089591 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Default skin folder name"
+key = "defaultSkin"
+defaultValue = "Body"
+
+[node name="MoodMin" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1160899127 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Minimum mood"
+key = "minMood"
+sliderMinimum = -100.0
+sliderMaximum = 100.0
+sliderStep = 0.2
+
+[node name="MoodMax" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1660641891 instance=ExtResource("9_r80vr")]
+layout_mode = 2
+label = "Maximum mood"
+key = "maxMood"
+sliderMinimum = -100.0
+sliderMaximum = 100.0
+sliderStep = 0.2
+
+[node name="HungerRate" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1872999209 instance=ExtResource("9_r80vr")]
+visible = false
+layout_mode = 2
+label = "Hunger rate
+[rainbow](Currenly unused)[/rainbow]"
+key = "hungerDecayRate"
+sliderMinimum = -1.0
+
+[node name="Disclaimer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1937617048 instance=ExtResource("5_hils5")]
+visible = false
+layout_mode = 2
+label = "Toggle disclaimer at bootup
+[i]No longer used[/i]"
+key = "messageEnabled"
+flipValue = true
+
+[node name="Normalize" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=168003765 instance=ExtResource("9_r80vr")]
+visible = false
+layout_mode = 2
+label = "Normalize"
+key = "normalize"
+sliderMinimum = -1.0
+
+[node name="UseVulkan" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=556117969 instance=ExtResource("5_hils5")]
+visible = false
+layout_mode = 2
+label = "Use Vulkan Rendering [color=red][wave] (REQUIRES RESTART)"
+key = "useVulkan"
+
+[node name="SkinsView" type="Panel" parent="MarginContainer/ViewportPanel" unique_id=1098396453 node_paths=PackedStringArray("defaultSkinButton", "spawnButton", "openFolderButton", "refreshButton", "openDBButton", "expieDisplayWidget", "skinsButtonList", "skinNameLabel")]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_wtw42")
+theme_override_styles/panel = SubResource("StyleBoxEmpty_72ypp")
+script = ExtResource("7_fbkat")
+defaultSkinButton = NodePath("MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer/ScrollContainer/VBoxContainer/DefaultSkinButton")
+spawnButton = NodePath("MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/Selector/SpawnButton")
+openFolderButton = NodePath("MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer/HBoxContainer/SkinFolder")
+refreshButton = NodePath("MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer/HBoxContainer/Refresh")
+openDBButton = NodePath("MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer/SkinDB")
+expieDisplayWidget = NodePath("MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/ScrollContainer/VBoxContainer/DisplayExpie")
+skinsButtonList = NodePath("MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer/ScrollContainer/VBoxContainer")
+skinNameLabel = NodePath("MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/SkinName")
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SkinsView" unique_id=604786455]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 2
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 2
+theme_override_constants/margin_bottom = 4
+metadata/_edit_use_anchors_ = true
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer" unique_id=427773516]
+layout_mode = 2
+
+[node name="SelectorPanel" type="Panel" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer" unique_id=737523754]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.65
+theme_override_styles/panel = SubResource("StyleBoxFlat_qxisp")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel" unique_id=467290841]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="SkinsMarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer" unique_id=62792110]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer" unique_id=2011251218]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_1d1gl")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer/ScrollContainer" unique_id=126987901]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DefaultSkinButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer/ScrollContainer/VBoxContainer" unique_id=1892626913]
+layout_mode = 2
+text = "Experiment (Default)"
+autowrap_mode = 3
+
+[node name="OptionsMarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer" unique_id=1591849225]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_right = 18
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer" unique_id=2063498795]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer" unique_id=279809845]
+layout_mode = 2
+alignment = 1
+
+[node name="SkinFolder" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer/HBoxContainer" unique_id=1326177558]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+text = "Open skins folder"
+autowrap_mode = 3
+autowrap_trim_flags = 192
+clip_text = true
+
+[node name="Refresh" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer/HBoxContainer" unique_id=124918564]
+layout_mode = 2
+size_flags_vertical = 4
+text = "↻"
+
+[node name="SkinDB" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/OptionsMarginContainer/VBoxContainer" unique_id=1962474016]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.13137114, 0.6858215, 0.86762196, 1)
+text = " Skins Database"
+autowrap_mode = 3
+
+[node name="DisplayPanel" type="Panel" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer" unique_id=319510509]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.6
+theme_override_styles/panel = SubResource("StyleBoxEmpty_cbexo")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel" unique_id=1214093684]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="SkinName" type="RichTextLabel" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer" unique_id=593605851]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 1
+theme_override_constants/line_separation = -5
+text = "Skin Name"
+fit_content = true
+scroll_following = true
+horizontal_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer" unique_id=1111418123]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/ScrollContainer" unique_id=235646141]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DisplayExpie" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/ScrollContainer/VBoxContainer" unique_id=1707983696 instance=ExtResource("8_fbkat")]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 6
+metadata/display = true
+
+[node name="Selector" type="GridContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer" unique_id=1815568107]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 8
+columns = 6
+
+[node name="PreviousButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/Selector" unique_id=403882709]
+visible = false
+layout_mode = 2
+text = "<"
+
+[node name="SpawnButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/Selector" unique_id=2042383996]
+layout_mode = 2
+text = " Spawn "
+
+[node name="NextButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/Selector" unique_id=350446503]
+visible = false
+layout_mode = 2
+text = ">"
+
+[node name="ItemsView" type="Panel" parent="MarginContainer/ViewportPanel" unique_id=1530645209 node_paths=PackedStringArray("itemContainer", "root", "wikiButton", "wikiButtonClose")]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_wtw42")
+theme_override_styles/panel = SubResource("StyleBoxEmpty_72ypp")
+script = ExtResource("15_0e1f5")
+itemContainer = NodePath("MarginContainer/VBoxContainer/ScrollContainer/ItemGridContainer")
+buttonScene = ExtResource("15_r80vr")
+root = NodePath("../../..")
+wikiButton = NodePath("MarginContainer/VBoxContainer/WikiButton")
+wikiButtonClose = NodePath("MarginContainer/VBoxContainer/WikiButton/Close")
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/ItemsView" unique_id=1449609605]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 7
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 7
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer" unique_id=1499811506]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="WikiButton" type="Button" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer" unique_id=1158817619]
+custom_minimum_size = Vector2(0, 53)
+layout_mode = 2
+text_overrun_behavior = 1
+autowrap_mode = 2
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/WikiButton" unique_id=2137691117]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 86.0
+offset_top = 5.0
+offset_right = -44.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="RichTextLabel" type="RichTextLabel" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/WikiButton/ScrollContainer" unique_id=926061023]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 1
+theme_override_font_sizes/normal_font_size = 16
+theme_override_font_sizes/bold_font_size = 16
+theme_override_font_sizes/bold_italics_font_size = 16
+theme_override_font_sizes/italics_font_size = 16
+theme_override_font_sizes/mono_font_size = 16
+bbcode_enabled = true
+text = "[color=ED2B42]MOST IF NOT ALL ASSETS ARE RIPPED FROM 
+[color=2BEDD6]https://casualtiesunknown.miraheze.org/wiki/[/color]"
+fit_content = true
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Close" type="Button" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/WikiButton" unique_id=1433764023]
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -35.0
+offset_top = -13.0
+offset_right = -8.0
+offset_bottom = 15.0
+grow_horizontal = 0
+grow_vertical = 2
+theme = ExtResource("2_wtw42")
+theme_override_font_sizes/font_size = 18
+text = "X"
+text_overrun_behavior = 2
+autowrap_mode = 1
+clip_text = true
+
+[node name="TextureRect" type="TextureRect" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/WikiButton" unique_id=1558527179]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 8.0
+offset_top = -20.0
+offset_right = 74.666664
+offset_bottom = 20.0
+grow_vertical = 2
+texture = ExtResource("17_1d1gl")
+expand_mode = 3
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer" unique_id=924644790]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ItemGridContainer" type="GridContainer" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/ScrollContainer" unique_id=1974013151]
+layout_mode = 2
+size_flags_horizontal = 6
+columns = 8
+
+[node name="ItemWidget" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/ScrollContainer/ItemGridContainer" unique_id=1118514660 instance_placeholder="res://scenes/ui/widgets/wgItem.tscn"]
+layout_mode = 2
+itemName = "sample item"
+itemIcon = ExtResource("17_qxisp")
+
+[node name="ItemWidget2" parent="MarginContainer/ViewportPanel/ItemsView/MarginContainer/VBoxContainer/ScrollContainer/ItemGridContainer" unique_id=1693646104 instance_placeholder="res://scenes/ui/widgets/wgItem.tscn"]
+layout_mode = 2
+itemName = "another one for the road"
+itemIcon = ExtResource("18_1d1gl")
+
+[node name="Resize" type="Button" parent="." unique_id=706981152]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -24.0
+offset_top = -24.027405
+offset_right = 0.027404785
+grow_horizontal = 0
+grow_vertical = 0
+scale = Vector2(1.0039321, 1)
+theme = ExtResource("2_wtw42")
+theme_override_styles/normal = SubResource("StyleBoxEmpty_ri3og")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_ri3og")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_ri3og")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_ri3og")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_ri3og")
+icon = ExtResource("7_u87i0")
+icon_alignment = 1
+expand_icon = true
+
+[connection signal="button_down" from="Resize" to="." method="_on_resize_button_down"]
+[connection signal="button_up" from="Resize" to="." method="_on_resize_button_up"]

@@ -1,0 +1,39 @@
+{
+	"ConsoleSize": {
+		"x": 580.0,
+		"y": 320.0
+	},
+	"noNoZone": {
+		"x1": 0.0,
+		"x2": 0.0
+	},
+	"expieDialogueSize": 7.0,
+	"minDialogueTime": 30.0,
+	"maxDialogueTime": 90.0,
+	"minMood": -100.0,
+	"maxMood": 100.0,
+	"hungerDecayRate": 0.1,
+	"invincible": false,
+	"deathEnabled": false,
+	"pixel": false,
+	"lobotomize": true,
+	"expiePersistence": false,
+	"mute": false,
+	"mutePassive": false,
+	"dialogueSoundEnabled": true,
+	"whiningSoundEnabled": true,
+	"barkSoundEnabled": true,
+	"pettingSoundEnabled": true,
+	"eatingSoundEnabled": true,
+	"messageEnabled": true,
+	"updNotif": true,
+	"hungerEnabled": true,
+	"sleepEnabled": true,
+	"normalize": 1.0,
+	"outdated": false,
+	"soundVolume": 1.0,
+	"defaultSkin": "Body",
+	"defaultMonitor": 0,
+	"useVulkan": false,
+	"noPersPopup": false
+}

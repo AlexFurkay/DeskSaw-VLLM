@@ -1,0 +1,55 @@
+[gd_scene format=3 uid="uid://5ulb0y10omfc"]
+
+[ext_resource type="Theme" uid="uid://cle2qxvhrms2" path="res://assets/themes/ui/CasMenuTheme.tres" id="1_lkfs2"]
+[ext_resource type="Script" uid="uid://dcqtvuc7ky335" path="res://Scripts/ui/widgets/wgCheckbox.gd" id="2_lkfs2"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_72ypp"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+
+[node name="SettingsCheck" type="PanelContainer" unique_id=2051856741 node_paths=PackedStringArray("_checkbox", "_label")]
+anchors_preset = -1
+anchor_right = 0.3715278
+anchor_bottom = 0.061728396
+theme = ExtResource("1_lkfs2")
+theme_override_styles/panel = SubResource("StyleBoxFlat_72ypp")
+script = ExtResource("2_lkfs2")
+label = "Setting Label"
+key = "setting-config-key"
+_checkbox = NodePath("MarginContainer/HBoxContainer/CheckBox")
+_label = NodePath("MarginContainer/HBoxContainer/Label")
+metadata/_edit_use_anchors_ = true
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=53382515]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer" unique_id=507161754]
+layout_mode = 2
+
+[node name="Label" type="RichTextLabel" parent="MarginContainer/HBoxContainer" unique_id=170594188]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/line_separation = -8
+theme_override_font_sizes/normal_font_size = 20
+theme_override_font_sizes/bold_font_size = 20
+theme_override_font_sizes/bold_italics_font_size = 20
+theme_override_font_sizes/italics_font_size = 20
+theme_override_font_sizes/mono_font_size = 20
+bbcode_enabled = true
+text = "Setting Label"
+fit_content = true
+scroll_active = false
+vertical_alignment = 1
+
+[node name="CheckBox" type="CheckBox" parent="MarginContainer/HBoxContainer" unique_id=981928196]
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4

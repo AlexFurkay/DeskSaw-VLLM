@@ -1,0 +1,75 @@
+[gd_scene format=3 uid="uid://nbfrphs14wxt"]
+
+[ext_resource type="Script" uid="uid://0kq78j6rijnm" path="res://Scripts/impo/main.gd" id="1_kw42e"]
+[ext_resource type="Script" uid="uid://dv3fk2oja8ogf" path="res://Scripts/nimpo/pixeltoggle.gd" id="3_wpfx3"]
+[ext_resource type="Shader" uid="uid://de2e1cyd8inbm" path="res://assets/shaders/pixelp.gdshader" id="4_6uavn"]
+[ext_resource type="PackedScene" uid="uid://kjcmv8a5d6d8" path="res://scenes/ui/terminal.tscn" id="4_8gj0p"]
+[ext_resource type="PackedScene" uid="uid://bn4qfaris1qqr" path="res://scenes/ui/persistencePopup.tscn" id="5_8gj0p"]
+
+[sub_resource type="WorldBoundaryShape2D" id="WorldBoundaryShape2D_fn1ne"]
+
+[sub_resource type="GDScript" id="GDScript_gct8d"]
+script/source = "extends StaticBody2D
+
+var screenWidth: int = DisplayServer.screen_get_usable_rect().size.x
+var screenHeight: int = DisplayServer.screen_get_usable_rect().size.y
+
+var taskbarPos: int = DisplayServer.screen_get_usable_rect().end.y
+
+
+func _ready() -> void:
+	pass
+"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_1ywsh"]
+shader = ExtResource("4_6uavn")
+shader_parameter/pixelation = 0.0030000001425
+shader_parameter/opacity = 1.0
+
+[node name="newmain" type="Node2D" unique_id=827416073 node_paths=PackedStringArray("console")]
+script = ExtResource("1_kw42e")
+console = NodePath("CanvasLayer2/ConsoleWindowPanel")
+
+[node name="Floor" type="StaticBody2D" parent="." unique_id=1727446454]
+collision_layer = 9
+collision_mask = 9
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Floor" unique_id=1591267612]
+shape = SubResource("WorldBoundaryShape2D_fn1ne")
+
+[node name="SideR" type="StaticBody2D" parent="." unique_id=224754577]
+rotation = -1.5707964
+collision_layer = 9
+collision_mask = 9
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="SideR" unique_id=2146665891]
+shape = SubResource("WorldBoundaryShape2D_fn1ne")
+
+[node name="SideL" type="StaticBody2D" parent="." unique_id=2011767522]
+rotation = 1.5707964
+collision_layer = 9
+collision_mask = 9
+script = SubResource("GDScript_gct8d")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="SideL" unique_id=1825212476]
+shape = SubResource("WorldBoundaryShape2D_fn1ne")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=431600723]
+script = ExtResource("3_wpfx3")
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer" unique_id=590503007]
+visible = false
+material = SubResource("ShaderMaterial_1ywsh")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="CanvasLayer2" type="CanvasLayer" parent="." unique_id=1718764187]
+
+[node name="ConsoleWindowPanel" parent="CanvasLayer2" unique_id=2084845338 instance=ExtResource("4_8gj0p")]
+
+[node name="PersistenceWarningPopup" parent="CanvasLayer2" unique_id=178805227 instance=ExtResource("5_8gj0p")]
+visible = false

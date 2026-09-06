@@ -1,0 +1,877 @@
+[gd_scene format=3 uid="uid://bqc56vqtcq7ou"]
+
+[ext_resource type="Script" uid="uid://di62pelsumou7" path="res://Scripts/nimpo/windowHandler.gd" id="1_635sk"]
+[ext_resource type="Theme" uid="uid://b3kq74llqlv3x" path="res://assets/themes/MinimalUI.tres" id="1_gicfb"]
+[ext_resource type="Script" uid="uid://d0cvk81o5qbon" path="res://Scripts/impo/commands.gd" id="1_spxfo"]
+[ext_resource type="Script" uid="uid://p4inwor7gtoo" path="res://addons/godot-console/scripts/console_container.gd" id="2_635sk"]
+[ext_resource type="Script" uid="uid://buv1161su40c1" path="res://Scripts/impo/settings.gd" id="5_uf3cf"]
+[ext_resource type="Texture2D" uid="uid://yuq6rb2r6wpm" path="res://assets/svg/x-symbol.svg" id="6_7udsa"]
+[ext_resource type="Script" uid="uid://blg811jk2cjt4" path="res://Scripts/nimpo/clickArea.gd" id="7_7udsa"]
+[ext_resource type="Script" uid="uid://c54ytulfgcsuk" path="res://Scripts/impo/skinSpawner.gd" id="7_emer2"]
+[ext_resource type="Script" uid="uid://di2ndevvlwtlo" path="res://Scripts/nimpo/item_spawner.gd" id="9_o0bys"]
+[ext_resource type="Theme" uid="uid://bl462l5byyohh" path="res://assets/themes/ConsoleTheme.tres" id="10_m5wgn"]
+[ext_resource type="Texture2D" uid="uid://btgnk8vpemq7w" path="res://assets/objectSpr/Site-logo.png" id="11_p45lu"]
+[ext_resource type="Script" uid="uid://ckp8r8xr5vm48" path="res://Scripts/nimpo/soundVolumeSlider.gd" id="19_emer2"]
+
+[node name="Console" type="Control" unique_id=2061047100 node_paths=PackedStringArray("Handle", "Minimize", "Exit", "ConsoleN", "SettingsN", "SkinsN", "ItemsN")]
+layout_mode = 3
+anchor_top = 0.0015432099
+anchor_right = 0.4861111
+anchor_bottom = 0.25
+size_flags_horizontal = 6
+mouse_filter = 2
+script = ExtResource("1_635sk")
+Handle = NodePath("Handle")
+Minimize = NodePath("Handle/Minimize")
+Exit = NodePath("Handle/Close")
+ConsoleN = NodePath("Main/ConsoleContainer")
+SettingsN = NodePath("Main/Settings")
+SkinsN = NodePath("Main/SkinSpawner")
+ItemsN = NodePath("Main/ItemSpawner")
+metadata/_edit_use_anchors_ = true
+
+[node name="Handle" type="Button" parent="." unique_id=473127369]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -0.0017857143
+anchor_top = -0.1863354
+anchor_right = 1.0017858
+anchor_bottom = 0.0062111802
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_gicfb")
+alignment = 0
+
+[node name="Close" type="Button" parent="Handle" unique_id=1025226998]
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.92704624
+anchor_top = 0.06451613
+anchor_right = 0.97686833
+anchor_bottom = 0.935484
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_gicfb")
+text = "X"
+metadata/_edit_use_anchors_ = true
+
+[node name="Minimize" type="Button" parent="Handle" unique_id=1942123215]
+visible = false
+custom_minimum_size = Vector2(12, 12)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.87366545
+anchor_top = 0.06451613
+anchor_right = 0.92348754
+anchor_bottom = 0.935484
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_gicfb")
+text = "-"
+metadata/_edit_use_anchors_ = true
+
+[node name="TabSwitch" type="OptionButton" parent="Handle" unique_id=149604070]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.026690392
+anchor_top = 0.09677419
+anchor_right = 0.2758007
+anchor_bottom = 0.9032258
+theme = ExtResource("1_gicfb")
+alignment = 1
+selected = 0
+item_count = 4
+popup/item_0/text = "Console"
+popup/item_0/id = 0
+popup/item_1/text = "Settings"
+popup/item_1/id = 1
+popup/item_2/text = "Skins"
+popup/item_2/id = 2
+popup/item_3/text = "Items"
+popup/item_3/id = 3
+metadata/_edit_use_anchors_ = true
+
+[node name="Main" type="ColorRect" parent="." unique_id=1524626669]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("1_gicfb")
+color = Color(0, 0, 0, 0.5372549)
+
+[node name="ConsoleContainer" type="VBoxContainer" parent="Main" unique_id=1769789166]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+theme = ExtResource("1_gicfb")
+alignment = 1
+script = ExtResource("2_635sk")
+metadata/_edit_use_anchors_ = true
+
+[node name="ColorRect" type="ColorRect" parent="Main/ConsoleContainer" unique_id=2085935150]
+modulate = Color(1, 1, 1, 0.21568628)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Commands" type="Node" parent="Main/ConsoleContainer" unique_id=43375570 node_paths=PackedStringArray("root")]
+script = ExtResource("1_spxfo")
+root = NodePath("../../..")
+
+[node name="Settings" type="Container" parent="Main" unique_id=1394294527 node_paths=PackedStringArray("list", "partent")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5_uf3cf")
+list = NodePath("VSplitContainer/ScrollContainer/ItemList")
+partent = NodePath("..")
+
+[node name="VSplitContainer" type="VSplitContainer" parent="Main/Settings" unique_id=438069106]
+layout_mode = 2
+dragging_enabled = false
+
+[node name="ScrollContainer" type="ScrollContainer" parent="Main/Settings/VSplitContainer" unique_id=2080831334]
+layout_mode = 2
+offset_transform_enabled = true
+
+[node name="ItemList" type="VBoxContainer" parent="Main/Settings/VSplitContainer/ScrollContainer" unique_id=726029026]
+layout_mode = 2
+alignment = 1
+
+[node name="deathBool" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1748848974]
+visible = false
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/deathBool" unique_id=1562381313]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Invincible (prevents death, mood loss, hunger,
+trust loss)"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="lobotomize" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=677617191]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/lobotomize" unique_id=2134535334]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Disable Mood
+"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="expiePersistence" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1586298901]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+metadata/Tab = "Sys"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/expiePersistence" unique_id=1938860050]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Keep spawned expies across loads"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="hungerEnable" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=804782789]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/hungerEnable" unique_id=1282134676]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Hunger Cycle"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="sleepEnable" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1789135605]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/sleepEnable" unique_id=916022155]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Sleep Cycle"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="useVulkan" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1249628858]
+visible = false
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/useVulkan" unique_id=1837024395]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 258.0
+grow_horizontal = 2
+grow_vertical = 2
+bbcode_enabled = true
+text = "Use Vulkan rendering [color=red] 
+THIS WILL RESTART THE PROGRAM"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="openAlert" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=180859308]
+visible = false
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/openAlert" unique_id=1809018078]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Toggles disclaimer at the start
+# this was no longer used, as the code was erased"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="mute" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=926247112]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/mute" unique_id=1661101866]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "disable all speech"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="mutePassive" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1757905059]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/mutePassive" unique_id=1859074492]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "disable passive speech"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="soundVolume" type="HSlider" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=569359640]
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 1.0
+tick_count = 3
+ticks_on_borders = true
+ticks_position = 3
+script = ExtResource("19_emer2")
+metadata/Tab = "Audio"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/soundVolume" unique_id=1729090434]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = 0.5
+anchor_right = 10.28
+anchor_bottom = 0.5
+offset_left = 526.1
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Master sound volume"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="dialogueSoundBool" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=670932247]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+metadata/Tab = "Audio"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/dialogueSoundBool" unique_id=1882356057]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+rotation = -0.0018087183
+text = "Toggle expie speech sounds"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="whiningSoundBool" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=665966097]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+metadata/Tab = "Audio"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/whiningSoundBool" unique_id=1540660626]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Toggle expie whining sounds"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="barkSoundBool" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1481630840]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+metadata/Tab = "Audio"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/barkSoundBool" unique_id=903923717]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Toggle expie barking sounds"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="pettingSoundBool" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=919336714]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+metadata/Tab = "Audio"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/pettingSoundBool" unique_id=640438610]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Toggle expie petting sounds"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="eatingSoundBool" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1613162462]
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+metadata/Tab = "Audio"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/eatingSoundBool" unique_id=1692611238]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "Toggle expie petting sounds"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="pixel" type="Button" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=808715694]
+visible = false
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+icon = ExtResource("6_7udsa")
+alignment = 2
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/pixel" unique_id=117636492]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 526.1
+offset_top = 187.975
+offset_right = 20.0
+offset_bottom = 227.975
+grow_horizontal = 2
+grow_vertical = 2
+text = "pixel filter"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="expieFontSize" type="LineEdit" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=390047042]
+layout_mode = 2
+placeholder_text = "10"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/expieFontSize" unique_id=1670461292]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = 0.5
+anchor_right = 10.28
+anchor_bottom = 0.5
+offset_left = 526.1
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Dialogue Font Size"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="defaultSkin" type="LineEdit" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=1765001001]
+layout_mode = 2
+placeholder_text = "Body"
+metadata/Tab = "Sys"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/defaultSkin" unique_id=1156571291]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = 0.5
+anchor_right = 10.28
+anchor_bottom = 0.5
+offset_left = 526.1
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Default Skin Folder Name"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="defaultMonitor" type="LineEdit" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList" unique_id=628928793]
+layout_mode = 2
+placeholder_text = "0"
+max_length = 1
+metadata/Tab = "Sys"
+
+[node name="name" type="RichTextLabel" parent="Main/Settings/VSplitContainer/ScrollContainer/ItemList/defaultMonitor" unique_id=1743805253]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = 0.5
+anchor_right = 10.28
+anchor_bottom = 0.5
+offset_left = 526.1
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Default Monitor to assign on start"
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="TabsScrollContainer" type="ScrollContainer" parent="Main/Settings/VSplitContainer" unique_id=207996322]
+layout_mode = 2
+vertical_scroll_mode = 0
+scroll_horizontal_by_default = true
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Main/Settings/VSplitContainer/TabsScrollContainer" unique_id=434200699]
+layout_mode = 2
+
+[node name="GeneralTab" type="Button" parent="Main/Settings/VSplitContainer/TabsScrollContainer/HBoxContainer" unique_id=45315780]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+button_pressed = true
+text = "General"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="AudioTab" type="Button" parent="Main/Settings/VSplitContainer/TabsScrollContainer/HBoxContainer" unique_id=734067448]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+text = "Audio"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="SysTab" type="Button" parent="Main/Settings/VSplitContainer/TabsScrollContainer/HBoxContainer" unique_id=1764513261]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+theme = ExtResource("1_gicfb")
+toggle_mode = true
+text = "System"
+icon_alignment = 1
+expand_icon = true
+metadata/type = "bool"
+
+[node name="SkinSpawner" type="Container" parent="Main" unique_id=2070923109]
+visible = false
+clip_contents = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("7_emer2")
+
+[node name="GridContainer" type="GridContainer" parent="Main/SkinSpawner" unique_id=1101962334]
+layout_mode = 2
+columns = 7
+
+[node name="FolderAccess" type="Button" parent="Main/SkinSpawner/GridContainer" unique_id=762259672]
+layout_mode = 2
+text = "Open Folder"
+
+[node name="SkinDB" type="Button" parent="Main/SkinSpawner/GridContainer" unique_id=1024239275]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0.6156863, 1, 1)
+text = "Skin Database"
+
+[node name="Refresh" type="Button" parent="Main/SkinSpawner/GridContainer" unique_id=1526966236]
+layout_mode = 2
+text = "↻"
+
+[node name="VSeparator" type="VSeparator" parent="Main/SkinSpawner/GridContainer" unique_id=549618703]
+layout_mode = 2
+
+[node name="Previous" type="Button" parent="Main/SkinSpawner/GridContainer" unique_id=1071876907]
+layout_mode = 2
+text = "<"
+
+[node name="Select" type="Button" parent="Main/SkinSpawner/GridContainer" unique_id=652479195]
+layout_mode = 2
+text = "Spawn"
+
+[node name="Next" type="Button" parent="Main/SkinSpawner/GridContainer" unique_id=401092076]
+layout_mode = 2
+text = ">"
+
+[node name="SkinName" type="Label" parent="Main/SkinSpawner" unique_id=341281014]
+layout_mode = 2
+offset_transform_enabled = true
+offset_transform_position = Vector2(0, 27)
+text = "Body:"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Main/SkinSpawner" unique_id=1065473906]
+visible = false
+layout_mode = 2
+alignment = 2
+
+[node name="HSplitContainer" type="HSplitContainer" parent="Main/SkinSpawner" unique_id=1627132420]
+layout_mode = 2
+
+[node name="RichTextLabel" type="RichTextLabel" parent="Main/SkinSpawner/HSplitContainer" unique_id=588263579]
+clip_contents = false
+layout_mode = 2
+text = "this is a long string of text to test this thing"
+
+[node name="ItemSpawner" type="Container" parent="Main" unique_id=445574113]
+clip_contents = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("9_o0bys")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="Main/ItemSpawner" unique_id=1692088839]
+custom_minimum_size = Vector2(560, 160)
+layout_mode = 2
+
+[node name="iList" type="VBoxContainer" parent="Main/ItemSpawner/ScrollContainer" unique_id=906711898]
+layout_mode = 2
+
+[node name="Button" type="Button" parent="Main/ItemSpawner/ScrollContainer/iList" unique_id=541480880]
+custom_minimum_size = Vector2(75, 75)
+layout_mode = 2
+theme = ExtResource("10_m5wgn")
+
+[node name="TextureRect" type="TextureRect" parent="Main/ItemSpawner/ScrollContainer/iList/Button" unique_id=1013724543]
+custom_maximum_size = Vector2(65, 65)
+layout_mode = 0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = 70.0
+offset_bottom = 70.0
+scale = Vector2(0.9, 0.9)
+pivot_offset_ratio = Vector2(0.5, 0.5)
+texture = ExtResource("11_p45lu")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="name" type="RichTextLabel" parent="Main/ItemSpawner/ScrollContainer/iList/Button" unique_id=2117883067]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = -9.382
+anchor_top = -3.66
+anchor_right = 10.28
+anchor_bottom = -3.66
+offset_left = 790.65
+offset_top = 275.5
+offset_right = -221.0
+offset_bottom = 347.5
+grow_horizontal = 2
+grow_vertical = 2
+bbcode_enabled = true
+text = "[color=red] MOST IF NOT ALL ASSETS ARE RIPPED FROM 
+[color=cyan]https://casualtiesunknown.miraheze.org/wiki/"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="ClickArea" type="Control" parent="." unique_id=1277571415]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -32.0
+offset_bottom = 43.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("7_7udsa")
+metadata/_custom_type_script = "uid://blg811jk2cjt4"
+
+[connection signal="button_down" from="Handle" to="." method="_downDrag"]
+[connection signal="button_up" from="Handle" to="." method="_upDrag"]
+[connection signal="pressed" from="Handle" to="." method="_drag"]
+[connection signal="pressed" from="Handle/Close" to="." method="_hide" binds= [true]]
+[connection signal="item_selected" from="Handle/TabSwitch" to="." method="_on_tab_switch_item_selected"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/ScrollContainer/ItemList/expiePersistence" to="Main/Settings" method="_on_expie_persistence_pressed"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/ScrollContainer/ItemList/hungerEnable" to="Main/Settings" method="_on_expie_persistence_pressed"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/ScrollContainer/ItemList/sleepEnable" to="Main/Settings" method="_on_expie_persistence_pressed"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/ScrollContainer/ItemList/useVulkan" to="Main/Settings" method="_on_use_vulkan_pressed"]
+[connection signal="toggled" from="Main/Settings/VSplitContainer/ScrollContainer/ItemList/useVulkan" to="Main/Settings" method="_on_use_vulkan_toggled"]
+[connection signal="text_submitted" from="Main/Settings/VSplitContainer/ScrollContainer/ItemList/expieFontSize" to="Main/Settings" method="_on_expie_font_size_text_submitted"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/TabsScrollContainer/HBoxContainer/GeneralTab" to="Main/Settings" method="_on_general_tab_pressed"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/TabsScrollContainer/HBoxContainer/AudioTab" to="Main/Settings" method="_on_audio_tab_pressed"]
+[connection signal="pressed" from="Main/Settings/VSplitContainer/TabsScrollContainer/HBoxContainer/SysTab" to="Main/Settings" method="_on_sys_tab_pressed"]
+[connection signal="pressed" from="Main/SkinSpawner/GridContainer/FolderAccess" to="Main/SkinSpawner" method="_on_folder_access_pressed"]
+[connection signal="pressed" from="Main/SkinSpawner/GridContainer/SkinDB" to="Main/SkinSpawner" method="_on_skin_db_pressed"]
+[connection signal="pressed" from="Main/SkinSpawner/GridContainer/Refresh" to="Main/SkinSpawner" method="_on_refresh_pressed"]
+[connection signal="pressed" from="Main/SkinSpawner/GridContainer/Previous" to="Main/SkinSpawner" method="_on_previous_pressed"]
+[connection signal="pressed" from="Main/SkinSpawner/GridContainer/Select" to="Main/SkinSpawner" method="_on_select_pressed"]
+[connection signal="pressed" from="Main/SkinSpawner/GridContainer/Next" to="Main/SkinSpawner" method="_on_next_pressed"]

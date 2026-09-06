@@ -1,0 +1,9 @@
+[gd_resource type="Theme" format=3 uid="uid://byc077a5abgew"]
+
+[ext_resource type="FontFile" uid="uid://c7uu6mucwhnd2" path="res://assets/fonts/OpenSans-Regular.ttf" id="1_hplf3"]
+
+[resource]
+RichTextLabel/colors/default_color = Color(0, 0.87772083, 0.9681695, 1)
+RichTextLabel/colors/font_outline_color = Color(0, 0, 0, 1)
+RichTextLabel/constants/outline_size = 14
+RichTextLabel/fonts/normal_font = ExtResource("1_hplf3")

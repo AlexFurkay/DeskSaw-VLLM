@@ -1,0 +1,100 @@
+[gd_scene format=3 uid="uid://bjcybvcgu670s"]
+
+[ext_resource type="Theme" uid="uid://cle2qxvhrms2" path="res://assets/themes/ui/CasMenuTheme.tres" id="1_48i3o"]
+[ext_resource type="Script" uid="uid://davee3wit3h3o" path="res://Scripts/ui/widgets/wgSlider.gd" id="2_48i3o"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_72ypp"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+
+[node name="SettingsCheck" type="PanelContainer" unique_id=2051856741 node_paths=PackedStringArray("_slider", "_label", "_val_label")]
+anchors_preset = -1
+anchor_top = -0.0030864198
+anchor_right = 0.32500002
+anchor_bottom = 0.062000003
+offset_top = 1.5
+offset_right = -0.4000244
+offset_bottom = 6.3239975
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+theme = ExtResource("1_48i3o")
+theme_override_styles/panel = SubResource("StyleBoxFlat_72ypp")
+script = ExtResource("2_48i3o")
+_slider = NodePath("MarginContainer/VBoxContainer/Panel/HSlider")
+_label = NodePath("MarginContainer/VBoxContainer/Label")
+_val_label = NodePath("MarginContainer/VBoxContainer/Panel/Label2")
+metadata/_edit_use_anchors_ = true
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=53382515]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 11
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer" unique_id=1712549996]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="Label" type="RichTextLabel" parent="MarginContainer/VBoxContainer" unique_id=170594188]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/line_separation = -8
+theme_override_font_sizes/normal_font_size = 20
+theme_override_font_sizes/bold_font_size = 20
+theme_override_font_sizes/bold_italics_font_size = 20
+theme_override_font_sizes/italics_font_size = 20
+theme_override_font_sizes/mono_font_size = 20
+bbcode_enabled = true
+text = "Setting Label"
+fit_content = true
+scroll_active = false
+vertical_alignment = 2
+
+[node name="Panel" type="Panel" parent="MarginContainer/VBoxContainer" unique_id=771326459]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="MarginContainer/VBoxContainer/Panel" unique_id=1450735899]
+layout_mode = 1
+anchors_preset = 14
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = -6.0
+offset_right = -64.0
+offset_bottom = 6.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -9999999.0
+max_value = 9999999.0
+
+[node name="Label2" type="RichTextLabel" parent="MarginContainer/VBoxContainer/Panel" unique_id=1151141495]
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -56.0
+offset_top = -13.0
+offset_bottom = 13.0
+grow_horizontal = 0
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.14
+offset_transform_enabled = true
+offset_transform_position = Vector2(0, -1.5)
+text = "100%"
+fit_content = true
+scroll_active = false
+autowrap_mode = 0
+horizontal_alignment = 2
+vertical_alignment = 1

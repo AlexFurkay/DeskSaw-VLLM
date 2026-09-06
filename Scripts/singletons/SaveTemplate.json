@@ -1,0 +1,22 @@
+{
+	"saw": {},
+	"sawTemplate": {
+		"skin": "Default",
+		"nickname": "",
+		"mood": 20.0,
+		"hunger": 90.0,
+		"health": 100.0,
+		"trust": 10.0,
+		"tired": 0.0,
+		"item": "",
+		"firstime": 0.0,
+		"interactions": false,
+		"dead": false,
+		"dangerVal": {}
+	},
+	"nextPetId": 1.0,
+	"firstLaunch": true,
+	"everPresentAcrossSaves": {
+		"PetsKilled": 0.0
+	}
+}

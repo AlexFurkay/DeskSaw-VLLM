@@ -1,0 +1,42 @@
+[remap]
+
+importer="font_data_dynamic"
+type="FontFile"
+uid="uid://bh21v7uuhl7i4"
+path="res://.godot/imported/Retro.Gaming.Extended.ttf-b904fd8275ff71993e827be2afa8b097.fontdata"
+
+[deps]
+
+source_file="res://assets/fonts/Retro.Gaming.Extended.ttf"
+dest_files=["res://.godot/imported/Retro.Gaming.Extended.ttf-b904fd8275ff71993e827be2afa8b097.fontdata"]
+
+[params]
+
+Rendering=null
+antialiasing=0
+generate_mipmaps=false
+disable_embedded_bitmaps=true
+multichannel_signed_distance_field=false
+msdf_pixel_range=8
+msdf_size=48
+allow_system_fallback=true
+force_autohinter=false
+modulate_color_glyphs=false
+hinting=0
+subpixel_positioning=0
+keep_rounding_remainders=false
+oversampling=0.0
+Fallbacks=null
+fallbacks=[]
+Compress=null
+compress=true
+preload=[{
+"chars": [],
+"glyphs": [],
+"name": "New Configuration",
+"size": Vector2i(16, 0),
+&"variation_embolden": 0.0
+}]
+language_support={}
+script_support={}
+opentype_features={}

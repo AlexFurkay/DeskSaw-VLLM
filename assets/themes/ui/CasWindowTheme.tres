@@ -1,0 +1,94 @@
+[gd_resource type="Theme" format=3 uid="uid://dknpyc8k8uut1"]
+
+[ext_resource type="Texture2D" uid="uid://d22dn5lltdw18" path="res://assets/textures/ui/uiBlockNano.png" id="2_nn1qp"]
+[ext_resource type="FontFile" uid="uid://bh21v7uuhl7i4" path="res://assets/fonts/Retro.Gaming.Extended.ttf" id="3_mrn1o"]
+[ext_resource type="Texture2D" uid="uid://bwpjf6fuh1d5g" path="res://assets/textures/ui/uiBlockWindow.png" id="3_nn1qp"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_sq06t"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_363m2"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_08bun"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_mw51r"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_udegp"]
+
+[sub_resource type="DPITexture" id="DPITexture_yiplu"]
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#fff\" fill-opacity=\".75\" d=\"m1 3 2-2 5 5 5-5 2 2-5 5 5 5-2 2-5-5-5 5-2-2 5-5z\"/></svg>
+"
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_mgmpr"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(1, 1, 1, 0.75)
+draw_center = false
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+corner_detail = 5
+expand_margin_left = 2.0
+expand_margin_top = 2.0
+expand_margin_right = 2.0
+expand_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_72ypp"]
+texture = ExtResource("2_nn1qp")
+texture_margin_left = 2.0
+texture_margin_top = 2.0
+texture_margin_right = 2.0
+texture_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_8yy6x"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.1, 0.1, 0.1, 0.3)
+border_width_bottom = 2
+border_color = Color(0, 0, 0, 0.3)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+corner_detail = 5
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_nn1qp"]
+texture = ExtResource("3_nn1qp")
+texture_margin_left = 8.0
+texture_margin_top = 8.0
+texture_margin_right = 8.0
+texture_margin_bottom = 8.0
+
+[resource]
+default_font = ExtResource("3_mrn1o")
+default_font_size = 20
+Button/styles/disabled = SubResource("StyleBoxEmpty_sq06t")
+Button/styles/focus = SubResource("StyleBoxEmpty_363m2")
+Button/styles/hover = SubResource("StyleBoxTexture_08bun")
+Button/styles/normal = SubResource("StyleBoxEmpty_mw51r")
+Button/styles/pressed = SubResource("StyleBoxEmpty_udegp")
+LineEdit/colors/caret_color = Color(0.95, 0.95, 0.95, 1)
+LineEdit/colors/clear_button_color = Color(0.875, 0.875, 0.875, 1)
+LineEdit/colors/clear_button_color_pressed = Color(1, 1, 1, 1)
+LineEdit/colors/font_color = Color(0.875, 0.875, 0.875, 1)
+LineEdit/colors/font_outline_color = Color(0, 0, 0, 1)
+LineEdit/colors/font_placeholder_color = Color(0.875, 0.875, 0.875, 0.6)
+LineEdit/colors/font_selected_color = Color(1, 1, 1, 1)
+LineEdit/colors/font_uneditable_color = Color(0.875, 0.875, 0.875, 0.5)
+LineEdit/colors/selection_color = Color(0.5, 0.5, 0.5, 1)
+LineEdit/constants/caret_width = 1
+LineEdit/constants/minimum_character_width = 4
+LineEdit/constants/outline_size = 0
+LineEdit/icons/clear = SubResource("DPITexture_yiplu")
+LineEdit/styles/focus = SubResource("StyleBoxFlat_mgmpr")
+LineEdit/styles/normal = SubResource("StyleBoxTexture_72ypp")
+LineEdit/styles/read_only = SubResource("StyleBoxFlat_8yy6x")
+Panel/styles/panel = SubResource("StyleBoxTexture_nn1qp")

@@ -1,0 +1,152 @@
+{
+	"diaGlobal": {
+		"THIS IS ALL PLACEHOLDERS!!! FINAL ONE WONT BE THIS BORING! IN THE MEAN TIME HAVE FUN MESSING AROUND WITH THIS": [],
+		"HappyPassive": [
+			"[wave]:3",
+			"[wave]I like this!",
+			"[wave]I'm enjoying myself...",
+			"[wave]I like this test!",
+			"[wave]Hello!",
+			"[wave]Yay!",
+			"[wave]I feel great!",
+			"[wave]Waow!"
+		],
+		"Passive": [
+			"I feel alright...",
+			"... Nothing",
+			"Uhhh......",
+			"This test is weird...",
+			"Hello?"
+		],
+		"LowPassive": [
+			"When will this test end?...",
+			"This test kinda sucks.",
+			"I'm feeling down...",
+			"It could be better...",
+			"I don't feel too happy right now...",
+			"3:"
+		],
+		"Full": [
+			"That's enough.",
+			"Any more and I'll be sick.",
+			"I'm full.",
+			"I don't want to eat more.",
+			"My belly's full.",
+			"My stomach's full.",
+			"I can't eat another bite..."
+		],
+		"EatReject": [
+			"Not in a million years.",
+			"I would never! NO!",
+			"No! That's disgusting!",
+			"This is disgusting! No!"
+		],
+		"EatBad": [
+			"[shake]Why am I eating this!?",
+			"[shake]Is this some sort of punishment...?",
+			"[shake]Ack! It tastes so bad!",
+			"[shake]Ew ew ew! Uugh!"
+		],
+		"EatOk": [
+			"Ehh...",
+			"I've eaten better...",
+			"...",
+			"What is this?",
+			"Mhh...",
+			"Gh..",
+			"...?"
+		],
+		"EatGood": [
+			"[wave]More of this...",
+			"[wave]Good food...",
+			"[wave]Love this taste...",
+			"[wave]Delicious...",
+			"[wave]Mmm, nice...",
+			"[wave]Just what I needed...",
+			"[wave]Mmmmm..."
+		],
+		"VeryLowPassive": [
+			"[shake]I want to go back!",
+			"[shake]I- I hate this!...",
+			"[shake]Please!",
+			"[shake]I want to leave!",
+			"[shake]I- I don't want to be here!"
+		],
+		"screamBIG": [
+			"[shake]WAHHHAHHHHHHHHHHHHHHH!!!!!!",
+			"[shake]HEY!!!!!!",
+			"[shake]AAAAAAAAAAHHHHHHHH!!!!!!",
+			"[shake]WOAHHHHHH!!"
+		],
+		"beingDragged": [
+			"[shake]Put me down! Please...",
+			"I don't like this...",
+			"Can you put me down? Please?!"
+		],
+		"getUp": [
+			"[wave]Ugh... no more please!",
+			"[wave]Ow!",
+			"[wave]Please never do that again!",
+			"[wave]Stop that!"
+		],
+		"getUpPet": [
+			"[wave]That was a bit too much... but I liked it.",
+			"[wave]I feel so dizzy...",
+			"[wave]Ugh... I didn't expect that."
+		],
+		"pet": [
+			"T-That feels nice.",
+			"T-thanks!",
+			"This is nice..",
+			"...I like it.",
+			"...that's nice.",
+			"...uh, thank you?..."
+		],
+		"start": [
+			"... Hello?",
+			"Uhhhhh....."
+		],
+		"lastmoments": [
+			"[stupid][shake]Ghh... ugh...",
+			"[stupid][shake]HHHHHhp... AAAAAcca...",
+			"[stupid][shake]K-kff... hh..",
+			"[stupid][shake]M... n-nh..."
+		],
+		"sleepy": [
+			"[wave]Nap time....",
+			"[wave]Im sleepy...",
+			"[wave]*yawn*",
+			"[wave]Im getting sleepy...",
+			"[wave]Getting a little drowsy...",
+			"[wave]Im getting sleepy..."
+		],
+		"reallySleepy": [
+			"I have to... lie down...",
+			"My eyes are so heavy...",
+			"I can't... see straight...",
+			"Just some sleep...",
+			"I'm so... worn out...",
+			"Can't keep my eyes open...",
+			"When can I lay down...",
+			"I'm about to fall asleep...",
+			"...",
+			"So tired...",
+			"I'm so sleepy...",
+			"Really tired..."
+		],
+		"hungry": [
+			"Could do with a bite to eat.",
+			"I'm hungry.",
+			"I feel hungry.",
+			"I want to eat!",
+			"I feel peckish.",
+			"Stomach's buggin' me.",
+			"My tummy's all rumbly."
+		],
+		"petReject": [
+			"[shake]NO!",
+			"[shake]Don't touch me!",
+			"[shake]Get away!"
+		]
+	}
+}

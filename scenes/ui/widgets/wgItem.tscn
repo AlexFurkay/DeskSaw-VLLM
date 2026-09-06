@@ -1,0 +1,56 @@
+[gd_scene format=3 uid="uid://ci0xelx1tte0f"]
+
+[ext_resource type="Theme" uid="uid://cle2qxvhrms2" path="res://assets/themes/ui/CasMenuTheme.tres" id="1_clyvc"]
+[ext_resource type="Script" uid="uid://c3v2rpy8lmeps" path="res://Scripts/ui/widgets/wgItem.gd" id="2_1jtl5"]
+[ext_resource type="Texture2D" uid="uid://dymyjhcie2or0" path="res://scenes/OLD/Limblets/giraf.png" id="4_fmg37"]
+[ext_resource type="PackedScene" uid="uid://cssci7xyy8e80" path="res://scenes/objects/geofruit.tscn" id="4_krx5a"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_72ypp"]
+
+[node name="PanelContainer" type="PanelContainer" unique_id=1693646104 node_paths=PackedStringArray("texRect", "label", "btn")]
+custom_minimum_size = Vector2(180, 40)
+offset_right = 40.0
+offset_bottom = 40.0
+theme = ExtResource("1_clyvc")
+theme_override_styles/panel = SubResource("StyleBoxEmpty_72ypp")
+script = ExtResource("2_1jtl5")
+sceneToInstance = ExtResource("4_krx5a")
+texRect = NodePath("Button/TextureRect")
+label = NodePath("Button/RichTextLabel")
+btn = NodePath("Button")
+
+[node name="Button" type="Button" parent="." unique_id=522709659]
+layout_mode = 2
+
+[node name="TextureRect" type="TextureRect" parent="Button" unique_id=1398036462]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 5.0
+offset_top = -13.0
+offset_right = 31.75
+offset_bottom = 13.75
+grow_vertical = 2
+texture = ExtResource("4_fmg37")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="RichTextLabel" type="RichTextLabel" parent="Button" unique_id=1494399342]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.18888889
+anchor_right = 0.96786803
+anchor_bottom = 1.0
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 1
+theme_override_font_sizes/normal_font_size = 18
+theme_override_font_sizes/bold_font_size = 18
+theme_override_font_sizes/bold_italics_font_size = 18
+theme_override_font_sizes/italics_font_size = 18
+theme_override_font_sizes/mono_font_size = 18
+text = "item name"
+horizontal_alignment = 1
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true

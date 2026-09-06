@@ -1,0 +1,77 @@
+[gd_scene format=3 uid="uid://ycbamo18lq41"]
+
+[ext_resource type="Shader" uid="uid://b1x03c3wn85hg" path="res://assets/shaders/outline.gdshader" id="1_aavoy"]
+[ext_resource type="Texture2D" uid="uid://d3bx007b4onwr" path="res://assets/objectSpr/fuck you.png" id="2_aavoy"]
+[ext_resource type="Script" uid="uid://cbm2skouhq87k" path="res://Scripts/impo/dragObj.gd" id="3_ucp3q"]
+[ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_vdc8g"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_yourn"]
+size = Vector2(792, 125)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_aavoy"]
+size = Vector2(131, 866.25)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_xu5n6"]
+shader = ExtResource("1_aavoy")
+shader_parameter/thickness = 0.0
+shader_parameter/ring_count = 4
+shader_parameter/ring_offset = 0.0
+shader_parameter/outline_color = Color(0, 0, 0.22745098, 1)
+shader_parameter/border_clipping_fix = true
+shader_parameter/aspect_ratio = 1.0
+shader_parameter/square_border = true
+shader_parameter/offset = Vector2(0, 0)
+shader_parameter/max_or_add = false
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_eddo4"]
+size = Vector2(750, 92)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ucp3q"]
+size = Vector2(78, 832)
+
+[node name="Body" type="RigidBody2D" unique_id=371602465]
+mass = 50.0
+metadata/Category = "object"
+
+[node name="Detector" type="Area2D" parent="." unique_id=1866926148]
+scale = Vector2(0.5, 0.5)
+
+[node name="Yeah" type="CollisionShape2D" parent="Detector" unique_id=273356045]
+position = Vector2(2, -366.5)
+shape = SubResource("RectangleShape2D_yourn")
+
+[node name="Yeah2" type="CollisionShape2D" parent="Detector" unique_id=1699844246]
+position = Vector2(-335.5, -3.125)
+shape = SubResource("RectangleShape2D_aavoy")
+
+[node name="Yeah3" type="CollisionShape2D" parent="Detector" unique_id=317408356]
+position = Vector2(328, 0)
+shape = SubResource("RectangleShape2D_aavoy")
+
+[node name="Sprite" type="Sprite2D" parent="." unique_id=673930975]
+material = SubResource("ShaderMaterial_xu5n6")
+scale = Vector2(0.83142823, 0.83142823)
+texture = ExtResource("2_aavoy")
+
+[node name="Collision" type="CollisionShape2D" parent="." unique_id=123731701]
+position = Vector2(-0.5, -185)
+scale = Vector2(0.5, 0.5)
+shape = SubResource("RectangleShape2D_eddo4")
+
+[node name="Collision2" type="CollisionShape2D" parent="." unique_id=1962707444]
+position = Vector2(-168.5, 0)
+scale = Vector2(0.5, 0.5)
+shape = SubResource("RectangleShape2D_ucp3q")
+
+[node name="Collision3" type="CollisionShape2D" parent="." unique_id=332784072]
+position = Vector2(168, 0)
+scale = Vector2(0.5, 0.5)
+shape = SubResource("RectangleShape2D_ucp3q")
+
+[node name="draggable" type="Node" parent="." unique_id=786882799 node_paths=PackedStringArray("sprite")]
+script = ExtResource("3_ucp3q")
+sprite = NodePath("../Sprite")
+metadata/_custom_type_script = "uid://cbm2skouhq87k"
+
+[node name="properties" type="Node" parent="." unique_id=399788717]
+script = ExtResource("4_vdc8g")

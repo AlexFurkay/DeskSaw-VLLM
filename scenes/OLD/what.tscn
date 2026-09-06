@@ -1,0 +1,43 @@
+[gd_scene format=3 uid="uid://hvd4x0c6m33a"]
+
+[ext_resource type="AudioStream" uid="uid://wd2ugonwgfvx" path="res://assets/sounds/test.mp3" id="1_14oqp"]
+[ext_resource type="Shader" uid="uid://de2e1cyd8inbm" path="res://assets/shaders/pixelp.gdshader" id="2_gpamc"]
+[ext_resource type="Texture2D" uid="uid://ckeps0v7cqbor" path="res://assets/objectSpr/pls update.png" id="3_14oqp"]
+[ext_resource type="Script" path="res://Scripts/nimpo/shitpost.gd" id="3_gpamc"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_mfhw6"]
+shader = ExtResource("2_gpamc")
+shader_parameter/pixelation = 0.0030000001425
+shader_parameter/opacity = 1.0
+
+[node name="Node2D" type="Node2D" unique_id=735373669]
+script = ExtResource("3_gpamc")
+
+[node name="Test" type="AudioStreamPlayer2D" parent="." unique_id=177759992]
+position = Vector2(258, 266)
+stream = ExtResource("1_14oqp")
+autoplay = true
+
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=479479176]
+layer = 2
+
+[node name="CanvasLayer2" type="CanvasLayer" parent="." unique_id=1191630764]
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer2" unique_id=386597174]
+material = SubResource("ShaderMaterial_mfhw6")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+metadata/_edit_use_anchors_ = true
+
+[node name="TextureRect" type="TextureRect" parent="CanvasLayer2/ColorRect" unique_id=1432104018]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_14oqp")
