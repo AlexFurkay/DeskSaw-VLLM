@@ -1,8 +1,6 @@
 # DeskSaw
 
-## Это страница с исходным кодом. Чтобы скачать готовое приложение, [зайди в раздел релизов!](<ССЫЛКА-НА-ТВОЙ-РЕПОЗИТОРИЙ>/releases)
-
-<img width="800" height="450" alt="prev" src="https://github.com/user-attachments/assets/711adeb3-b843-4819-8ccd-539c799052ce" />
+## Это страница с исходным кодом. Чтобы скачать готовое приложение, зайди в раздел релизов на странице: https://github.com/AlexFurkay/DeskSaw-VLLM
 
 Это правда! Эксперименты из отличных игр [Casualties: Unknown](https://store.steampowered.com/app/4576490/Casualties_Unknown/) и [GunSaw](https://orsonik.itch.io/gunsaw-demo) прямо у тебя на рабочем столе! Спавни их, корми, кидай в них циркулярные лезвия! Или дай им жизнь, которую они заслуживают, беспрерывно поглаживая. <3
 
@@ -43,7 +41,7 @@
 
 * Скачай последнюю версию [.NET Godot Engine](https://godotengine.org/download/) *(нужна для сборки C#-решений)*
 * Склонируй git-репозиторий
-  * Через [git](https://git-scm.com/install/): `git clone <ССЫЛКА-НА-ТВОЙ-РЕПОЗИТОРИЙ>`
+  * Через [git](https://git-scm.com/install/): `git clone https://github.com/AlexFurkay/DeskSaw-VLLM`
   * или [скачай исходный код напрямую](<ССЫЛКА-НА-ТВОЙ-РЕПОЗИТОРИЙ>/archive/refs/heads/master.zip)
 * Также понадобится аддон ``godot-console``, чтобы проект корректно загрузился
   * Через git, выполни внутри папки проекта:
