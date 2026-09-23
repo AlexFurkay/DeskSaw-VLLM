@@ -1,152 +1,152 @@
 {
 	"diaGlobal": {
-		"THIS IS ALL PLACEHOLDERS!!! FINAL ONE WONT BE THIS BORING! IN THE MEAN TIME HAVE FUN MESSING AROUND WITH THIS": [],
+		"Добро пожаловать на сервер Шизофрения!": [],
 		"HappyPassive": [
 			"[wave]:3",
-			"[wave]I like this!",
-			"[wave]I'm enjoying myself...",
-			"[wave]I like this test!",
-			"[wave]Hello!",
-			"[wave]Yay!",
-			"[wave]I feel great!",
-			"[wave]Waow!"
+			"[wave]Мне это нравится!",
+			"[wave]Мне тут хорошо...",
+			"[wave]Мне нравится этот тест!",
+			"[wave]Привет!",
+			"[wave]Ура!",
+			"[wave]Я чувствую себя отлично!",
+			"[wave]Ваау!"
 		],
 		"Passive": [
-			"I feel alright...",
-			"... Nothing",
-			"Uhhh......",
-			"This test is weird...",
-			"Hello?"
+			"Я в порядке...",
+			"...Ничего",
+			"Эээ......",
+			"Этот тест какой-то странный...",
+			"Алло?"
 		],
 		"LowPassive": [
-			"When will this test end?...",
-			"This test kinda sucks.",
-			"I'm feeling down...",
-			"It could be better...",
-			"I don't feel too happy right now...",
+			"Когда это уже закончится?...",
+			"Так себе тест, если честно.",
+			"Мне немного грустно...",
+			"Могло быть и лучше...",
+			"Не сказать, что мне сейчас весело...",
 			"3:"
 		],
 		"Full": [
-			"That's enough.",
-			"Any more and I'll be sick.",
-			"I'm full.",
-			"I don't want to eat more.",
-			"My belly's full.",
-			"My stomach's full.",
-			"I can't eat another bite..."
+			"Хватит.",
+			"Ещё немного, и меня стошнит.",
+			"Я наелась.",
+			"Больше не хочу есть.",
+			"Живот полный.",
+			"Желудок полон.",
+			"Не могу проглотить больше ни кусочка..."
 		],
 		"EatReject": [
-			"Not in a million years.",
-			"I would never! NO!",
-			"No! That's disgusting!",
-			"This is disgusting! No!"
+			"Ни за что на свете.",
+			"Никогда! НЕТ!",
+			"Нет! Это отвратительно!",
+			"Фу, гадость! Нет!"
 		],
 		"EatBad": [
-			"[shake]Why am I eating this!?",
-			"[shake]Is this some sort of punishment...?",
-			"[shake]Ack! It tastes so bad!",
-			"[shake]Ew ew ew! Uugh!"
+			"[shake]Зачем я это ем!?",
+			"[shake]Это что, наказание какое-то?..",
+			"[shake]Фу! Это ужасно на вкус!",
+			"[shake]Фу-фу-фу! Бее!"
 		],
 		"EatOk": [
-			"Ehh...",
-			"I've eaten better...",
+			"Ээх...",
+			"Бывало и повкуснее...",
 			"...",
-			"What is this?",
-			"Mhh...",
-			"Gh..",
+			"Это что вообще?",
+			"Мхм...",
+			"Гх..",
 			"...?"
 		],
 		"EatGood": [
-			"[wave]More of this...",
-			"[wave]Good food...",
-			"[wave]Love this taste...",
-			"[wave]Delicious...",
-			"[wave]Mmm, nice...",
-			"[wave]Just what I needed...",
-			"[wave]Mmmmm..."
+			"[wave]Ещё бы этого...",
+			"[wave]Вкусная еда...",
+			"[wave]Обожаю этот вкус...",
+			"[wave]Вкуснотища...",
+			"[wave]Ммм, как хорошо...",
+			"[wave]Именно то, что нужно...",
+			"[wave]Ммммм..."
 		],
 		"VeryLowPassive": [
-			"[shake]I want to go back!",
-			"[shake]I- I hate this!...",
-			"[shake]Please!",
-			"[shake]I want to leave!",
-			"[shake]I- I don't want to be here!"
+			"[shake]Я хочу обратно!",
+			"[shake]Я... я это ненавижу!..",
+			"[shake]Пожалуйста!",
+			"[shake]Я хочу уйти отсюда!",
+			"[shake]Я... я не хочу здесь быть!"
 		],
 		"screamBIG": [
-			"[shake]WAHHHAHHHHHHHHHHHHHHH!!!!!!",
-			"[shake]HEY!!!!!!",
-			"[shake]AAAAAAAAAAHHHHHHHH!!!!!!",
-			"[shake]WOAHHHHHH!!"
+			"[shake]ВААААААААААА!!!!!!",
+			"[shake]ЭЙ!!!!!!",
+			"[shake]АААААААААААХХХХ!!!!!!",
+			"[shake]ВООААААА!!"
 		],
 		"beingDragged": [
-			"[shake]Put me down! Please...",
-			"I don't like this...",
-			"Can you put me down? Please?!"
+			"[shake]Поставь меня! Пожалуйста...",
+			"Мне это не нравится...",
+			"Можешь меня поставить? Пожалуйста?!"
 		],
 		"getUp": [
-			"[wave]Ugh... no more please!",
-			"[wave]Ow!",
-			"[wave]Please never do that again!",
-			"[wave]Stop that!"
+			"[wave]Угх... хватит, пожалуйста!",
+			"[wave]Ай!",
+			"[wave]Больше так не делай, пожалуйста!",
+			"[wave]Прекрати это!"
 		],
 		"getUpPet": [
-			"[wave]That was a bit too much... but I liked it.",
-			"[wave]I feel so dizzy...",
-			"[wave]Ugh... I didn't expect that."
+			"[wave]Это было чересчур... но мне понравилось.",
+			"[wave]У меня кружится голова...",
+			"[wave]Угх... вот этого я не ожидала."
 		],
 		"pet": [
-			"T-That feels nice.",
-			"T-thanks!",
-			"This is nice..",
-			"...I like it.",
-			"...that's nice.",
-			"...uh, thank you?..."
+			"Э-это приятно.",
+			"С-спасибо!",
+			"Это приятно..",
+			"...мне нравится.",
+			"...это приятно.",
+			"...эм, спасибо?..."
 		],
 		"start": [
-			"... Hello?",
-			"Uhhhhh....."
+			"...Алло?",
+			"Эээ....."
 		],
 		"lastmoments": [
-			"[stupid][shake]Ghh... ugh...",
-			"[stupid][shake]HHHHHhp... AAAAAcca...",
-			"[stupid][shake]K-kff... hh..",
-			"[stupid][shake]M... n-nh..."
+			"[stupid][shake]Гхх... угх...",
+			"[stupid][shake]Ххх... Ааааа...",
+			"[stupid][shake]К-кхх... хх..",
+			"[stupid][shake]М... н-нх..."
 		],
 		"sleepy": [
-			"[wave]Nap time....",
-			"[wave]Im sleepy...",
-			"[wave]*yawn*",
-			"[wave]Im getting sleepy...",
-			"[wave]Getting a little drowsy...",
-			"[wave]Im getting sleepy..."
+			"[wave]Пора вздремнуть....",
+			"[wave]Мне хочется спать...",
+			"[wave]*зевает*",
+			"[wave]Меня клонит в сон...",
+			"[wave]Начинаю потихоньку засыпать...",
+			"[wave]Сонливость накатывает..."
 		],
 		"reallySleepy": [
-			"I have to... lie down...",
-			"My eyes are so heavy...",
-			"I can't... see straight...",
-			"Just some sleep...",
-			"I'm so... worn out...",
-			"Can't keep my eyes open...",
-			"When can I lay down...",
-			"I'm about to fall asleep...",
+			"Мне нужно... прилечь...",
+			"Глаза такие тяжёлые...",
+			"Не могу... нормально видеть...",
+			"Хоть немного поспать бы...",
+			"Я так... вымотана...",
+			"Не могу держать глаза открытыми...",
+			"Когда уже можно лечь...",
+			"Я вот-вот усну...",
 			"...",
-			"So tired...",
-			"I'm so sleepy...",
-			"Really tired..."
+			"Так устала...",
+			"Мне так хочется спать...",
+			"Правда очень устала..."
 		],
 		"hungry": [
-			"Could do with a bite to eat.",
-			"I'm hungry.",
-			"I feel hungry.",
-			"I want to eat!",
-			"I feel peckish.",
-			"Stomach's buggin' me.",
-			"My tummy's all rumbly."
+			"Не отказалась бы перекусить.",
+			"Я голодна.",
+			"Чувствую голод.",
+			"Хочу есть!",
+			"Немного проголодалась.",
+			"Живот донимает.",
+			"Живот весь урчит."
 		],
 		"petReject": [
-			"[shake]NO!",
-			"[shake]Don't touch me!",
-			"[shake]Get away!"
+			"[shake]НЕТ!",
+			"[shake]Не трогай меня!",
+			"[shake]Уйди!"
 		]
 	}
 }

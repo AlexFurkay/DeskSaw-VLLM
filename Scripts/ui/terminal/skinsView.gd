@@ -90,8 +90,12 @@ func scan_for_skins() -> void:
 	var directories = dirac.get_directories()
 
 	for directory_name in directories:
-		# ignore our default folder name.
-		if directory_name == gbData.settings.get("defaultSkin", null):
+		# ignore the built-in Default/Body folder specifically - it's
+		# already shown as the hardcoded "Experiment (Default)" entry above.
+		# NOT the same as gbData.settings.defaultSkin - that setting is now
+		# user-configurable and can legitimately point at a real custom
+		# character (e.g. VoyagerAlt), which should still show up here.
+		if directory_name == "Default" or directory_name == "Body":
 			continue
 		# register otherwise.
 		var _skin = SkinEntry.new()

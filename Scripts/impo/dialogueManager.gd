@@ -62,7 +62,8 @@ func typeOut(string: String, speed_multiplier: float = 1.0):
 		if current_char in pause:
 			wait *= 8
 
-		AudioManager.play_sfx(AudioManager.speech, 1, base_db + randf_range(-variance_db, variance_db), 1 + randf_range(-.2, .2), false, 0.5, "", "Text")
+		var speechSound: AudioStream = get_parent().voiceSet.get("speech", AudioManager.speech)
+		AudioManager.play_sfx(speechSound, 0.75, base_db + randf_range(-variance_db, variance_db), 1 + randf_range(-.2, .2), false, 0.5, "", "Text")
 		await get_tree().create_timer(wait).timeout
 		i += 1
 

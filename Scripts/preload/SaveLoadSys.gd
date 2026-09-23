@@ -32,6 +32,15 @@ const skinfilepath = "user://skin"
 
 
 func _ready():
+	# Настройки грузим ПЕРВЫМИ (было после сохранения) - иначе самый первый
+	# персонаж на чистой установке создаётся до того, как defaultSkin вообще
+	# прочитан, и молча получает "Default" вместо того, что реально задано.
+	if FileAccess.file_exists(conPath):
+		settings = loadjson(conPath)
+		fixMissing(settings, loadjson("res://Scripts/singletons/config.json"))
+	else:
+		newConfig()
+
 	# Load save file
 	if FileAccess.file_exists(savePath):
 		data = loadjson(savePath)
@@ -41,7 +50,7 @@ func _ready():
 		for petId in data.get("saw", {}).keys():
 			fixMissing(data["saw"][petId], templateData["sawTemplate"])
 		if data.get("saw", {}).is_empty():
-			addPet("Default")
+			addPet(settings.get("defaultSkin", "Default"))
 
 	else:
 		newsave()
@@ -53,22 +62,90 @@ func _ready():
 	else:
 		newTrans()
 
-	# Load settings/config file
-	if FileAccess.file_exists(conPath):
-		settings = loadjson(conPath)
-		fixMissing(settings, loadjson("res://Scripts/singletons/config.json"))
-	else:
-		newConfig()
-
 	if DirAccess.dir_exists_absolute(skinfilepath):
 		skinData = loadSkin()
 	else:
 		newSkinFile()
 
+	_syncBundledSkins()
 
 
 
 	InitAutosave()
+
+
+## Копирует в user://skin/ любые скины, зашитые в саму сборку под
+## res://defaults/skins/<Имя>/, которых у игрока ещё НЕТ. Вызывается на
+## КАЖДОМ запуске (не только первом) - так при обновлении, добавляющем
+## нового Sawian-персонажа, он просто появится у всех существующих игроков
+## сам, а уже настроенные/изменённые игроком скины никто не трогает и не
+## перезаписывает (копируется только то, чего не хватает целиком).
+func _syncBundledSkins() -> void:
+	var bundledRoot := "res://defaults/skins"
+	var dir := DirAccess.open(bundledRoot)
+	if dir == null:
+		print("SYNC DEBUG: res://defaults/skins не найдена вообще (DirAccess.open вернул null)")
+		return # пока ничего не зашито - ничего не делаем, старое поведение не меняется
+
+	var skinNames := dir.get_directories()
+	print("SYNC DEBUG: найдены зашитые скины: ", skinNames)
+
+	for skinName in skinNames:
+		var userSkinDir: String = skinfilepath + "/" + skinName
+		if DirAccess.dir_exists_absolute(userSkinDir):
+			print("SYNC DEBUG: '%s' - у игрока уже есть папка, пропускаю" % skinName)
+			continue # у игрока уже есть эта папка - не трогаем, вдруг он сам её менял
+
+		var madeDir := DirAccess.make_dir_recursive_absolute(userSkinDir)
+		if madeDir != OK:
+			print("SYNC DEBUG: '%s' - не смог создать папку %s (код %d)" % [skinName, userSkinDir, madeDir])
+			continue
+
+		var srcDir := DirAccess.open(bundledRoot + "/" + skinName)
+		if srcDir == null:
+			print("SYNC DEBUG: '%s' - не смог открыть исходную папку" % skinName)
+			continue
+		var copiedCount := 0
+		var realFiles := 0
+		var allEntries := srcDir.get_files()
+		for entryName in allEntries:
+			# В собранной игре PNG (и вообще любой импортируемый Godot тип)
+			# не виден в листинге папки под своим настоящим именем "*.png" -
+			# видна только служебная метка "*.png.import" рядом с ним, а
+			# сам файл читается через load() по ОРИГИНАЛЬНОМУ имени (Godot
+			# сам подставляет за кулисами скомпилированную версию). Поэтому
+			# настоящее имя мы восстанавливаем ИЗ .import-файла, а не
+			# пропускаем его как мусор.
+			var fileName: String = entryName.trim_suffix(".import") if entryName.ends_with(".import") else entryName
+			if fileName != entryName and fileName in allEntries:
+				continue # у этого файла есть и сам файл, и .import - не считаем дважды, обработаем по настоящему имени в своём проходе
+			realFiles += 1
+			var srcPath: String = bundledRoot + "/" + skinName + "/" + fileName
+			var dstPath: String = userSkinDir + "/" + fileName
+
+			if fileName.get_extension().to_lower() in ["png", "jpg", "jpeg"]:
+				# В экспортированной сборке PNG под res:// компилируется в
+				# внутренний формат текстур Godot - сырых байт исходного
+				# файла там больше нет, копировать их напрямую бессмысленно
+				# (получались бы .import-файлы вместо картинок). Грузим как
+				# ресурс (по восстановленному имени) и заново сохраняем как
+				# настоящий PNG.
+				var tex: Texture2D = load(srcPath)
+				var img: Image = tex.get_image() if tex else null
+				if img and img.save_png(dstPath) == OK:
+					copiedCount += 1
+				else:
+					print("SYNC DEBUG: не смог перекодировать картинку %s" % srcPath)
+			else:
+				var fileData := FileAccess.get_file_as_bytes(srcPath)
+				var out := FileAccess.open(dstPath, FileAccess.WRITE)
+				if out:
+					out.store_buffer(fileData)
+					out.close()
+					copiedCount += 1
+				else:
+					print("SYNC DEBUG: не смог записать %s" % dstPath)
+		print("SaveLoadSys: добавлен новый зашитый скин '%s' (%d файлов скопировано из %d найденных)" % [skinName, copiedCount, realFiles])
 
 #this bug fuxking sucks so im removing it once and for all
 #automatically detect if the user is missing a setting or something related to that
@@ -105,7 +182,7 @@ func newsave():
 
 #	what does ts even do
 	#pingpong()
-	var firstPetId = addPet("Default")
+	var firstPetId = addPet(settings.get("defaultSkin", "Default"))
 	data["saw"][firstPetId]["mood"] += randi_range(-5, 5)
 	data["saw"][firstPetId]["hunger"] -= randi_range(1, 5)
 	data["saw"][firstPetId]["trust"] += randi_range(-10, 0)
@@ -134,8 +211,12 @@ func removePet(id: String) -> void:
 
 func newTrans():
 	#fix this later make it bassdfjogsdjfoigjsdfgjosdifgjiosdfjg nvm its good as it
-	var defaultTrans = "res://Scripts/singletons/TEMPDialogue.json"
-	
+	# Если в саму сборку зашит настоящий TRANSLATION.json (res://defaults/) -
+	# новый игрок сразу получает его, а не голую generic-заглушку.
+	var defaultTrans := "res://Scripts/singletons/TEMPDialogue.json"
+	if ResourceLoader.exists("res://defaults/TRANSLATION.json"):
+		defaultTrans = "res://defaults/TRANSLATION.json"
+
 	text = loadjson(defaultTrans).duplicate(true)
 	savetodisk(transPath, text)
 
@@ -227,6 +308,22 @@ func getDialogueForSkin(skinPath: String):
 		return dialogueCache[skinPath]
 	var merged = text.diaGlobal.duplicate(true)
 	var skinFile = skinPath + "TRANSLATION.json"
+
+	if not FileAccess.file_exists(skinFile):
+		# Миграция со старого плоского расположения (user://<имя>TRANSLATION.json) -
+		# на случай если игрок успел создать файл именно так до того, как
+		# перевод и лор объединили внутри самой папки скина.
+		var skinName: String = skinPath.trim_suffix("/").get_file()
+		var oldFlatFile := "user://%sTRANSLATION.json" % skinName.to_lower()
+		if FileAccess.file_exists(oldFlatFile):
+			var oldFile := FileAccess.open(oldFlatFile, FileAccess.READ)
+			var oldText := oldFile.get_as_text()
+			oldFile.close()
+			var newFile := FileAccess.open(skinFile, FileAccess.WRITE)
+			if newFile:
+				newFile.store_string(oldText)
+				newFile.close()
+
 	if FileAccess.file_exists(skinFile):
 		var skinText = loadjson(skinFile)
 		if skinText is Dictionary and skinText.get("diaGlobal") is Dictionary:

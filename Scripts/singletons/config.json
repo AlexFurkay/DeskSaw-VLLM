@@ -8,8 +8,8 @@
 		"x2": 0.0
 	},
 	"expieDialogueSize": 7.0,
-	"minDialogueTime": 30.0,
-	"maxDialogueTime": 90.0,
+	"minDialogueTime": 40.0,
+	"maxDialogueTime": 80.0,
 	"minMood": -100.0,
 	"maxMood": 100.0,
 	"hungerDecayRate": 0.1,
@@ -32,8 +32,14 @@
 	"normalize": 1.0,
 	"outdated": false,
 	"soundVolume": 1.0,
-	"defaultSkin": "Body",
+	"defaultSkin": "VoyagerAlt",
 	"defaultMonitor": 0,
 	"useVulkan": false,
-	"noPersPopup": false
+	"noPersPopup": false,
+	"llmVisionEnabled": true,
+	"llmAllowProfanity": false,
+	"llmFlirtEnabled": false,
+	"llmCreativity": 1.0,
+	"llmRepetitionGuard": 1.2,
+	"petScale": 4.0
 }

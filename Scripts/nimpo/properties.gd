@@ -11,5 +11,6 @@ var propertyTable = {
     "consumable": false,
     "replenishIfConsumable": 0.0,
     "moodBoostIfConsumable": 0.0,
-    "tasteIfConsumable": 0 # out of 10,
+    "tasteIfConsumable": 0, # out of 10,
+    "healIfConsumable": 0.0 # HP restored on contact - bandage/syringe/medkit use this, food items leave it at 0
 }

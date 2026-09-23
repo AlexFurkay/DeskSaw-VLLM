@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://f1p5q8s2tv6xy"]
+
+[ext_resource type="Script" path="res://scenes/effects/blood_burst.gd" id="1_bldscr"]
+[ext_resource type="Texture2D" uid="uid://bm0hlmnidsilq" path="res://scenes/effects/blood_burst.png" id="2_bldtex"]
+
+[node name="BloodBurst" type="CPUParticles2D"]
+emitting = false
+amount = 8
+lifetime = 0.7
+one_shot = true
+explosiveness = 1.0
+randomness = 0.4
+emission_shape = 1
+emission_sphere_radius = 2.0
+spread = 180.0
+gravity = Vector2(0, 250)
+initial_velocity_min = 40.0
+initial_velocity_max = 130.0
+angular_velocity_min = -180.0
+angular_velocity_max = 180.0
+scale_amount_min = 1.0
+scale_amount_max = 2.6
+color = Color(0.95, 0.9, 0.4, 1.0)
+texture = ExtResource("2_bldtex")
+script = ExtResource("1_bldscr")

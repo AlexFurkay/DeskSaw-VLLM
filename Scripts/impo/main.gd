@@ -43,15 +43,12 @@ func _ready():
 
 	if gbData.data["firstLaunch"]:
 		gbData.data["firstLaunch"] = false
-		var method := RenderingServer.get_current_rendering_method()
-		var use_vulkan: bool = await GlobalVariable.makePopUp(
-			"This is your first time launching DeskSaw!\n\nWould you like to be linked to a guide on how to use it?",
-			$CanvasLayer2,
-			Vector2(screenWidth / 2, screenHeight / 2)
-		)
-		print(use_vulkan)
-		if use_vulkan:
-			OS.shell_open('https://github.com/dee-dee-catorce/desksaw/wiki')
+		# Раньше тут всплывало окно со ссылкой на wiki оригинального автора
+		# (github.com/dee-dee-catorce/...) - убрано по просьбе, раз это
+		# форк и ссылка ведёт не туда. Если понадобится показывать ссылку
+		# на СВОЙ гайд после релиза - можно вернуть тем же способом:
+		# var open := await GlobalVariable.makePopUp("...", $CanvasLayer2, Vector2(screenWidth / 2, screenHeight / 2))
+		# if open: OS.shell_open('https://github.com/<твой-репозиторий>/wiki')
 
 	
 func createBorders():

@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://dw3ua14au5m83"]
 
 [ext_resource type="Theme" uid="uid://bl462l5byyohh" path="res://assets/themes/ConsoleTheme.tres" id="1_wjbx6"]
-[ext_resource type="Script" uid="uid://bu1nlyxwv0ll8" path="res://Scripts/nimpo/popupMenu.gd" id="1_yekbp"]
+[ext_resource type="Script" path="res://Scripts/nimpo/popupMenu.gd" id="1_yekbp"]
 [ext_resource type="Script" uid="uid://blg811jk2cjt4" path="res://Scripts/nimpo/clickArea.gd" id="2_aywyk"]
 
 [node name="tempMenu" type="Control" unique_id=1446517993 node_paths=PackedStringArray("clickthrough")]

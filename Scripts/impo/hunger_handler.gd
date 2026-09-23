@@ -40,7 +40,7 @@ func _onItemEnter(body: Node2D) -> void:
 	#consolidate this later
 	if foodDb == true:
 		return
-	if get_parent().isSleeping or get_parent().shocked:
+	if get_parent().isSleeping or get_parent().shocked or get_parent().isUnconscious:
 		return
 	if not body.has_node("properties"):
 		return
@@ -49,23 +49,22 @@ func _onItemEnter(body: Node2D) -> void:
 
 	if not props.consumable:
 		return
+	if props.get("healIfConsumable", 0.0) > 0.0:
+		return # medical item - healthHandler handles this one, not food logic
 	foodDb = true
 
 	if hungry >= 98.0:
-		dialogue.pool = dialogue.data.Full
-		dialogue.send()
+		get_parent()._say("Full")
 		awaitDB()
 		return
 	if props.tasteIfConsumable == 0:
-		dialogue.pool = dialogue.data.EatReject
-		dialogue.send()
+		get_parent()._say("EatReject")
 		awaitDB()
 		return
 	AudioManager.play_sfx(AudioManager.eat)
 	hungry += props.replenishIfConsumable
 	self.get_parent().moodSys.mood += props.moodBoostIfConsumable
-	dialogue.pool = _getTasteDialogue(props.tasteIfConsumable)
-	dialogue.send()
+	get_parent()._say(_getTasteCategory(props.tasteIfConsumable))
 
 	body.queue_free()
 	awaitDB()
@@ -75,13 +74,13 @@ func awaitDB() -> void:
 	await get_tree().create_timer(cd).timeout
 	foodDb = false
 	pass
-func _getTasteDialogue(taste: int) -> Array:
+func _getTasteCategory(taste: int) -> String:
 	if taste <= 3:
-		return dialogue.data.EatBad
+		return "EatBad"
 	elif taste <= 6:
-		return dialogue.data.EatOk
+		return "EatOk"
 	else:
-		return dialogue.data.EatGood
+		return "EatGood"
 
 """
 					dialogueSys.pool = dialogue.data.sleepy

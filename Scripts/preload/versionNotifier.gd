@@ -6,6 +6,8 @@ const RELEASES = "https://api.github.com/repos/dee-dee-catorce/deskpublic/releas
 var http: HTTPRequest
 
 func _ready():
+	return # version-check disabled - this is a diverged fork, checking
+	# against dee-dee-catorce's original releases doesn't make sense anymore
 	http = HTTPRequest.new()
 	add_child(http)
 

@@ -14,6 +14,12 @@ var userSkinPath = GlobalVariable.userSkinPath
 func _ready() -> void:
 	if userSkinPath == "user://skin/Default/": userSkinPath = resPath
 	print("Using '", userSkinPath, "' for new expie's skin")
+	# На чистой установке файлы скина только что дозаписались из
+	# res://defaults/skins/ (см. _syncBundledSkins в SaveLoadSys.gd) - без
+	# этой паузы DirAccess иногда видит папку пустой сразу после массовой
+	# записи файлов, будто файловая система ещё не успела "показать" их.
+	await get_tree().process_frame
+	await get_tree().create_timer(0.05).timeout
 	mapSkin()
 	loadAllTextures()
 

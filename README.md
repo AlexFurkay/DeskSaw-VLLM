@@ -1,25 +1,52 @@
 # DeskSaw
 
-## This is the source code page. To download the executable, [go to releases here!](https://github.com/dee-dee-catorce/desksaw/releases)
+## Это страница с исходным кодом. Чтобы скачать готовое приложение, [зайди в раздел релизов!](<ССЫЛКА-НА-ТВОЙ-РЕПОЗИТОРИЙ>/releases)
 
 <img width="800" height="450" alt="prev" src="https://github.com/user-attachments/assets/711adeb3-b843-4819-8ccd-539c799052ce" />
 
-It's true! Experiments from hit games [Casualties: Unknown](https://store.steampowered.com/app/4576490/Casualties_Unknown/) and [GunSaw](https://orsonik.itch.io/gunsaw-demo) right on your desktop! Spawn them, feed them, throw sawblades at them! Or give them the life they deserve by petting them restlessly. <3
+Это правда! Эксперименты из отличных игр [Casualties: Unknown](https://store.steampowered.com/app/4576490/Casualties_Unknown/) и [GunSaw](https://orsonik.itch.io/gunsaw-demo) прямо у тебя на рабочем столе! Спавни их, корми, кидай в них циркулярные лезвия! Или дай им жизнь, которую они заслуживают, беспрерывно поглаживая. <3
 
-### Controls
+Этот форк добавляет к оригинальному DeskSaw полностью локальный характер на базе ИИ: твой Экспи реагирует на твой рабочий стол, собственное настроение, голод, сон и систему травм/здоровья — всё это через диалог, который генерируется на лету моделью, работающей прямо на твоём компьютере через [Ollama](https://ollama.com), без интернета и без аккаунта.
 
-**F1** / **Ctrl + Right Click** *an Expie* to bring up the terminal
+### Управление
 
-**Left Click** an Expie to pet them or **Right Click** one of their limbs to drag them around
+**F1** / **Ctrl + правый клик** *по Экспи* открывает консоль
 
-## How to build
+**Левый клик** по Экспи — погладить, **правый клик** по одной из его конечностей — потаскать за неё
 
-* Get the latest [.NET Godot Engine](https://godotengine.org/download/) release *(required to build C# solutions)*
-* Clone the git repository
-  * Via [git](https://git-scm.com/install/), run ``git clone https://github.com/dee-dee-catorce/desksaw``
-  * or [download the source code directly](https://github.com/dee-dee-catorce/desksaw/archive/refs/heads/master.zip)
-* You will also need the ``godot-console`` addon to load the project correctly
-  * Via git, run the following commands inside the project's path:
+## Требования
+
+* [Ollama](https://ollama.com/download), установленная и запущенная (`ollama serve`)
+* Видеокарта с 6+ ГБ видеопамяти для комфортной работы модели по умолчанию (`qwen3-vl:8b-instruct`)
+
+Модель качать вручную не нужно — игра сама скачает её через Ollama при первой необходимости (или при смене модели командой `aiModel`). Это может занять время в зависимости от размера модели и скорости интернета — прогресс-бара нет, просто подтверждение в консоли, когда всё будет готово.
+
+## Особенности
+
+* **Настроение, голод и сон** — три базовых стата, которые определяют поведение Экспи и его реакцию на тебя
+* **Здоровье и травмы** — здоровье падает от жёстких падений или брошенных предметов, с видимыми повреждениями тела при низком здоровье; при 0 здоровья Экспи не умирает, а теряет сознание до перезапуска приложения
+* **Реакции на экран** — время от времени Экспи комментирует происходящее на твоём рабочем столе, тон меняется в зависимости от текущего здоровья и настроения
+* **Кастомные скины** — каждый персонаж — это самодостаточная папка (текстуры, характер, диалоги, опционально голос), которую можно просто перетащить в папку сохранений — подробнее ниже
+
+### Добавление кастомного скина
+
+Если кто-то поделился с тобой персонажем (папка с текстурами, характером и диалогами) — установка ручная и простая:
+
+1. Скачай и распакуй папку персонажа (например `Rex.zip`).
+2. Найди папку сохранений игры (`%appdata%\...\desksawPRE-RELEASE\`).
+3. Перетащи папку персонажа (например `Rex`) целиком в подпапку `skin\`.
+4. Перезапусти игру.
+
+Готово — текстуры, характер, диалоги и голос (если автор его добавил) подхватятся сами. Ничего компилировать или прописывать в консоли не нужно.
+
+## Как собрать из исходников
+
+* Скачай последнюю версию [.NET Godot Engine](https://godotengine.org/download/) *(нужна для сборки C#-решений)*
+* Склонируй git-репозиторий
+  * Через [git](https://git-scm.com/install/): `git clone <ССЫЛКА-НА-ТВОЙ-РЕПОЗИТОРИЙ>`
+  * или [скачай исходный код напрямую](<ССЫЛКА-НА-ТВОЙ-РЕПОЗИТОРИЙ>/archive/refs/heads/master.zip)
+* Также понадобится аддон ``godot-console``, чтобы проект корректно загрузился
+  * Через git, выполни внутри папки проекта:
 
 	```console
 	cd addons/godot-console
@@ -27,26 +54,31 @@ It's true! Experiments from hit games [Casualties: Unknown](https://store.steamp
 	git submodule update
 	```
   
-  * or [manually download the godot-console repository](https://github.com/4d49/godot-console) and move its contents inside the ``addons/godot-console`` folder
+  * или [скачай репозиторий godot-console вручную](https://github.com/4d49/godot-console) и перенеси его содержимое в папку ``addons/godot-console``
 
-* Open Godot, click the ``Import`` button and find the cloned repository folder
-* If you haven't built a Godot project before, go to ``Editor > Manage Export Features`` and download a template for the platform you're building to
-* Go to ``Project > Export`` and add a new preset for the target platform, click ``Export Project`` and go to your target path before saving
-  * If the build fails, you might need to rebuild the C# solution. Do so by going to ``Project > Tools > C# > Create C# Solution``. If you don't see the option, you downloaded the wrong Godot release! :p
+* Открой Godot, нажми ``Import`` и найди папку с клонированным репозиторием
+* Если ты раньше не собирал проекты на Godot — зайди в ``Editor > Manage Export Features`` и скачай шаблон под нужную платформу
+* Зайди в ``Project > Export``, добавь новый пресет под целевую платформу, нажми ``Export Project`` и укажи путь перед сохранением
+  * Если сборка не удаётся — возможно, нужно пересобрать C#-решение: ``Project > Tools > C# > Create C# Solution``. Если такого пункта нет — скачана не та версия Godot! :p
 
-You successfully built DeskSaw!
+Готово, ты собрал DeskSaw!
 
-## Credits
+## Благодарности
 
-### [Casualties: Unknown](https://store.steampowered.com/app/4576490/Casualties_Unknown/) *by [Orsoniks/Moffee](https://orsonik.itch.io)*
+### Изначальная концепция и базовая игра — [dee-dee-catorce](https://github.com/dee-dee-catorce/desksaw)
 
-### [Godot "Minimalistic UI" Theme](https://azagaya.itch.io/minimalistic-ui) *by [azagaya](https://azagaya.itch.io)*
+### ИИ-система диалогов, система травм/здоровья и остальные доработки этого форка — <ТВОЁ-ИМЯ-ЗДЕСЬ>
 
+### [Casualties: Unknown](https://store.steampowered.com/app/4576490/Casualties_Unknown/) *от [Orsoniks/Moffee](https://orsonik.itch.io)*
 
-### [Godot Console Plugin](https://github.com/4d49/godot-console) *by [4d49](https://github.com/4d49), [stevenctl](https://github.com/stevenctl), [v-for-vandal](https://github.com/v-for-vandal) & [lolomap](https://github.com/lolomap)*
+### [Godot "Minimalistic UI" Theme](https://azagaya.itch.io/minimalistic-ui) *от [azagaya](https://azagaya.itch.io)*
 
-### [Godot Rapier Physics](https://godot.rapier.rs/) *by [appsinacup](https://github.com/appsinacup) & [several contributors](https://github.com/appsinacup/godot-rapier-physics/graphs/contributors?all=1)*
+### [Godot Console Plugin](https://github.com/4d49/godot-console) *от [4d49](https://github.com/4d49), [stevenctl](https://github.com/stevenctl), [v-for-vandal](https://github.com/v-for-vandal) и [lolomap](https://github.com/lolomap)*
 
-## Contributing
+### [Godot Rapier Physics](https://godot.rapier.rs/) *от [appsinacup](https://github.com/appsinacup) и [ряда контрибьюторов](https://github.com/appsinacup/godot-rapier-physics/graphs/contributors?all=1)*
 
-This project is in active development. Feel free to fork and contribute to it by making a pull request.
+### [Ollama](https://ollama.com) за локальный запуск LLM
+
+## Как поучаствовать
+
+Проект в активной разработке. Не стесняйся форкнуть его и предложить свои правки через pull request.

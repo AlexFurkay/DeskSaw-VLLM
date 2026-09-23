@@ -111,7 +111,7 @@ func headIKf():
 	var mouse_pos: Vector2 = targetPos
 	var dist: float = rigidtorso.global_position.distance_to(targetPos)
 
-	if dist <= 300.0:
+	if dist <= 750.0:
 		lookback = dirx != facing
 		if dirx != facing:
 			mouse_pos.x = rigidtorso.global_position.x - (mouse_pos.x - rigidtorso.global_position.x)

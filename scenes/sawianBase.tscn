@@ -29,6 +29,7 @@
 [ext_resource type="Script" uid="uid://bhc642h64r7ev" path="res://Scripts/impo/moodSys.gd" id="22_un334"]
 [ext_resource type="Script" uid="uid://cmppv0optma7o" path="res://Scripts/impo/damageHandler.gd" id="25_3pkli"]
 [ext_resource type="Script" uid="uid://bvssnx7cofbpp" path="res://Scripts/impo/hunger_handler.gd" id="26_84wtd"]
+[ext_resource type="Script" path="res://Scripts/impo/health_handler.gd" id="40_hlthh"]
 [ext_resource type="Script" uid="uid://dnk6vcggbqmhu" path="res://Scripts/impo/det_radius.gd" id="30_873iu"]
 [ext_resource type="Script" uid="uid://bmc5ssn6i83yj" path="res://Scripts/impo/stat_watcher.gd" id="31_873iu"]
 [ext_resource type="PackedScene" uid="uid://c5tuv3hsjyl02" path="res://scenes/statPopup.tscn" id="32_oiscl"]
@@ -1914,7 +1915,7 @@ height = 10.0
 colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_0vd41"]
-radius = 76.23648
+radius = 350.0
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_0vd41"]
 size = Vector2(17.992195, 22.019926)
@@ -2857,6 +2858,7 @@ offset_left = -122.79461
 offset_top = -24.251263
 offset_right = 122.74047
 offset_bottom = -5.2512627
+grow_vertical = 0
 theme = ExtResource("21_57y4j")
 theme_override_colors/default_color = Color(0.97141486, 0.76168233, 0, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
@@ -2937,6 +2939,10 @@ script = ExtResource("26_84wtd")
 mouth = NodePath("../../RigidBodies/Head/Mouth")
 dialogue = NodePath("../dialogue")
 
+[node name="healthHandler" type="Node" parent="behavior" unique_id=2070105681 node_paths=PackedStringArray("mouth")]
+script = ExtResource("40_hlthh")
+mouth = NodePath("../../RigidBodies/Head/Mouth")
+
 [node name="petTimer" type="Timer" parent="behavior" unique_id=1934989107]
 one_shot = true
 
@@ -2953,3 +2959,4 @@ window = NodePath("../../textParent/Control")
 [connection signal="body_entered" from="RigidBodies/Head/Dect" to="behavior/detRadius" method="_on_dect_body_entered"]
 [connection signal="body_exited" from="RigidBodies/Head/Dect" to="behavior/detRadius" method="_on_dect_body_exited"]
 [connection signal="body_entered" from="RigidBodies/Head/Mouth" to="behavior/hungerHandler" method="_onItemEnter"]
+[connection signal="body_entered" from="RigidBodies/Head/Mouth" to="behavior/healthHandler" method="_onItemEnter"]
