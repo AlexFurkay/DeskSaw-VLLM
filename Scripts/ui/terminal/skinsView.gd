@@ -30,6 +30,13 @@ func _ready() -> void:
 	visibility_changed.connect(_update)
 	scan_for_skins()
 
+	# Персонаж-игрок (PlayerManager): кнопка рядом со Spawn
+	var playerButton := Button.new()
+	playerButton.text = " Spawn as player "
+	spawnButton.get_parent().add_child(playerButton)
+	spawnButton.get_parent().move_child(playerButton, spawnButton.get_index() + 1)
+	playerButton.pressed.connect(_on_spawn_player_press)
+
 func _update() -> void:
 	if !visible:
 		return
@@ -138,6 +145,11 @@ func _on_spawn_button_press() -> void:
 		else selectedSkin.path
 	)
 	spawnExpie()
+
+func _on_spawn_player_press() -> void:
+	var path: String = "res://assets/Body/" if selectedSkin == null else selectedSkin.path
+	PlayerManager.spawnPlayer(path, "Body" if selectedSkin == null else selectedSkin.name)
+
 
 func _on_skin_folder_button_press() -> void:
 	OS.shell_open(ProjectSettings.globalize_path("user://skin"))

@@ -7,7 +7,7 @@ extends Node
 @export var eyeNode: Sprite2D
 @export var mouthNode: Sprite2D
 
-@export var normalRate: float = 0.009
+@export var normalRate: float = 0.0045 # было 0.009 - настроение вдвое медленнее тянется к нулю
 #dont mind the numbers here theyre just placeholders until it gets loaded
 var mood: float = 20.0
 var trust: float = 10.0
@@ -65,7 +65,12 @@ func moodCheck(delta: float = 1.0) -> float:
 	if gbData.settings.get("invincible", false):
 		return mood
 
-	mood += calcmood(1) * delta / 1.5
+	# Падение настроения замедлено вдвое (просьба 2026-10-14): отрицательный
+	# дрейф (голод/усталость/рэгдолл) и притяжение к нулю - оба x0.5.
+	var change: float = calcmood(1) * delta / 1.5
+	if change < 0.0:
+		change *= 0.5
+	mood += change
 	mood = clamp(mood, minmood, maxmood)
 
 

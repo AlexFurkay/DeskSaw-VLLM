@@ -79,6 +79,16 @@ func _additem(item: String = "containercrate"):
 	instance.set_meta("itemName", item)
 
 
+func _cmd_changePlayerMode(combo: String = "") -> void:
+	if combo == "":
+		Console.print("Сейчас: [color=CYAN]%s[/color]. Пример: change_player_mode Ctrl+Shift+K" % PlayerManager.currentKeys())
+		return
+	if PlayerManager.setKeys(combo):
+		Console.print("Режим игрока теперь: [color=CYAN]%s[/color]" % combo)
+	else:
+		Console.print("[color=RED]Не понял сочетание '%s'.[/color] Пиши через + без пробелов, например Ctrl+Alt+P" % combo)
+
+
 func _cmd_petSize(value: float) -> void:
 	gbData.settings["petScale"] = value
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
@@ -188,6 +198,7 @@ func _ready():
 	Console.create_command("clearItems", clearObj, "очищает по 'entity', 'object' или конкретному имени предмета/скина")
 	Console.create_command("despawnPet", _cmd_despawnPet, "удаляет текущего питомца(ев) с экрана, чтобы можно было заспавнить нового")
 	Console.create_command("spawnExpie", spawnExpie, "создаёт Савианина на основе твоего скина по умолчанию")
+	Console.create_command("change_player_mode", _cmd_changePlayerMode, "меняет клавиши входа/выхода из управления игроком (сейчас: Ctrl+Alt+P). Клавиши пишутся ВРУЧНУЮ через + без пробелов, например: change_player_mode Ctrl+Shift+K. Можно: Ctrl, Alt, Shift, Win + одна обычная клавиша (A-Z, 0-9, F1-F24, Space, Tab, Home, End, Insert, Delete, PageUp, PageDown, стрелки Left/Right/Up/Down)")
 	Console.create_command("petSize", _cmd_petSize, "меняет размер персонажа (по умолчанию 4.0) - действует на новых заспавненных, не на уже существующих")
 	#Console.create_command("openSkinFolder", openskinfold, "opens the skin folder")
 	Console.create_command("nukeData", nukesettings, "сбрасывает ВСЁ. Файл сохранения, настройки и т.д. Используй на свой страх и риск.")

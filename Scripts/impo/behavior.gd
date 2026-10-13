@@ -74,6 +74,16 @@ var isSad := false
 var shocked := false
 var isUnconscious := false # 0 хп - навсегда (до перезапуска приложения), персонаж молчит и не приходит в себя
 var _finalLinePending := false # одна последняя фраза, которая ещё может прозвучать после отключки (см. _queueMessage)
+
+## Персонаж-игрок (см. PlayerManager): та же физика и статы, но без своих
+## ИИ-фраз - говорит только то, что пишет человек. Выставляется ДО
+## добавления в сцену (как petId).
+var isPlayer := false
+var playerControlled := false
+var _playerDir := 0.0
+var _playerJump := false
+var _forcedSleep := false # сон автопилота: не просыпается сам, только по включению управления
+var _autopilotSleepAt := 0 # когда автопилот уложит игрока спать (3-5 мин без управления)
 const CRITICAL_HEALTH_THRESHOLD := 20.0 # ниже этого - не может встать, но остаётся в сознании и говорит
 
 ## Сила удара = насколько резко изменилась скорость тела за один кадр
@@ -171,7 +181,13 @@ func _ready() -> void:
 		petId = gbData.addPet(skinName)
 
 	get_parent().get_parent().set_meta("itemName", petId)
-	
+	add_to_group("pets") # PlayerManager ищет, кто ответит игроку
+	if gbData.data["saw"].has(petId) and gbData.data["saw"][petId].get("player", false):
+		isPlayer = true # восстановлен из сейва (expiePersistence)
+	if isPlayer:
+		PlayerManager.adopt(self, _skinTag())
+		_autopilotSleepAt = Time.get_ticks_msec() + randi_range(180000, 300000)
+
 
 	#im very sorry that i had to comment this out i have no idea what its supposed to do and it was throwing an error
 	"""
@@ -185,10 +201,11 @@ func _ready() -> void:
 	_spawnGraceUntil = Time.get_ticks_msec() + 2000 # 2 сек. неприкосновенности сразу после спавна
 	_initalSpawn()
 	LLMManager.llmReaction.connect(_on_llm_reaction)
-	LLMManager.aiEnabledChanged.connect(func(enabled): if enabled: _prewarmMyCategories())
-	LLMManager.poolsCleared.connect(_prewarmMyCategories)
-	if gbData.settings.get("llmVisionEnabled", false):
-		_prewarmMyCategories()
+	LLMManager.aiEnabledChanged.connect(func(enabled): if enabled and not isPlayer: _prewarmMyCategories())
+	if not isPlayer: # игроку свои ИИ-фразы не нужны - и видеокарту не грузим прогревом
+		LLMManager.poolsCleared.connect(_prewarmMyCategories)
+		if gbData.settings.get("llmVisionEnabled", false):
+			_prewarmMyCategories()
 	# одежда надевается через ту же зону у головы, через которую персонаж ест
 	healthHandler.mouth.body_entered.connect(_onWearableEnter)
 
@@ -353,7 +370,7 @@ func _tryShowQueued() -> void:
 
 
 func _on_llm_reaction(text: String) -> void:
-	if beingDragged or isSleeping or shocked:
+	if isPlayer or beingDragged or isSleeping or shocked:
 		return
 	# у нескольких питомцев на экране — не все обязаны реагировать разом
 	if gbData.data["saw"].size() > 1 and randf() < 0.5:
@@ -402,7 +419,7 @@ func sleep():
 				# гасим "сонные" эффекты и выходим.
 				sleepParticle.emitting = false
 				break
-			if sleepHandler.sleepCheck() < 5.0:
+			if sleepHandler.sleepCheck() < 5.0 and not _forcedSleep:
 				#break if its below 10 (aka good enough to get up)
 				sleepParticle.emitting = false
 				moveSys.rigid.global_position = moveSys.rigidtorso.global_position
@@ -445,7 +462,7 @@ func checker():
 				print("tired")
 
 				# После пробуждения ударом какое-то время не засыпаем снова
-				var canSleep: bool = Time.get_ticks_msec() >= _noSleepUntil and not ragdolled
+				var canSleep: bool = Time.get_ticks_msec() >= _noSleepUntil and not ragdolled and not (isPlayer and playerControlled)
 
 				if sleepN > 94.5 and canSleep:
 					# раньше флаг тут был локальной переменной и сбрасывался
@@ -505,6 +522,11 @@ func checker():
 		await get_tree().create_timer(tick).timeout
 
 func _physics_process(_delta: float) -> void:
+	# игрок под управлением: направление и прыжок - с клавиатуры (PlayerManager)
+	if isPlayer and playerControlled and not ragdolled and not isSleeping and not isUnconscious:
+		moveSys.dir = _playerDir
+		if _playerJump:
+			moveSys.jump()
 	#detect speed and aiosdhfopjkasfguopjasfgsdfhcvio[]
 	#and ragdoll based on taht
 	if not ragdolled and (abs(moveSys.rigid.linear_velocity.x) > moveSys.ragdollspeed or beingDragged):
@@ -620,12 +642,22 @@ func _onWearableEnter(body: Node2D) -> void:
 	var key := _itemKey(body)
 	var head: Node2D = healthHandler.mouth.get_parent() # RigidBodies/Head - одежда двигается и падает вместе с головой
 	var worn := Sprite2D.new()
+	worn.set_meta("worn", true) # _applyInjuryLook пропускает такие спрайты
 	worn.texture = itemSprite.texture
 	worn.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	worn.position = WEAR_OFFSETS.get(key, WEAR_OFFSETS[WEAR_SLOT_DEFAULT.get(slot, "hat")])
 	head.add_child(worn)
 	_worn[slot] = {"sprite": worn, "scene": body.scene_file_path, "key": key}
-	body.queue_free()
+	# Вещь могут надевать прямо из руки: сначала отпускаем захват мышью
+	# (его пружинный шарнир держится за это тело), и удаляем тело уже вне
+	# текущего шага физики - удаление тела посреди шага физики/с живым
+	# шарниром может уронить движок.
+	var drag = body.get_node_or_null("draggable")
+	if drag and drag._dragging:
+		drag._stopDrag()
+	body.hide()
+	body.set_deferred("freeze", true)
+	body.call_deferred("queue_free")
 	_saySituational("clothesOn", key)
 
 
@@ -642,20 +674,34 @@ func _knockOffClothes() -> void:
 		var pos: Vector2 = sprite.global_position
 		sprite.queue_free()
 		_worn.erase(slot)
-		var scene: PackedScene = load(w["scene"]) if w["scene"] != "" else null
-		if scene:
-			var item = scene.instantiate()
-			get_tree().current_scene.add_child(item)
-			item.global_position = pos
-			item.set_meta("itemName", w["key"])
-			_seenItems[item.get_instance_id()] = true # уже прозвучит clothesOff - отдельная реакция "предмет рядом" не нужна
-			if item is RigidBody2D:
-				item.linear_velocity = Vector2(randf_range(-250.0, 250.0), randf_range(-450.0, -250.0))
-				item.angular_velocity = randf_range(-8.0, 8.0)
+		# Вызывается из _physics_process - добавлять новое физическое тело
+		# прямо посреди шага физики нельзя, поэтому создаём вещь отложенно.
+		call_deferred("_spawnDroppedItem", String(w["scene"]), pos, String(w["key"]))
 		if lost == "":
 			lost = w["key"]
 	if lost != "":
 		_saySituational("clothesOff", lost)
+
+
+func _spawnDroppedItem(scenePath: String, pos: Vector2, key: String) -> void:
+	if scenePath == "":
+		return
+	var scene: PackedScene = load(scenePath)
+	if scene == null:
+		return
+	var item = scene.instantiate()
+	var parentScene := get_tree().current_scene
+	parentScene.add_child(item)
+	# owner обязателен: dragObj при захвате мышью добавляет свой захват в
+	# get_parent().owner - без owner там null, и взять вещь было нельзя
+	# (у предметов из вкладки Items/команды spawn owner выставляется так же).
+	item.owner = parentScene
+	item.global_position = pos
+	item.set_meta("itemName", key)
+	_seenItems[item.get_instance_id()] = true # уже прозвучит clothesOff - отдельная реакция "предмет рядом" не нужна
+	if item is RigidBody2D:
+		item.linear_velocity = Vector2(randf_range(-250.0, 250.0), randf_range(-450.0, -250.0))
+		item.angular_velocity = randf_range(-8.0, 8.0)
 
 
 func _saySituational(category: String, key: String) -> void:
@@ -741,6 +787,66 @@ func drugLoop() -> void:
 			_say("withdrawal")
 
 
+# ---------------- Игрок ----------------
+func setPlayerControlled(on: bool) -> void:
+	playerControlled = on
+	moveSys.faceMoveDir = on # под управлением смотрит туда, куда идёт, а не на курсор
+	if on:
+		_forcedSleep = false
+		_autopilotSleepAt = 0
+		if isSleeping:
+			wakeUp()
+		if moveSys.currstate == moveSys.states.resting:
+			moveSys.initswithc(moveSys.states.idle)
+		wander = true
+		moveSys.jumpCoolDown = 0.6
+	else:
+		_playerDir = 0.0
+		_playerJump = false
+		moveSys.dir = 0
+		moveSys.jumpCoolDown = 4.0
+		_autopilotSleepAt = Time.get_ticks_msec() + randi_range(180000, 300000)
+
+
+func playerInput(dir: float, jump: bool) -> void:
+	_playerDir = dir
+	_playerJump = jump
+
+
+## Реплика, которую написал человек. Звук - обычный голос скина (whine).
+func playerSay(text: String) -> void:
+	if isUnconscious:
+		return
+	dialogueSys.setDia(text, 1.0, 2.0, true)
+	AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+
+
+## ИИ-персонаж отвечает игроку - вне очереди, с учётом лора и состояния,
+## без примеров из TRANSLATION.json.
+func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> void:
+	if isPlayer or isUnconscious or isSleeping:
+		return
+	var stats := "настроение %.0f из 100, здоровье %.0f из 100, сытость %.0f из 100" % [
+		moodSys.mood + moodSys.drugOffset, healthHandler.health, hungerHandler.hungry]
+	if not _worn.is_empty():
+		stats += ", на тебе надето: " + _wornDescription()
+	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), func(text: String):
+		_queueMessage(text, 1.0, true)
+		onReply.call(text))
+
+
+func _forceSleep() -> void:
+	if isSleeping or isUnconscious:
+		return
+	_autopilotSleepAt = 0
+	isSleeping = true
+	_forcedSleep = true
+	_messageQueue.clear()
+	_urgentInQueue = 0
+	moveSys.rigidtorso.linear_velocity = Vector2.ZERO
+	sleep()
+
+
 ## Разбудить спящего (сейчас - только от урона). Усталость остаётся какой
 ## была, просто персонаж какое-то время не может снова заснуть.
 func wakeUp() -> void:
@@ -816,6 +922,8 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 	while true:
 		var aiOn: bool = gbData.settings.get("llmVisionEnabled", false)
 		var waitTime: float = randf_range(10.0, 15.0) if aiOn else (getUpTimer + randf_range(0, 5))
+		if isPlayer:
+			waitTime = 1.5 # игроку незачем ждать ИИ-реплик - встаёт почти сразу
 		await get_tree().create_timer(waitTime).timeout
 		if beingDragged:
 			if not isSleeping and not isUnconscious:
@@ -939,7 +1047,7 @@ func itemWatch() -> void:
 			if not firstScan: # то, что уже лежало рядом при появлении персонажа, - не "новое"
 				fresh.append(body)
 		firstScan = false
-		if fresh.is_empty():
+		if fresh.is_empty() or isPlayer:
 			continue
 		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
 			continue
@@ -1007,6 +1115,9 @@ func _aiStateHint() -> String:
 # periodically send a message based on mood
 func passivetalk() -> void:
 	while true:
+		if isPlayer:
+			await get_tree().create_timer(5.0).timeout
+			continue
 		if !gbData.settings.get("mutePassive", false):
 			var diaTimerMinimum = float(GlobalVariable.getNumFromString(str(gbData.settings["minDialogueTime"])))
 
@@ -1192,7 +1303,10 @@ func _applyInjuryLook() -> void:
 		return
 	# ВАЖНО: используем ТОТ ЖЕ обход, что и skinmapper.mapSkin(), без
 	# фильтрации глаза здесь - иначе индексы разойдутся с currtextures.
-	var allSprites: Array = skinmapper.getspr(root)
+	# Надетая одежда - тоже Sprite2D на голове; без фильтра список спрайтов
+	# становился длиннее списка текстур скина, функция выходила на проверке
+	# размеров ниже, и вид травм "замерзал" (нога оставалась раненой при 100 ХП).
+	var allSprites: Array = skinmapper.getspr(root).filter(func(s): return not s.has_meta("worn"))
 	# skinmapper при подмене скина (для любого user:// скина, включая
 	# VoyagerAlt) грузит текстуры через Image.load()+ImageTexture, у которых
 	# НЕТ resource_path - поэтому имя файла бралось из resource_path и
@@ -1312,6 +1426,8 @@ var voiceSet: Dictionary = {}
 func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true, situationOverride: String = "", poolSuffix: String = "") -> void:
 	if isUnconscious:
 		return # 0 хп - персонаж без сознания, молчит до перезапуска приложения
+	if isPlayer:
+		return # игрок говорит только то, что напишет человек (звуки при этом играют отдельно)
 	if not ignoreCooldown and cooldown > 0.0:
 		var now := Time.get_ticks_msec()
 		var last: int = _lastSayTime.get(category, -999999999)
@@ -1347,6 +1463,14 @@ var _baseMaxSpeed := -1.0
 
 func wandering() -> void:
 	while get_tree():
+		if isPlayer and playerControlled:
+			await get_tree().create_timer(0.5).timeout # ходит человек
+			continue
+		if isPlayer and not isSleeping and not isUnconscious and not ragdolled and _autopilotSleepAt > 0 and Time.get_ticks_msec() >= _autopilotSleepAt:
+			moveSys.dir = 0
+			_forceSleep() # автопилот: через 3-5 минут без управления игрок ложится спать
+			await get_tree().create_timer(1.0).timeout
+			continue
 		if not wander or ragdolled or isSleeping or isUnconscious or beingDragged:
 			moveSys.dir = 0
 			await get_tree().create_timer(1.0).timeout
@@ -1454,14 +1578,14 @@ func _walkTo(targetX: float) -> void:
 		_baseMaxSpeed = moveSys.maxspeed
 	var speedMul := 1.0
 	if isTired:
-		speedMul = 0.7
-	elif isSad:
 		speedMul = 0.8
+	elif isSad:
+		speedMul = 0.9
 	elif moodSys.mood > 50.0:
 		speedMul = 1.15
 	var high := _isHigh()
 	if high:
-		speedMul *= 0.6
+		speedMul *= 0.8 # плюс случайные остановки ниже - этого хватает, чтобы походка была "пьяной"
 	moveSys.maxspeed = _baseMaxSpeed * speedMul
 
 	var startX: float = moveSys.rigid.global_position.x

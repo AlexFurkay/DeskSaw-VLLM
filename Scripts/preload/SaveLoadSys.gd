@@ -46,6 +46,11 @@ func _ready():
 		data = loadjson(savePath)
 		var templateData = loadjson(template)
 		fixMissing(data, templateData)
+		# Шаблон нового питомца лежит копией в SAVE.json игрока, и fixMissing
+		# не обновляет уже существующие поля - стартовое настроение берём из
+		# шаблона сборки, иначе его изменение не дошло бы до старых сейвов.
+		if data.get("sawTemplate") is Dictionary and templateData.get("sawTemplate") is Dictionary:
+			data["sawTemplate"]["mood"] = templateData["sawTemplate"].get("mood", 70.0)
 
 		for petId in data.get("saw", {}).keys():
 			fixMissing(data["saw"][petId], templateData["sawTemplate"])

@@ -74,6 +74,7 @@ var _sinceBackgroundJob := 0
 const BACKGROUND_EVERY_N := 3    # guarantee background a turn at least this often
 var _currentCallback: Callable
 var _currentTag: String = ""
+var _currentJob: Dictionary = {} # чтобы прерванный фоновый пакет можно было вернуть в очередь
 var _watchdogTimer: Timer
 
 
@@ -542,6 +543,39 @@ func requestItemReaction(skinTag: String, itemDescription: String, stateHintText
 	_enqueue(prompt, [], callback, tag)
 
 
+## Ответ ИИ-персонажа на реплику игрока (PlayerManager). Высший приоритет:
+## встаёт первым в очередь, а идущую фоновую генерацию пакета фраз
+## прерывает (она потом повторится). Без примеров из TRANSLATION.json -
+## только лор, состояние и сам разговор.
+func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var tag := skinTag + ":chat"
+	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Ответь на его последнюю реплику как в живом разговоре: по смыслу его слов, коротко и в своём характере." % speaker
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	if chatHistory.size() > 0:
+		var lines: Array = []
+		for entry in chatHistory:
+			var who: String = String(entry.get("who", ""))
+			lines.append(("Ты" if who == myName else who) + ": " + String(entry.get("text", "")))
+		prompt += "\nРазговор (последние реплики, внизу - самая новая):\n" + "\n".join(lines)
+		var last: Dictionary = chatHistory[chatHistory.size() - 1]
+		prompt += "\nТолько что %s сказал тебе: \"%s\". Ответь ИМЕННО на это - на его вопрос или слова, а не на что-то своё." % [speaker, String(last.get("text", ""))]
+	prompt += "\nТвой ответ (только сама реплика):"
+
+	var job := {"prompt": prompt, "images": [], "callback": callback, "tag": tag}
+	if busy and _currentTag.begins_with("prefetch:") and not _currentJob.is_empty():
+		# прерываем фоновый пакет - ответ человеку важнее
+		http.cancel_request()
+		_watchdogTimer.stop()
+		_backgroundQueue.push_front(_currentJob)
+		busy = false
+	_queue.push_front(job)
+	_processQueue()
+
+
 ## Called from a specific pet's passivetalk() loop. Result delivered ONLY to
 ## that pet via callback - not broadcast.
 const _PROFANITY_ROOTS := ["хуй", "ебат", "ёбан", "ебан", "заеб", "пизд", "мудак", "долбоёб", "гандон", "нахер", "похер"]
@@ -977,6 +1011,7 @@ func _processQueue() -> void:
 
 	_currentCallback = job["callback"]
 	_currentTag = job.get("tag", "")
+	_currentJob = job
 
 	# Batch (prefetch pool refill) requests carry PREFETCH_TARGET lines in one
 	# response, so they need a much bigger token budget than a single line.
@@ -1117,7 +1152,8 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 			rejectReason = "ROLE_INVERSION"
 			text = ""
 
-		if text != "" and _looksLikeRepeat(_currentTag, text):
+		# в разговоре с игроком повтор лучше молчания - не отбрасываем
+		if text != "" and not _currentTag.ends_with(":chat") and _looksLikeRepeat(_currentTag, text):
 			rejectReason = "REPEAT"
 			text = ""
 

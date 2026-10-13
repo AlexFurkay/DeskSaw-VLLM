@@ -35,6 +35,7 @@ var wander = true
 var friction: float = 1.0
 var speedacc: float = 20.0
 var maxspeed: float = 240.0 # you will understand what the one is for later
+const ANIM_REF_SPEED := 240.0 # обычная скорость ходьбы - от неё считается скорость анимации шагов
 var maxspeedMult: float = 10.0
 #i literally forgot what the one was for
 var jumpPowCap: float = -600.0
@@ -191,7 +192,10 @@ func phystate(_delta: float):
 				rigid.apply_central_force(Vector2(dir, 0) * speedacc)
 
 		
-			var normlized = abs(remap(rigid.linear_velocity.x, 0, maxspeed, 0.0, 1.0))
+			# Анимация считается от ОБЫЧНОЙ скорости, а не от текущего лимита:
+			# behavior._walkTo() временно снижает maxspeed (усталость, фентанил),
+			# и раньше ноги от этого перебирали быстрее при меньшей скорости.
+			var normlized = abs(remap(rigid.linear_velocity.x, 0, ANIM_REF_SPEED, 0.0, 1.0))
 			#there used to be a long if statement here and my ass got flamed when i posted it
 			backwards = GlobalVariable.checkpositive(dir) == flip
 			var target_anim = "moveB" if backwards else "moveF"
@@ -205,8 +209,17 @@ func phystate(_delta: float):
 			pass
 
 
+## Игрок под управлением смотрит по направлению движения, а не на курсор -
+## иначе при ходьбе "от курсора" включалась медленная ходьба задом.
+var faceMoveDir := false
+
 func detFlip():
 	if currstate == states.ragdoll:
+		return
+	if faceMoveDir:
+		if dir != 0:
+			skelparent.scale.x = dir
+			flip = dir < 0
 		return
 
 	var dirx: float = sign(rigid.get_global_mouse_position().x - rigid.global_position.x)

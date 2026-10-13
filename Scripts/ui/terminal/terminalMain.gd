@@ -16,6 +16,7 @@ func _ready() -> void:
 	# show first (console) window by default
 	submenuButton.item_selected.connect(_on_submenu_picker_item_selected)
 	_on_submenu_picker_item_selected(0)
+	_buildSubmenuTabs()
 
 	GlobalVariable.TerminalOpenPressed.connect(_on_terminal_open_press)
 	CommandsGlobal.resizeCommandCalled.connect(_resize_console)
@@ -43,6 +44,31 @@ func _on_terminal_open_press(_is_native: bool) -> void:
 		visible = !visible
 	else:
 		visible = true
+
+## Вместо выпадающего списка в заголовке - кнопки-вкладки Console /
+## Settings / Skins / Items, как вкладки внутри Settings (Behavior, Audio...).
+## Сам список остаётся в сцене (на него ссылаются экспорт-поля), просто скрыт.
+func _buildSubmenuTabs() -> void:
+	var bar := HBoxContainer.new()
+	bar.theme = submenuButton.theme
+	bar.add_theme_constant_override("separation", 4)
+	var group := ButtonGroup.new()
+	for i in submenuPanels.size():
+		var btn := Button.new()
+		btn.text = submenuButton.get_item_text(i) if i < submenuButton.item_count else str(i)
+		btn.toggle_mode = true
+		btn.button_group = group
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.custom_minimum_size = Vector2(70, 0)
+		btn.button_pressed = i == 0
+		btn.pressed.connect(_on_submenu_picker_item_selected.bind(i))
+		bar.add_child(btn)
+	submenuButton.get_parent().add_child(bar)
+	bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	bar.grow_vertical = Control.GROW_DIRECTION_BOTH
+	bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	submenuButton.hide()
+
 
 func _on_submenu_picker_item_selected(index: int) -> void:
 	for i in submenuPanels.size():

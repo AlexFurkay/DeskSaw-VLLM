@@ -36,6 +36,8 @@ GlobalVariable="*uid://mxghgdpm2n4c"
 TransparentWindow="*uid://cckj4pyg78xfg"
 AudioManager="*uid://kyyjq6geettk"
 CommandsGlobal="*uid://cdrh1cuyfy75f"
+GlobalKeys="*res://Scripts/preload/GlobalKeys.cs"
+PlayerManager="*res://Scripts/impo/playerManager.gd"
 
 [display]
 
