@@ -120,6 +120,10 @@ func goUnconscious() -> void:
 	isUnconscious = true
 	_finalLinePending = true
 	faceSys.setEmotion("sleep") # уже готовое состояние с закрытыми глазами, ничего рисовать не нужно
+	if not ragdolled:
+		# При 0 ХП от удара персонаж и так уже лежит, а при передозировке он
+		# стоял - без этого так и оставался стоять с закрытыми глазами.
+		tempRagdoll(false, true)
 
 
 #unused atm
@@ -185,6 +189,8 @@ func _ready() -> void:
 	LLMManager.poolsCleared.connect(_prewarmMyCategories)
 	if gbData.settings.get("llmVisionEnabled", false):
 		_prewarmMyCategories()
+	# одежда надевается через ту же зону у головы, через которую персонаж ест
+	healthHandler.mouth.body_entered.connect(_onWearableEnter)
 
 	_queueTimer = Timer.new()
 	_queueTimer.wait_time = 0.3
@@ -490,6 +496,7 @@ func checker():
 				faceSys.setEmotion(emotionz.keys()[currentEmotion])
 		statUpd.stat.mood = moodN
 		LLMManager.lastKnownMood = moodN
+		LLMManager.lastKnownDrugLevel = _drugLevel() # для экранных реакций
 		statUpd.stat.hunger = hungerHandler.hungry
 		statUpd.stat.health = healthHandler.health
 		statUpd.stat.sleep = snapped(sleepN, 0.1) # ???? why was it like that before?
@@ -534,6 +541,8 @@ func _trackRagdollImpact() -> void:
 	var vel: Vector2 = moveSys.rigidtorso.linear_velocity
 	if _impactPrevValid:
 		var hit := (_prevTorsoVel - vel).length()
+		if hit >= KNOCKOFF_IMPACT and _spawnSettled:
+			_knockOffClothes()
 		if hit >= IMPACT_LIGHT:
 			_registerImpact(hit)
 	_prevTorsoVel = vel
@@ -569,6 +578,95 @@ func _registerImpact(speed: float) -> void:
 	healthHandler.applyDamage(dmg)
 	if not shocked:
 		shock()
+
+
+# ---------------- Одежда ----------------
+## Предмет с "wearable" в propertyTable ("head" - шляпа/кепка, "eyes" -
+## очки) надевается, когда его подносят к голове. В каждый слот - одна вещь.
+## Сильный удар (KNOCKOFF_IMPACT) сбивает одежду, она падает обратно
+## предметом. Надетое держится только в пределах запуска.
+##
+## Позиции - в пикселях спрайта головы (26x18, лицом вправо), посчитаны по
+## непрозрачным пикселям experimentHead.png/experimentEyeOpen.png:
+## макушка ~ y -6.5, глаз ~ (0, 2). Для нового предмета без своей строки
+## берётся позиция по слоту.
+const WEAR_OFFSETS := {
+	"hat": Vector2(-1.5, -7.0),
+	"cap": Vector2(0.5, -7.0),
+	"glasses": Vector2(-1.5, 3.0),
+}
+const WEAR_SLOT_DEFAULT := {"head": "hat", "eyes": "glasses"}
+const KNOCKOFF_IMPACT := 800.0 # слабее, чем порог урона - шляпу сбить проще, чем поранить
+const CLOTHES_SITUATION := {
+	"clothesOn": "На тебя только что надели: %s. Отреагируй - как тебе в этом, идёт ли тебе, нравится или раздражает.",
+	"clothesOff": "От удара с тебя только что слетело: %s. Отреагируй на это.",
+}
+var _worn: Dictionary = {} # слот -> {"sprite": Sprite2D, "scene": путь сцены, "key": имя предмета}
+var _wearCooldownUntil := 0 # только что слетевшая вещь не надевается обратно сама, пока лежит у головы
+
+
+func _onWearableEnter(body: Node2D) -> void:
+	if isUnconscious or Time.get_ticks_msec() < _wearCooldownUntil:
+		return
+	var propsNode = body.get_node_or_null("properties")
+	if propsNode == null:
+		return
+	var slot: String = String(propsNode.propertyTable.get("wearable", ""))
+	if slot == "" or _worn.has(slot):
+		return
+	var itemSprite := body.get_node_or_null("Sprite") as Sprite2D
+	if itemSprite == null:
+		return
+	var key := _itemKey(body)
+	var head: Node2D = healthHandler.mouth.get_parent() # RigidBodies/Head - одежда двигается и падает вместе с головой
+	var worn := Sprite2D.new()
+	worn.texture = itemSprite.texture
+	worn.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	worn.position = WEAR_OFFSETS.get(key, WEAR_OFFSETS[WEAR_SLOT_DEFAULT.get(slot, "hat")])
+	head.add_child(worn)
+	_worn[slot] = {"sprite": worn, "scene": body.scene_file_path, "key": key}
+	body.queue_free()
+	_saySituational("clothesOn", key)
+
+
+func _knockOffClothes() -> void:
+	if _worn.is_empty():
+		return
+	_wearCooldownUntil = Time.get_ticks_msec() + 2500
+	var lost := ""
+	for slot in _worn.keys():
+		if slot == "eyes" and randf() < 0.5:
+			continue # очки сидят плотнее шляпы - слетают через раз
+		var w: Dictionary = _worn[slot]
+		var sprite: Sprite2D = w["sprite"]
+		var pos: Vector2 = sprite.global_position
+		sprite.queue_free()
+		_worn.erase(slot)
+		var scene: PackedScene = load(w["scene"]) if w["scene"] != "" else null
+		if scene:
+			var item = scene.instantiate()
+			get_tree().current_scene.add_child(item)
+			item.global_position = pos
+			item.set_meta("itemName", w["key"])
+			if item is RigidBody2D:
+				item.linear_velocity = Vector2(randf_range(-250.0, 250.0), randf_range(-450.0, -250.0))
+				item.angular_velocity = randf_range(-8.0, 8.0)
+		if lost == "":
+			lost = w["key"]
+	if lost != "":
+		_saySituational("clothesOff", lost)
+
+
+func _saySituational(category: String, key: String) -> void:
+	var desc: String = ITEM_DESCRIPTIONS.get(key, key)
+	_say(category, 0.0, true, CLOTHES_SITUATION[category] % desc, key)
+
+
+func _wornDescription() -> String:
+	var names: Array = []
+	for slot in _worn.keys():
+		names.append(ITEM_DESCRIPTIONS.get(_worn[slot]["key"], _worn[slot]["key"]))
+	return ", ".join(names)
 
 
 # ---------------- Фентанил ----------------
@@ -687,6 +785,7 @@ func shock() -> void:
 func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: float = 0.0) -> void:
 	_impactThisRagdoll = false
 	_impactPrevValid = false
+	ragdolled = true # заранее: урон ниже может вызвать goUnconscious(), а тот не должен запускать второе падение
 	if isHardFall and not isUnconscious and _spawnSettled and Time.get_ticks_msec() >= _spawnGraceUntil:
 		# Урон и обновление спрайтов - сразу в момент падения/удара, а не
 		# позже, когда персонаж уже встаёт и говорит. Раньше оба совпадали
@@ -699,6 +798,8 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		# Сбить с ног может и слабый толчок - урон только если удар
 		# дотягивает хотя бы до лёгкого порога.
 		var dmg: float = _damageForImpact(impactSpeed)
+		if impactSpeed >= KNOCKOFF_IMPACT:
+			_knockOffClothes()
 		if LLMManager.debugTags:
 			Console.print("[color=YELLOW]Сбита с ног: сила %.0f -> урон %.0f[/color]" % [impactSpeed, dmg])
 		if dmg > 0.0:
@@ -803,24 +904,65 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 			tempRagdoll(false, true)
 
 
-# periodically check for a nearby item worth commenting on - runs on its
-# own faster cadence, independent of the slower mood-based passivetalk loop
+## Реакции на предметы рядом - "динамические", как экранные: каждый раз
+## живой запрос к ИИ без заготовленного пула. Свой цикл, но с теми же
+## интервалами, что у обычных фраз (minDialogueTime/maxDialogueTime).
+## Один и тот же предмет комментируется не чаще раза в ITEM_REPEAT_MS.
+##
+## Почему раньше крашилось: вкладка Items записывала в предмет meta
+## "itemName" не имя, а служебный объект ItemEntry, а этот код читал его
+## в переменную типа String. Теперь предмет опознаётся по имени его файла
+## сцены (burger.tscn -> "burger"), meta вообще не нужна.
+const ITEM_NEAR_DISTANCE := 600.0 # пикс экрана при petSize 4 - что считается "рядом"
+const ITEM_REPEAT_MS := 300000
+var _itemCommentedAt: Dictionary = {} # имя предмета -> когда последний раз комментировали
+
 func itemWatch() -> void:
-	# ВРЕМЕННО ОТКЛЮЧЕНО: реакции на предметы стабильно вызывали зависание ПК
-	# при поднятии предмета мышкой. Логика оставлена нетронутой ниже на случай,
-	# если понадобится включить обратно - просто убери "return" и комментарии.
-	return
-	while true:
-		await get_tree().create_timer(randf_range(12.0, 20.0)).timeout
-		if beingDragged or isSleeping or shocked:
+	while get_tree():
+		var minT := float(GlobalVariable.getNumFromString(str(gbData.settings.get("minDialogueTime", "30"))))
+		var maxT := float(GlobalVariable.getNumFromString(str(gbData.settings.get("maxDialogueTime", "65"))))
+		await get_tree().create_timer(randf_range(minT, maxf(minT, maxT))).timeout
+		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
 			continue
-		if not gbData.settings.get("llmVisionEnabled", false):
+		if beingDragged or isSleeping or shocked or isUnconscious or ragdolled:
 			continue
-		var itemDesc := _getNearbyItemDescription()
-		if itemDesc == "":
+		var key := _getNearbyItemKey()
+		if key == "":
 			continue
-		if randf() < 0.6:
-			LLMManager.reactToEvent("Ты замечаешь рядом с собой предмет: " + itemDesc + ". Прокомментируй его в своём духе - одной фразой.", func(text): _queueMessage(text, 1.0), "item")
+		var now := Time.get_ticks_msec()
+		if now - int(_itemCommentedAt.get(key, -ITEM_REPEAT_MS)) < ITEM_REPEAT_MS:
+			continue
+		_itemCommentedAt[key] = now
+		var extra := ""
+		if hungerHandler.hungry < 30.0 and _isFoodKey(key):
+			extra = "\nТы голодна."
+		LLMManager.requestItemReaction(_skinTag(), ITEM_DESCRIPTIONS[key], _aiStateHint() + extra, _on_state_reaction)
+
+
+## Имя предмета по файлу его сцены ("res://scenes/objects/burger.tscn" -> "burger").
+func _itemKey(body: Node) -> String:
+	if body.scene_file_path != "":
+		return body.scene_file_path.get_file().get_basename()
+	var meta = body.get_meta("itemName", "")
+	return meta if meta is String else ""
+
+
+func _isFoodKey(key: String) -> bool:
+	return key in ["bread", "pizzaslice", "burger", "banana", "juicedobry", "geofruit", "yellowflesh"]
+
+
+## Состояние персонажа для ИИ-реакций (предметы, экран): настроение,
+## здоровье и степень фентанилового опьянения/ломки.
+func _drugLevel() -> int:
+	if _isHigh():
+		return 2 if moodSys.drugOffset > 30.0 else 1
+	if _inWithdrawal():
+		return -1
+	return 0
+
+
+func _aiStateHint() -> String:
+	return LLMManager.stateHint(moodSys.mood + moodSys.drugOffset, healthHandler.health, _drugLevel())
 
 
 # periodically send a message based on mood
@@ -860,6 +1002,8 @@ func passivetalk() -> void:
 						statLine += ", ты под действием фентанила - тебе слишком хорошо и всё плывёт"
 					elif _inWithdrawal():
 						statLine += ", у тебя ломка - тебе плохо без фентанила"
+					if not _worn.is_empty():
+						statLine += ", на тебе надето: " + _wornDescription()
 					var examples: Array = _pickExamples(dialogueSys.pool.duplicate(), 10)
 					LLMManager.requestStateReaction(statLine, examples, _on_state_reaction, _skinTag() + ":state")
 				else:
@@ -892,34 +1036,44 @@ const LOUD_CATEGORIES := ["getUp", "getUpPet", "fell", "screamBIG", "LightDamage
 ## Maps a spawned item's "itemName" meta to a human description for the AI.
 ## To support a new item, just add one line here - nothing else needs to
 ## change, no matter how many items exist.
+## Ключ - имя файла сцены предмета в scenes/objects/ (без .tscn).
 const ITEM_DESCRIPTIONS := {
-	"bread": "хлеб",
-	"containercrate": "обычный ящик с припасами",
-	"geofruit": "странный минеральный фрукт, наполовину похожий на камень",
+	"bandage": "бинт",
+	"syringe": "шприц с красным лекарством, который лечит",
+	"medkit": "аптечка",
 	"medcrate": "медицинский ящик с аптечкой",
+	"bread": "хлеб",
 	"pizzaslice": "кусок пиццы",
-	"sawblade": "ржавое лезвие циркулярной пилы",
+	"burger": "бургер",
+	"banana": "банан",
+	"juicedobry": "пакет яблочного сока 'Добрый'",
+	"geofruit": "странный минеральный фрукт, наполовину похожий на камень",
 	"yellowflesh": "кусок жёлтой плоти непонятного происхождения",
+	"containercrate": "обычный ящик с припасами",
+	"sawblade": "ржавое лезвие циркулярной пилы",
+	"fentanyl": "шприц с сине-белой жидкостью - фентанил",
+	"chair": "деревянный стул",
+	"nightstand": "прикроватная тумбочка с ящиками",
+	"hat": "шляпа",
+	"cap": "кепка",
+	"glasses": "прозрачные очки",
 }
 
-## Finds the closest known item currently in the pet's detection radius and
-## returns its description, or "" if nothing recognized is nearby.
-func _getNearbyItemDescription() -> String:
-	var closestBody: Node2D = null
-	var closestDist := INF
+## Ближайший знакомый предмет в радиусе ITEM_NEAR_DISTANCE, или "".
+func _getNearbyItemKey() -> String:
+	var bestKey := ""
+	var bestDist: float = ITEM_NEAR_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
 	for body in detectRange.inRadius.keys():
 		if not is_instance_valid(body):
 			continue
-		var itemName: String = body.get_meta("itemName", "")
-		if not ITEM_DESCRIPTIONS.has(itemName):
+		var key := _itemKey(body)
+		if not ITEM_DESCRIPTIONS.has(key):
 			continue
-		var d: float = moveSys.rigid.global_position.distance_to(body.global_position)
-		if d < closestDist:
-			closestDist = d
-			closestBody = body
-	if closestBody == null:
-		return ""
-	return ITEM_DESCRIPTIONS[closestBody.get_meta("itemName")]
+		var d: float = moveSys.rigidtorso.global_position.distance_to(body.global_position)
+		if d < bestDist:
+			bestDist = d
+			bestKey = key
+	return bestKey
 
 ## Categories that are a reaction to something sudden happening right now -
 ## they should jump straight to the front of the display queue instead of
@@ -1129,7 +1283,9 @@ func _skinTag() -> String:
 var voiceSet: Dictionary = {}
 
 
-func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true) -> void:
+## situationOverride/poolSuffix - для событий с конкретным предметом
+## (одежда): своя ситуация и отдельный пул "Скин:категория:предмет".
+func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true, situationOverride: String = "", poolSuffix: String = "") -> void:
 	if isUnconscious:
 		return # 0 хп - персонаж без сознания, молчит до перезапуска приложения
 	if not ignoreCooldown and cooldown > 0.0:
@@ -1148,38 +1304,139 @@ func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true) 
 			styleHint = "Ситуация громкая и напряжённая, но сама фраза должна быть простой и сдержанной - обычные слова, без надрыва в формулировке. Громкость передавай только тем, что одно слово можно выделить ЗАГЛАВНЫМИ буквами - не всю фразу и не усложняй саму мысль."
 		var urgent: bool = category in URGENT_CATEGORIES
 		var tag: String = CATEGORY_DISPLAY_TAG.get(category, "")
-		var situation: String = CATEGORY_SITUATION.get(category, "")
+		var situation: String = situationOverride if situationOverride != "" else CATEGORY_SITUATION.get(category, "")
+		var poolKey := _skinTag() + ":" + category + ((":" + poolSuffix) if poolSuffix != "" else "")
 		# Пул прогрева ключуется по "Скин:категория" - иначе разные персонажи
 		# (когда их станет больше одного) делили бы один и тот же пул и
 		# путались бы в стиле друг друга.
-		LLMManager.requestPooledReaction(_skinTag() + ":" + category, examples, func(text): _queueMessage(tag + text, speed, urgent), styleHint, situation)
+		LLMManager.requestPooledReaction(poolKey, examples, func(text): _queueMessage(tag + text, speed, urgent), styleHint, situation)
 	else:
 		dialogueSys.send(cooldown, ignoreCooldown)
 	
+## Прогулки. Раньше: раз в 4-8 сек случайный рывок на 0.5-2 сек. Теперь
+## персонаж выбирает ЦЕЛЬ и идёт к ней, а выбор зависит от состояния:
+## голодна - к еде рядом, хорошее настроение - подойти к курсору,
+## любопытство - к интересному предмету, иначе - в случайную точку экрана.
+## Уставшая/грустная чаще стоит и ходит медленнее, под фентанилом -
+## короткими неуверенными отрезками.
+var _baseMaxSpeed := -1.0
+
 func wandering() -> void:
 	while get_tree():
-		if wander:
-			var restChance = randi_range(1, 22)
-			if restChance == 1: moveSys.initswithc(moveSys.states.resting)
-			await get_tree().create_timer(randi_range(4, 8)).timeout
-
-			var center = GlobalVariable.screenWidth / 2.0
-			var ex = moveSys.rigid.global_position.x
-			var offset = ex - center
-			var th = GlobalVariable.screenWidth * 0.25
-
-			if offset > th:
-				moveSys.dir = -1
-			elif offset < -th:
-				moveSys.dir = 1
-			else:
-				moveSys.dir = randi_range(-1, 1)
-
-			await get_tree().create_timer(randf_range(.5, 2.0)).timeout
-			
+		if not wander or ragdolled or isSleeping or isUnconscious or beingDragged:
 			moveSys.dir = 0
-		else:
-			await get_tree().create_timer(randi_range(4, 8)).timeout
+			await get_tree().create_timer(1.0).timeout
+			continue
+
+		# пауза между прогулками
+		var pause := randf_range(2.0, 6.0)
+		if isTired or isSad:
+			pause *= 1.8
+		await get_tree().create_timer(pause).timeout
+		if not wander or ragdolled or isSleeping or isUnconscious or beingDragged:
+			continue
+
+		var restChance := 0.06
+		if isTired:
+			restChance = 0.3
+		if randf() < restChance:
+			moveSys.initswithc(moveSys.states.resting) # присесть/прилечь (сам встанет через 2-3 мин)
+			continue
+
+		if randf() < (0.35 if isSad else 0.15):
+			continue # просто постоять
+
+		await _walkTo(_pickWalkTarget())
+
+
+func _pickWalkTarget() -> float:
+	var w := float(GlobalVariable.screenWidth)
+	var x: float = moveSys.rigid.global_position.x
+	var margin := w * 0.06
+
+	# голодна - к ближайшей еде
+	if hungerHandler.hungry < 30.0 and randf() < 0.7:
+		var food := _nearestBody(func(body, key): return _isFoodKey(key))
+		if food:
+			return food.global_position.x
+	# хорошее настроение - подойти к человеку (курсору), но не вплотную
+	var mood: float = moodSys.mood + moodSys.drugOffset
+	if mood > 30.0 and randf() < 0.25:
+		var mx: float = moveSys.rigid.get_global_mouse_position().x
+		if mx > margin and mx < w - margin:
+			return mx - signf(mx - x) * 120.0
+	# любопытство - к интересному предмету
+	if randf() < 0.2:
+		var thing := _nearestBody(func(body, key): return ITEM_DESCRIPTIONS.has(key))
+		if thing:
+			return thing.global_position.x + randf_range(-60.0, 60.0)
+	# случайная точка: от 150 до 700 пикс, у края - разворот к центру
+	var dist := randf_range(150.0, 700.0)
+	var dir := -1.0 if randf() < 0.5 else 1.0
+	if x < w * 0.25:
+		dir = 1.0
+	elif x > w * 0.75:
+		dir = -1.0
+	return clampf(x + dir * dist, margin, w - margin)
+
+
+func _nearestBody(filter: Callable) -> Node2D:
+	var best: Node2D = null
+	var bestDist := INF
+	for body in detectRange.inRadius.keys():
+		if not is_instance_valid(body):
+			continue
+		var key := _itemKey(body)
+		if not filter.call(body, key):
+			continue
+		var d: float = absf(body.global_position.x - moveSys.rigid.global_position.x)
+		if d < bestDist:
+			bestDist = d
+			best = body
+	return best
+
+
+func _walkTo(targetX: float) -> void:
+	if _baseMaxSpeed < 0.0:
+		_baseMaxSpeed = moveSys.maxspeed
+	var speedMul := 1.0
+	if isTired:
+		speedMul = 0.7
+	elif isSad:
+		speedMul = 0.8
+	elif moodSys.mood > 50.0:
+		speedMul = 1.15
+	var high := _isHigh()
+	if high:
+		speedMul *= 0.6
+	moveSys.maxspeed = _baseMaxSpeed * speedMul
+
+	var startX: float = moveSys.rigid.global_position.x
+	var timeLimit := absf(targetX - startX) / maxf(60.0, moveSys.maxspeed * 0.6) + 3.0
+	var t := 0.0
+	var lastX := startX
+	var stuckFor := 0.0
+	while t < timeLimit:
+		if not wander or ragdolled or isSleeping or isUnconscious or beingDragged:
+			break
+		var x: float = moveSys.rigid.global_position.x
+		var dx := targetX - x
+		if absf(dx) < 25.0:
+			break
+		moveSys.dir = signf(dx)
+		# под фентанилом - заплетающиеся ноги: внезапные остановки
+		if high and randf() < 0.08:
+			moveSys.dir = 0
+			await get_tree().create_timer(randf_range(0.4, 1.2)).timeout
+		await get_tree().create_timer(0.1).timeout
+		t += 0.1
+		# упёрлась (в стену, ящик, который не перепрыгнуть) - сдаёмся
+		stuckFor = stuckFor + 0.1 if absf(moveSys.rigid.global_position.x - lastX) < 1.0 else 0.0
+		lastX = moveSys.rigid.global_position.x
+		if stuckFor > 1.5:
+			break
+	moveSys.dir = 0
+	moveSys.maxspeed = _baseMaxSpeed
 
 func petReject() -> void:
 	dialogueSys.speedMod = 1.2

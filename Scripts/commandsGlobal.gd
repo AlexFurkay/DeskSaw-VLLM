@@ -82,7 +82,7 @@ func _additem(item: String = "containercrate"):
 func _cmd_petSize(value: float) -> void:
 	gbData.settings["petScale"] = value
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
-	Console.print("Размер новых питомцев: [color=CYAN]%s[/color] (заспавни нового, чтобы увидеть - на уже существующих не действует)" % value)
+	Console.print("Размер новых питомцев и предметов: [color=CYAN]%s[/color] (заспавни новых, чтобы увидеть - на уже существующих не действует)" % value)
 
 
 func _cmd_despawnPet() -> void:

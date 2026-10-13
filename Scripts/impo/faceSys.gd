@@ -87,6 +87,11 @@ func _ready() -> void:
 func setEmotion(emotion: String):
 	if !eyes.has(emotion):
 		return
+	# Без сознания глаза закрыты насовсем - отложенные таймеры испуга
+	# (shock: panic -> scared -> sad) и поглаживания (через 5 сек "normal")
+	# раньше открывали их обратно уже после отключки.
+	if get_parent().isUnconscious and emotion != "sleep":
+		return
 
 	currentEmotion = emotion
 	setEyeTexture(eyes[emotion]["open"])

@@ -81,7 +81,7 @@ func _on_item_button_press(item: ItemEntry) -> void:
 	get_tree().current_scene.add_child(instance)
 	instance.global_position = instance.get_global_mouse_position()
 	instance.owner = get_tree().current_scene
-	instance.set_meta("itemName", item)
+	instance.set_meta("itemName", item.name) # было item (объект ItemEntry) - код, ждущий строку, на этом падал
 
 ## Recalculate item list columns using our root width
 func _recalculate_columns() -> void:

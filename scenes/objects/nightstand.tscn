@@ -6,10 +6,10 @@
 [ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_pr"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_det"]
-size = Vector2(80, 76)
+size = Vector2(144, 136)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_col"]
-size = Vector2(64, 60)
+size = Vector2(128, 120)
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_ol"]
 shader = ExtResource("1_sh")
@@ -35,7 +35,7 @@ shape = SubResource("RectangleShape2D_det")
 [node name="Sprite" type="Sprite2D" parent="."]
 texture_filter = 1
 material = SubResource("ShaderMaterial_ol")
-scale = Vector2(4, 4)
+scale = Vector2(8, 8)
 texture = ExtResource("2_tx")
 
 [node name="Collision" type="CollisionShape2D" parent="."]

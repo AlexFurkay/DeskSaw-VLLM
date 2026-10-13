@@ -34,6 +34,8 @@ func _regenLoop() -> void:
 		await get_tree().create_timer(10.0).timeout
 		if gbData.settings.get("invincible", false):
 			continue
+		if get_parent().isUnconscious:
+			continue # без сознания (0 ХП или передозировка) - само не лечится, это до перезапуска
 		if health < maxhealth:
 			health = clamp(health + 0.6, minhealth, maxhealth)
 			pet.health = health

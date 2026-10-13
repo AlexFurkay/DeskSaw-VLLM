@@ -37,6 +37,7 @@ var creativity := 0.8    # was "temperature" - higher = more random/wild answers
 ## read them to let bad mood/low health quietly colour the tone.
 var lastKnownMood: float = 50.0
 var lastKnownHealth: float = 100.0
+var lastKnownDrugLevel: int = 0 # 0 - трезвая, 1 - лёгкий приход, 2 - сильный, -1 - ломка (см. behavior._drugLevel)
 var repetitionGuard := 1.2 # was "repeat_penalty" - higher = less likely to repeat the same words/phrases
 var minScreenInterval := 30.0
 var maxScreenInterval := 60.0
@@ -439,12 +440,31 @@ func _pickScreenAngle() -> String:
 ## настроение, тем сильнее это должно просачиваться в тон, не перекрывая
 ## собой саму реакцию на экран. Пороги - грубая прикидка, баланс потом.
 func _screenMoodHealthHint() -> String:
+	return stateHint(lastKnownMood, lastKnownHealth, lastKnownDrugLevel)
+
+
+## Общая подсказка состояния для динамических реакций (экран, предметы):
+## настроение/здоровье + фентанил. Опьянение и ломка перекрашивают тон
+## поверх обычного настроения.
+func stateHint(mood: float, health: float, drugLevel: int) -> String:
+	var drug := ""
+	match drugLevel:
+		1:
+			drug = "\nТы сейчас под фентанилом - лёгкий приход: тебе тепло и спокойно, мысли чуть плывут, это слегка слышно в реакции."
+		2:
+			drug = "\nТы сейчас сильно под фентанилом - тебя накрыло: мысли плывут и путаются, тебе слишком хорошо, реакция заторможенная и мечтательная."
+		-1:
+			drug = "\nУ тебя ломка без фентанила - тебя знобит, всё ломит и раздражает, это сквозит в реакции."
+	return _moodHealthHint(mood, health) + drug
+
+
+func _moodHealthHint(mood: float, health: float) -> String:
 	var severity := 0
-	if lastKnownHealth <= 15.0 or lastKnownMood <= -60.0:
+	if health <= 15.0 or mood <= -60.0:
 		severity = 3
-	elif lastKnownHealth <= 40.0 or lastKnownMood <= -30.0:
+	elif health <= 40.0 or mood <= -30.0:
 		severity = 2
-	elif lastKnownHealth <= 70.0 or lastKnownMood <= -10.0:
+	elif health <= 70.0 or mood <= -10.0:
 		severity = 1
 
 	match severity:
@@ -480,6 +500,29 @@ func reactToEvent(eventDescription: String, callback: Callable = Callable(), tag
 	if not cb.is_valid():
 		cb = func(text): llmReaction.emit(text)
 	_enqueue(prompt, [], cb, tag)
+
+
+## Реакция на предмет рядом (behavior.itemWatch). Как и экранные - живой
+## запрос без пула, со случайным "углом", чтобы не звучать одинаково.
+const ITEM_ANGLES := [
+	"оцени, пригодится ли он тебе.",
+	"скажи, что бы ты с ним сделала.",
+	"подколи человека за то, что он оставил это рядом с тобой.",
+	"вырази желание или отвращение.",
+	"вспомни, что он тебе напоминает.",
+	"пошути над ним в своём стиле.",
+]
+
+func requestItemReaction(skinTag: String, itemDescription: String, stateHintText: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var tag := skinTag + ":item"
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\nРядом с тобой на рабочем столе лежит предмет: " + itemDescription + ". Отреагируй на него одной фразой как живой персонаж - не описывай предмет, а вырази своё отношение к нему. Скажи это как утверждение или восклицание."
+	prompt += "\nПодход к реакции на этот раз: " + ITEM_ANGLES[randi() % ITEM_ANGLES.size()]
+	if stateHintText != "":
+		prompt += "\n" + stateHintText.strip_edges()
+	_enqueue(prompt, [], callback, tag)
 
 
 ## Called from a specific pet's passivetalk() loop. Result delivered ONLY to
