@@ -371,7 +371,8 @@ func _initalSpawn() -> void:
 	hungerHandler.loadFromSave(petId)
 	healthHandler.loadFromSave(petId)
 	sleepHandler.loadFromSave(petId)
-	addiction = float(gbData.data["saw"][petId].get("addiction", 0.0))
+	# зависимость от фентанила живёт только в пределах одного запуска
+	gbData.data["saw"][petId].erase("addiction") # старое поле из 051 - убираем из сейва
 
 
 	tempRagdoll()
@@ -572,7 +573,7 @@ func _registerImpact(speed: float) -> void:
 
 # ---------------- Фентанил ----------------
 ## Доза: сильный, но временный подъём настроения, после него - спад ниже
-## исходного. Каждая доза добавляет зависимость (сохраняется в SAVE.json),
+## исходного. Каждая доза добавляет зависимость (только на этот запуск),
 ## с ней следующие дозы действуют слабее, а без новой дозы начинается
 ## ломка. OVERDOSE_DOSES доз подряд (каждая в пределах DOSE_CHAIN_MS от
 ## предыдущей) - передозировка, отключка как при 0 ХП. Все числа -
@@ -619,14 +620,8 @@ func takeFentanyl() -> void:
 	var boost: float = HIGH_BOOST / (1.0 + addiction / 40.0)
 	moodSys.startDrugHigh(boost, HIGH_DURATION_SEC, boost * COMEDOWN_FRACTION)
 	addiction = minf(100.0, addiction + ADDICTION_PER_DOSE)
-	_saveAddiction()
 	dialogueSys.speedMod = 0.8
 	_say("fentanyl")
-
-
-func _saveAddiction() -> void:
-	if gbData.data["saw"].has(petId):
-		gbData.data["saw"][petId]["addiction"] = addiction
 
 
 ## Раз в 30 сек: зависимость понемногу спадает сама, а в ломке настроение
@@ -638,7 +633,6 @@ func drugLoop() -> void:
 			continue
 		if addiction > 0.0:
 			addiction = maxf(0.0, addiction - ADDICTION_DECAY_PER_MIN * 0.5)
-			_saveAddiction()
 		if not _inWithdrawal():
 			continue
 		moodSys.mood = clampf(moodSys.mood - addiction * 0.02, moodSys.minmood, moodSys.maxmood)

@@ -300,9 +300,19 @@ func _looksLikeRoleInversion(category: String, text: String) -> bool:
 
 ## Shared "is this basically the same line as one already in `others`" check -
 ## exact match, or same first 3 words (same tired opener, e.g. "Ты снова...").
+## Слова без знаков препинания - иначе "продолжать," и "продолжать"
+## считались разными словами, и фразы с одинаковым началом проскакивали.
+const _WORD_PUNCT := [".", ",", "!", "?", "…", ";", ":", "\"", "'", "«", "»", "(", ")", "—", "–", "-", "*"]
+func _normWords(text: String) -> PackedStringArray:
+	var s := text.to_lower()
+	for p in _WORD_PUNCT:
+		s = s.replace(p, " ")
+	return s.split(" ", false)
+
+
 func _isFuzzyDuplicateOf(text: String, others: Array) -> bool:
 	var lowerText := text.to_lower().strip_edges()
-	var wordsNew := lowerText.split(" ", false)
+	var wordsNew := _normWords(text)
 	var setNew := {}
 	for w in wordsNew:
 		setNew[w] = true
@@ -310,7 +320,7 @@ func _isFuzzyDuplicateOf(text: String, others: Array) -> bool:
 		var lowerOld := String(other).to_lower().strip_edges()
 		if lowerText == lowerOld:
 			return true
-		var wordsOld := lowerOld.split(" ", false)
+		var wordsOld := _normWords(lowerOld)
 		if wordsNew.size() >= 3 and wordsOld.size() >= 3 and wordsNew[0] == wordsOld[0] and wordsNew[1] == wordsOld[1] and wordsNew[2] == wordsOld[2]:
 			return true
 		# Word-overlap check (Jaccard-ish) - catches "Ночь - лучшее время для
@@ -1184,10 +1194,24 @@ func listAvailableModels() -> void:
 		http.queue_free()
 
 
+## Подобранные вручную настройки под конкретные модели: [креативность,
+## защита от повторов]. При переключении модели (aiModel) применяются сами.
+## Для модели не из списка текущие значения не трогаем.
+const MODEL_PRESETS := {
+	"qwen3-vl:8b-instruct": [0.8, 1.2],
+	"ministral-3:14b": [0.6, 1.1],
+}
+
 func setModel(name: String) -> void:
 	name = name.strip_edges() # в конфиге уже находили "ministral-3:14b\n"
 	modelName = name
 	gbData.settings["llmModelName"] = modelName
+	if MODEL_PRESETS.has(name):
+		creativity = MODEL_PRESETS[name][0]
+		repetitionGuard = MODEL_PRESETS[name][1]
+		gbData.settings["llmCreativity"] = creativity
+		gbData.settings["llmRepetitionGuard"] = repetitionGuard
+		Console.print("Настройки под модель: креативность [color=CYAN]%s[/color], защита от повторов [color=CYAN]%s[/color]" % [creativity, repetitionGuard])
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
 	# Раньше тут был _clearPrefetchPools() - специально убрал: часть тестеров
 	# и разработчик хотят прогреть пулы на одной модели, потом переключиться
