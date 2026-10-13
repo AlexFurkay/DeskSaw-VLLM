@@ -26,7 +26,7 @@ signal prewarmBatchFinished()
 const OLLAMA_URL := "http://127.0.0.1:11434/api/generate" # NOT "localhost" - on some Windows setups (VPN software installed even if inactive, IPv6/DNS quirks) resolving "localhost" can add seconds of delay per request; the literal loopback IP skips DNS resolution entirely
 
 var modelName := "qwen3-vl:8b-instruct"
-var creativity := 1.0    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
+var creativity := 0.9    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
 
 ## _on_screen_tick() runs on its own, independent of any specific pet, so it
 ## has no direct line to a pet's mood/health. behavior.gd/health_handler.gd

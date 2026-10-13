@@ -46,6 +46,16 @@ var ragdolled := false
 
 var launchflag := false
 
+## Момент (Time.get_ticks_msec()), до которого подавляются урон/испуг от
+## падений и бросков - только чтобы не пугать и не бить персонажа в самый
+## первый кадр после спавна (ложное "падение" из-за физики затухания при
+## появлении). Раньше для этого использовался launchflag, но он же блокировал
+## АБСОЛЮТНО ЛЮБОЙ урон до первого завершённого цикла "встал" - то есть если
+## бросить свежеспавненного питомца об стену сразу же, урон не засчитывался
+## вообще, пока он хоть раз не поднимется сам. launchflag теперь используется
+## только для выбора реплики при подъёме (см. tempRagdoll), а не для урона.
+var _spawnGraceUntil: int = 0
+
 
 var wander := true
 
@@ -133,6 +143,7 @@ func _ready() -> void:
 	"""
 
 		#setup For spawn
+	_spawnGraceUntil = Time.get_ticks_msec() + 2000 # 2 сек. неприкосновенности сразу после спавна
 	_initalSpawn()
 	LLMManager.llmReaction.connect(_on_llm_reaction)
 	LLMManager.aiEnabledChanged.connect(func(enabled): if enabled: _prewarmMyCategories())
@@ -409,15 +420,34 @@ func _physics_process(_delta: float) -> void:
 	if ragdolled:
 		moveSys.dir = 0
 
+## Вызывается из dragExp.gd в момент отпускания ПКМ (конец захвата мышкой).
+## Раньше бросок мышкой НИКОГДА не наносил урона: сам захват уже переводит
+## ragdolled в true через tempRagdoll(false) выше (см. beingDragged в
+## условии), а _physics_process заново проверяет силу удара только когда
+## "not ragdolled" - то есть пока персонаж всё ещё находится в том же цикле
+## ragdoll (захват -> полёт после броска -> приземление -> подъём), момент
+## настоящего броска никогда повторно не оценивался как удар. Здесь мы
+## отдельно проверяем скорость именно в момент отпускания.
+func registerThrowImpact(releaseVelocity: Vector2) -> void:
+	if isUnconscious:
+		return
+	if releaseVelocity.length() <= moveSys.ragdollspeed:
+		return
+	if Time.get_ticks_msec() < _spawnGraceUntil:
+		return
+	healthHandler.applyDamage(15.0) # тот же плейсхолдер, что и для обычного жёсткого падения
+	if not shocked:
+		shock()
+
 
 """
 
-green because it needs to catch my attention 
+green because it needs to catch my attention
 PLEASE FUCKING RECODE BOTH OF THESE
 
 """
 func shock() -> void:
-	if isUnconscious or beingDragged or not launchflag:
+	if isUnconscious or beingDragged or Time.get_ticks_msec() < _spawnGraceUntil:
 		return # screamBIG - только настоящий удар/падение, не обычное хватание мышкой и не самый первый спавн
 	shocked = true
 	moodSys._tempVal(-5.0, 15)
@@ -437,11 +467,15 @@ func shock() -> void:
 	shocked = false
 
 func tempRagdoll(isHardFall: bool = false, silent: bool = false) -> void:
-	if isHardFall and launchflag:
+	if isHardFall and not isUnconscious and Time.get_ticks_msec() >= _spawnGraceUntil:
 		# Урон и обновление спрайтов - сразу в момент падения/удара, а не
 		# позже, когда персонаж уже встаёт и говорит. Раньше оба совпадали
 		# по времени с репликой, что на глаз незаметно для одних лишь цифр
 		# ХП, но было бы явно видно на уровне смены спрайтов тела.
+		# ВАЖНО: раньше тут стояла проверка launchflag, а не грейс-период -
+		# из-за этого урон не засчитывался вообще ни разу, пока персонаж не
+		# завершит хотя бы один цикл "встал" после спавна (launchflag
+		# становился true только в конце этой же функции).
 		healthHandler.applyDamage(15.0) # плейсхолдер, баланс потом
 	moveSys.ragdoll(false)
 	ragdolled = true

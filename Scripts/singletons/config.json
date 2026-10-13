@@ -8,15 +8,15 @@
 		"x2": 0.0
 	},
 	"expieDialogueSize": 7.0,
-	"minDialogueTime": 40.0,
-	"maxDialogueTime": 80.0,
+	"minDialogueTime": "30.0",
+	"maxDialogueTime": "65.0",
 	"minMood": -100.0,
 	"maxMood": 100.0,
 	"hungerDecayRate": 0.1,
 	"invincible": false,
 	"deathEnabled": false,
 	"pixel": false,
-	"lobotomize": true,
+	"lobotomize": false,
 	"expiePersistence": false,
 	"mute": false,
 	"mutePassive": false,
@@ -39,7 +39,7 @@
 	"llmVisionEnabled": true,
 	"llmAllowProfanity": false,
 	"llmFlirtEnabled": false,
-	"llmCreativity": 1.0,
+	"llmCreativity": 0.9,
 	"llmRepetitionGuard": 1.2,
 	"petScale": 4.0
 }

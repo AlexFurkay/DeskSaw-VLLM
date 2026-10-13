@@ -60,10 +60,20 @@ func _headTextureFor(key: String) -> String:
 			return candidate
 	return base # для этого конкретного кадра рта травма ещё не нарисована - остаёмся на здоровом, лучше так, чем ничего не показать
 
+## ВАЖНО: проверяем реальное наличие файла в папке активного скина напрямую
+## (как и body-часть системы травм в behavior.gd::_loadInjuryTex()), а НЕ
+## через loadedspritesData.alltextures - тот список строится по resPath
+## (папке ДЕФОЛТНОГО скина Body), а не по userSkinPath (папке активного
+## кастомного скина). У Body файлов травм нет вообще, поэтому проверка через
+## alltextures проваливалась всегда, даже когда файл реально существовал
+## у VoyagerAlt - рот поэтому падал на здоровый вид именно во время речи.
 func _hasTexture(texture_name: String) -> bool:
-	for entry in loadedspritesData.alltextures:
-		if entry["name"] == texture_name:
-			return true
+	if loadedspritesData == null:
+		return false
+	if FileAccess.file_exists(loadedspritesData.userSkinPath + texture_name):
+		return true
+	if loadedspritesData.userSkinPath != loadedspritesData.resPath:
+		return FileAccess.file_exists(loadedspritesData.resPath + texture_name)
 	return false
 
 func _ready() -> void:
@@ -82,18 +92,25 @@ func setEmotion(emotion: String):
 	setEyeTexture(eyes[emotion]["open"])
 
 
+## ВАЖНО: грузим текстуру напрямую из папки активного скина, а не через
+## loadedspritesData.alltextures - тот список ограничен именами файлов из
+## resPath (папка ДЕФОЛТНОГО скина Body), поэтому файлы, которых у Body
+## просто нет (например кадры анимации рта у кастомных скинов), никогда не
+## находились вообще, даже если реально существуют у активного скина.
 func setHeadTexture(texture_name: String):
-	for entry in loadedspritesData.alltextures:
-		if entry["name"] == texture_name:
-			headNode.texture = entry["texture"]
-			return
+	var tex = loadedspritesData.loadUserTex(loadedspritesData.userSkinPath + texture_name)
+	if tex == null and loadedspritesData.userSkinPath != loadedspritesData.resPath:
+		tex = loadedspritesData.loadUserTex(loadedspritesData.resPath + texture_name)
+	if tex:
+		headNode.texture = tex
 
 
 func setEyeTexture(texture_name: String):
-	for entry in loadedspritesData.alltextures:
-		if entry["name"] == texture_name:
-			eyeNode.texture = entry["texture"]
-			return
+	var tex = loadedspritesData.loadUserTex(loadedspritesData.userSkinPath + texture_name)
+	if tex == null and loadedspritesData.userSkinPath != loadedspritesData.resPath:
+		tex = loadedspritesData.loadUserTex(loadedspritesData.resPath + texture_name)
+	if tex:
+		eyeNode.texture = tex
 
 
 func startTalking():

@@ -310,11 +310,21 @@ func _startDrag(body: RigidBody2D, mouse_pos: Vector2) -> void:
 
 
 func _stopDrag() -> void:
+	# считываем скорость ДО того, как _dragged_body обнулится - раньше
+	# отпускание мышкой (бросок) вообще никогда не наносило урона, потому что
+	# сам факт захвата уже переводил персонажа в ragdoll, и обычная проверка
+	# скорости в behaviornode._physics_process() больше не срабатывала повторно
+	# пока этот цикл ragdoll не закончится (см. registerThrowImpact в behavior.gd)
+	var released_velocity := Vector2.ZERO
+	if is_instance_valid(_dragged_body):
+		released_velocity = _dragged_body.linear_velocity
+
 	_dragging = false
 	_dragged_body = null
 
 	if behaviornode:
 		behaviornode.beingDragged = false
+		behaviornode.registerThrowImpact(released_velocity)
 
 	if is_instance_valid(_dragger):
 		_dragger.queue_free()

@@ -63,7 +63,7 @@ func moodCheck(delta: float = 1.0) -> float:
 	if gbData.devMode:
 		print(str("mood: ", clamp(mood + snappedf(tempOffset, 0.05), minmood, maxmood), "(temporary offset: ", snappedf(tempOffset, 0.05), ")"))
 		print(str("tick: ", calcmood(1.0)))
-	if gbData.settings.get("lobotomize", true):
+	if gbData.settings.get("lobotomize", false):
 		mood = 0.0
 
 	_sync_mood()
