@@ -39,7 +39,7 @@
 	"llmVisionEnabled": true,
 	"llmAllowProfanity": false,
 	"llmFlirtEnabled": false,
-	"llmCreativity": 0.9,
+	"llmCreativity": 0.8,
 	"llmRepetitionGuard": 1.2,
 	"petScale": 4.0
 }

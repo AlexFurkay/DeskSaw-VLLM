@@ -17,7 +17,11 @@ var healDb = false
 func loadFromSave(id: String) -> void:
 	petId = id
 	pet = gbData.data["saw"][petId]
-	health = pet.get("health", health)
+	# Каждый спавн/перезапуск - с полным здоровьем, а не с тем, что было
+	# сохранено. Иначе после "отключки" на 0 ХП персонаж загружался почти
+	# мёртвым и не мог встать, пока ХП не отрастёт выше 20.
+	health = maxhealth
+	pet.health = health
 	LLMManager.lastKnownHealth = health
 	_regenLoop()
 

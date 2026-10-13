@@ -308,12 +308,24 @@ func getDialogueForSkin(skinPath: String):
 		return dialogueCache[skinPath]
 	var merged = text.diaGlobal.duplicate(true)
 	var skinFile = skinPath + "TRANSLATION.json"
+	var skinName: String = skinPath.trim_suffix("/").get_file()
+
+	# Категории из зашитой в сборку версии скина (res://defaults/skins/<Имя>/) -
+	# _syncBundledSkins() не трогает уже существующую папку игрока, поэтому
+	# новые категории из обновления (например healed) иначе никогда бы до
+	# него не дошли. Файл игрока ниже всё равно перекрывает эти значения,
+	# так что его собственные правки сохраняются.
+	var bundledFile := "res://defaults/skins/%s/TRANSLATION.json" % skinName
+	if FileAccess.file_exists(bundledFile):
+		var bundledText = loadjson(bundledFile)
+		if bundledText is Dictionary and bundledText.get("diaGlobal") is Dictionary:
+			for key in bundledText["diaGlobal"]:
+				merged[key] = bundledText["diaGlobal"][key]
 
 	if not FileAccess.file_exists(skinFile):
 		# Миграция со старого плоского расположения (user://<имя>TRANSLATION.json) -
 		# на случай если игрок успел создать файл именно так до того, как
 		# перевод и лор объединили внутри самой папки скина.
-		var skinName: String = skinPath.trim_suffix("/").get_file()
 		var oldFlatFile := "user://%sTRANSLATION.json" % skinName.to_lower()
 		if FileAccess.file_exists(oldFlatFile):
 			var oldFile := FileAccess.open(oldFlatFile, FileAccess.READ)

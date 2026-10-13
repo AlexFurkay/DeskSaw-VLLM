@@ -22,11 +22,15 @@ extends Node
 signal llmReaction(text: String)
 signal aiEnabledChanged(enabled: bool)
 signal prewarmBatchFinished()
+## Все готовые пулы фраз сброшены (смена креативности/защиты от повторов,
+## reloadLore) - питомцы перезапускают прогрев, чтобы новые фразы были
+## сгенерированы уже с новыми настройками.
+signal poolsCleared()
 
 const OLLAMA_URL := "http://127.0.0.1:11434/api/generate" # NOT "localhost" - on some Windows setups (VPN software installed even if inactive, IPv6/DNS quirks) resolving "localhost" can add seconds of delay per request; the literal loopback IP skips DNS resolution entirely
 
 var modelName := "qwen3-vl:8b-instruct"
-var creativity := 0.9    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
+var creativity := 0.8    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
 
 ## _on_screen_tick() runs on its own, independent of any specific pet, so it
 ## has no direct line to a pet's mood/health. behavior.gd/health_handler.gd
@@ -101,7 +105,7 @@ func _ready() -> void:
 
 
 func _loadSavedSettings() -> void:
-	modelName = gbData.settings.get("llmModelName", modelName)
+	modelName = String(gbData.settings.get("llmModelName", modelName)).strip_edges()
 	creativity = gbData.settings.get("llmCreativity", creativity)
 	repetitionGuard = gbData.settings.get("llmRepetitionGuard", repetitionGuard)
 	minScreenInterval = gbData.settings.get("llmMinInterval", minScreenInterval)
@@ -172,6 +176,12 @@ func _createLoreTemplate(path: String, skinName: String) -> void:
 func _clearPrefetchPools() -> void:
 	_prefetchPools.clear()
 	_prefetchPending.clear()
+	# Ещё не отправленные пакеты прогрева тоже выкидываем - иначе после
+	# повторного прогрева одни и те же категории генерировались бы дважды,
+	# а счётчик "Прогрев: N/M" путался.
+	_backgroundQueue.clear()
+	_prewarmTotal = 0
+	_prewarmDone = 0
 
 
 ## Drops only the individual cached lines that actually contain profanity,
@@ -310,6 +320,7 @@ func reloadLore() -> void:
 	_loadLore()
 	_clearPrefetchPools() # old cached lines were written under the old lore
 	print("LLMManager: lore reloaded (", lore.length(), " chars)")
+	poolsCleared.emit()
 
 
 func _buildBasePrompt(category: String = "") -> String:
@@ -409,7 +420,11 @@ func reactToEvent(eventDescription: String, callback: Callable = Callable(), tag
 
 ## Called from a specific pet's passivetalk() loop. Result delivered ONLY to
 ## that pet via callback - not broadcast.
-const _PROFANITY_ROOTS := ["хуй", "хер", "ебат", "ёбан", "ебан", "заеб", "пизд", "бля", "сук", "мудак", "долбоёб", "гандон"]
+const _PROFANITY_ROOTS := ["хуй", "ебат", "ёбан", "ебан", "заеб", "пизд", "мудак", "долбоёб", "гандон", "нахер", "похер"]
+## Эти корни ищем только В НАЧАЛЕ слова: как простая подстрока они ловили
+## обычные слова ("корабля", "рубля", "барсук", "сукно") и молча
+## выкидывали нормальные примеры, когда мат выключен.
+var _profanityWordStart := RegEx.create_from_string("(?<![а-яёa-z])(бля|сук|хер)")
 
 ## Strips profane example lines before they ever reach the model - relying
 ## on a prompt instruction alone isn't enough, since a capable model will
@@ -434,7 +449,7 @@ func _containsProfanity(text: String) -> bool:
 	for root in _PROFANITY_ROOTS:
 		if lower.find(root) != -1:
 			return true
-	return false
+	return _profanityWordStart.search(lower) != null
 
 
 func _filterExamplesForProfanity(lines: Array) -> Array:
@@ -540,7 +555,7 @@ func _refillPool(category: String, exampleLines: Array, styleHint: String = "", 
 		# every example got filtered out (profanity) - still generate a
 		# batch, just without a style example to lean on.
 		prompt += "\nОриентируйся на характер персонажа."
-	prompt += "\nВыведи ровно %d строк, каждая - отдельная новая фраза в этом же духе." % PREFETCH_TARGET
+	prompt += "\nВыведи ровно %d строк, каждая - отдельная новая фраза в этом же духе." % target # было PREFETCH_TARGET (7) - противоречило "напиши 20" выше для pet и т.п.
 
 	_enqueue(prompt, [], func(rawText): _onPoolRefilled(category, rawText), "prefetch:" + category)
 
@@ -1068,10 +1083,15 @@ func setInterval(minSeconds: float, maxSeconds: float) -> void:
 
 
 ## Console command: aiCreativity <0.0-1.5>
+## Креативность влияет только на НОВЫЕ запросы к модели - а большая часть
+## фраз берётся из заранее нагенерированных пулов (до 20 штук на категорию).
+## Без сброса пулов после смены значения ещё долго показывались старые
+## фразы, и казалось, что настройка вообще ни на что не влияет.
 func setCreativity(value: float) -> void:
 	creativity = clampf(value, 0.0, 1.5)
 	gbData.settings["llmCreativity"] = creativity
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	_resetPoolsForNewSettings()
 
 
 ## Console command: aiRepetitionGuard <1.0-2.0>
@@ -1079,6 +1099,13 @@ func setRepetitionGuard(value: float) -> void:
 	repetitionGuard = clampf(value, 1.0, 2.0)
 	gbData.settings["llmRepetitionGuard"] = repetitionGuard
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	_resetPoolsForNewSettings()
+
+
+func _resetPoolsForNewSettings() -> void:
+	_clearPrefetchPools()
+	Console.print("[color=CYAN]Готовые фразы сброшены - ИИ сгенерирует новые уже с новыми настройками (1-2 минуты).[/color]")
+	poolsCleared.emit()
 
 
 ## Console command: aiModel <name>
@@ -1113,6 +1140,7 @@ func listAvailableModels() -> void:
 
 
 func setModel(name: String) -> void:
+	name = name.strip_edges() # в конфиге уже находили "ministral-3:14b\n"
 	modelName = name
 	gbData.settings["llmModelName"] = modelName
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)

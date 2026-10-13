@@ -44,7 +44,11 @@ func _update_state() -> void:
 		_checkbox.button_pressed = v
 
 func _init_variable(save: bool = false) -> void:
-	gbData.settings.set(key, defaultValue)
+	# defaultValue - это состояние ГАЛОЧКИ. При flipValue в конфиг пишется
+	# обратное значение - раньше писалось как есть, и "Enable mood" (галочка
+	# по умолчанию включена) записывал lobotomize = true, то есть ВЫКЛЮЧАЛ
+	# настроение; то же со всеми "Mute ..." (выключали звук).
+	gbData.settings.set(key, !defaultValue if flipValue else defaultValue)
 	if save:
 		gbData.savetodisk(gbData.conPath, gbData.settings)
 

@@ -75,6 +75,34 @@ var shocked := false
 var isUnconscious := false # 0 хп - навсегда (до перезапуска приложения), персонаж молчит и не приходит в себя
 const CRITICAL_HEALTH_THRESHOLD := 20.0 # ниже этого - не может встать, но остаётся в сознании и говорит
 
+## Сила удара = насколько резко изменилась скорость тела за один кадр
+## физики (пикс/сек). Меряется в момент столкновения, а не в момент
+## отпускания мышкой - поэтому считаются и броски, и просто падения с
+## высоты, и удары о стены, в любом направлении. Пороги - стартовая
+## прикидка, подбирать по ощущениям (toggleDebugTags печатает силу каждого
+## удара в консоль).
+const IMPACT_LIGHT := 700.0
+const IMPACT_MEDIUM := 1200.0
+const IMPACT_HARD := 1800.0
+const DAMAGE_LIGHT := 5.0
+const DAMAGE_MEDIUM := 15.0
+const DAMAGE_HARD := 30.0
+const IMPACT_COOLDOWN_MS := 600 # отскок от пола сразу после удара - это не второй удар
+var _prevTorsoVel := Vector2.ZERO
+var _prevBodyVel := Vector2.ZERO
+var _impactPrevValid := false
+var _bodyPrevValid := false
+var _lastImpactMsec := -100000
+var _impactThisRagdoll := false # был ли настоящий удар за этот цикл рэгдолла - тогда при подъёме реплика "fell", а не "getUp"
+var _spawnSettled := false # пока персонаж падает при самом первом спавне (а это бывает несколько экранов высоты), удар о пол не считается
+
+## Сколько персонаж не может снова заснуть после того, как его разбудили
+## ударом. Без этого при усталости > 95 он засыпал бы обратно на следующем
+## же тике (5 сек). Сама усталость при пробуждении не сбрасывается.
+const WAKE_NO_SLEEP_MS := 120000
+var _noSleepUntil: int = 0
+var _saidReallySleepy := false
+
 ## Вызывается из health_handler.gd, когда ХП падает до 0. Не смерть - просто
 ## окончательная "отключка" на весь текущий запуск приложения: персонаж
 ## молчит (см. guard в _say()) и держит закрытые глаза, пока пользователь
@@ -147,6 +175,7 @@ func _ready() -> void:
 	_initalSpawn()
 	LLMManager.llmReaction.connect(_on_llm_reaction)
 	LLMManager.aiEnabledChanged.connect(func(enabled): if enabled: _prewarmMyCategories())
+	LLMManager.poolsCleared.connect(_prewarmMyCategories)
 	if gbData.settings.get("llmVisionEnabled", false):
 		_prewarmMyCategories()
 
@@ -190,7 +219,10 @@ func _prewarmMyCategories() -> void:
 	})
 	# Rare ones continue automatically, passively, right after the common
 	# batch finishes - no need to wait for them to actually happen in play.
-	LLMManager.prewarmBatchFinished.connect(_prewarmRareCategories, CONNECT_ONE_SHOT)
+	# Проверка нужна: прогрев может запускаться повторно (poolsCleared), а
+	# повторный connect того же метода Godot считает ошибкой.
+	if not LLMManager.prewarmBatchFinished.is_connected(_prewarmRareCategories):
+		LLMManager.prewarmBatchFinished.connect(_prewarmRareCategories, CONNECT_ONE_SHOT)
 
 
 func _prewarmRareCategories() -> void:
@@ -240,6 +272,8 @@ var _queueTimer: Timer
 func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> void:
 	if isUnconscious:
 		return # 0 хп - state/screen/grab и всё остальное тоже не должно звучать, не только _say()
+	if isSleeping:
+		return # ответ ИИ мог прийти уже после того, как персонаж уснул - во сне молчим
 	if urgent and (dialogueSys.isTyping or not dialogueSys.dialogueTimer.is_stopped()):
 		# Urgent lines (screamBIG etc.) shouldn't politely wait behind
 		# whatever's already on screen - cut it off now. setDia()'s own
@@ -262,6 +296,8 @@ func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> vo
 
 
 func _tryShowQueued() -> void:
+	if isSleeping or isUnconscious:
+		return
 	if dialogueSys.isTyping or not dialogueSys.dialogueTimer.is_stopped():
 		return # something is still on screen - wait for it to clear
 	if _messageQueue.is_empty():
@@ -315,6 +351,12 @@ func sleep():
 	#handle sleeep loop this is probably one of the worst ways i couldve handled this ill fix it later
 	while get_tree():
 			#print("2")
+			if not isSleeping:
+				# Разбудили ударом (wakeUp) - тело уже в рэгдолле от удара,
+				# дальше подъёмом занимается tempRagdoll(), здесь только
+				# гасим "сонные" эффекты и выходим.
+				sleepParticle.emitting = false
+				break
 			if sleepHandler.sleepCheck() < 5.0:
 				#break if its below 10 (aka good enough to get up)
 				sleepParticle.emitting = false
@@ -350,33 +392,38 @@ func checker():
 			#sleep stuff
 			currentEmotion = emotionz.normal
 			if sleepN > 80.0:
-				var sleepflag1 = false
-
 				if !isTired:
-					sleepflag1 = false
 					if randi() % 4 == 0:
 						_say("sleepy")
 				isTired = true
 				currentEmotion = emotionz.tired
 				print("tired")
-				
 
-				if sleepN > 94.5:
-					if !sleepflag1:
-						sleepflag1 = true
+				# После пробуждения ударом какое-то время не засыпаем снова
+				var canSleep: bool = Time.get_ticks_msec() >= _noSleepUntil and not ragdolled
+
+				if sleepN > 94.5 and canSleep:
+					# раньше флаг тут был локальной переменной и сбрасывался
+					# каждый тик - "очень хочу спать" могло звучать каждые 5 сек
+					if not _saidReallySleepy:
+						_saidReallySleepy = true
 						moveSys.initswithc(moveSys.states.resting)
 						if randi() % 2 == 0:
 							_say("reallySleepy")
 
 
-				if sleepN > 95.0:
+				if sleepN > 95.0 and canSleep:
 					isSleeping = true
+					# всё, что успело встать в очередь до засыпания, уже неактуально
+					_messageQueue.clear()
+					_urgentInQueue = 0
 
 					moveSys.rigidtorso.linear_velocity = Vector2(0, 0)
 					print("sleeping")
 					sleep()
 			else:
 				isTired = false
+				_saidReallySleepy = false
 
 			#isSad s	
 			if moodN < -10.0:
@@ -415,29 +462,91 @@ func _physics_process(_delta: float) -> void:
 	#detect speed and aiosdhfopjkasfguopjasfgsdfhcvio[]
 	#and ragdoll based on taht
 	if not ragdolled and (abs(moveSys.rigid.linear_velocity.x) > moveSys.ragdollspeed or beingDragged):
-		tempRagdoll(not beingDragged) # true = genuine uncontrolled fall, not a hand-release
+		_bodyPrevValid = false
+		tempRagdoll(not beingDragged, false, abs(moveSys.rigid.linear_velocity.x)) # true = genuine uncontrolled fall, not a hand-release
+	elif not ragdolled:
+		# Стоит на ногах: ловим жёсткое приземление (падение вертикально,
+		# например с ящика) - раньше проверялась только горизонтальная
+		# скорость, и падение сверху вниз не считалось вообще.
+		var bodyVel: Vector2 = moveSys.rigid.linear_velocity
+		if _bodyPrevValid:
+			var hit := (_prevBodyVel - bodyVel).length()
+			if hit >= IMPACT_LIGHT:
+				_bodyPrevValid = false
+				tempRagdoll(true, false, hit)
+				return
+		_prevBodyVel = bodyVel
+		_bodyPrevValid = true
 
 	if ragdolled:
 		moveSys.dir = 0
+		_bodyPrevValid = false
+		_trackRagdollImpact()
 
-## Вызывается из dragExp.gd в момент отпускания ПКМ (конец захвата мышкой).
-## Раньше бросок мышкой НИКОГДА не наносил урона: сам захват уже переводит
-## ragdolled в true через tempRagdoll(false) выше (см. beingDragged в
-## условии), а _physics_process заново проверяет силу удара только когда
-## "not ragdolled" - то есть пока персонаж всё ещё находится в том же цикле
-## ragdoll (захват -> полёт после броска -> приземление -> подъём), момент
-## настоящего броска никогда повторно не оценивался как удар. Здесь мы
-## отдельно проверяем скорость именно в момент отпускания.
-func registerThrowImpact(releaseVelocity: Vector2) -> void:
-	if isUnconscious:
+
+## Пока персонаж лежит/летит рэгдоллом (после броска, падения, во сне) -
+## смотрим, насколько резко затормозило туловище за этот кадр. Резкое
+## торможение = удар о пол/стену/предмет. Пока его держат мышкой - не
+## считаем (иначе любой рывок курсором был бы "ударом").
+func _trackRagdollImpact() -> void:
+	if beingDragged or isUnconscious:
+		_impactPrevValid = false
 		return
-	if releaseVelocity.length() <= moveSys.ragdollspeed:
+	var vel: Vector2 = moveSys.rigidtorso.linear_velocity
+	if not _spawnSettled:
+		if vel.length() < 50.0:
+			_spawnSettled = true # долетел до пола после спавна и успокоился
+		_prevTorsoVel = vel
+		_impactPrevValid = true
 		return
-	if Time.get_ticks_msec() < _spawnGraceUntil:
+	if _impactPrevValid:
+		var hit := (_prevTorsoVel - vel).length()
+		if hit >= IMPACT_LIGHT:
+			_registerImpact(hit)
+	_prevTorsoVel = vel
+	_impactPrevValid = true
+
+
+func _damageForImpact(speed: float) -> float:
+	if speed >= IMPACT_HARD:
+		return DAMAGE_HARD
+	if speed >= IMPACT_MEDIUM:
+		return DAMAGE_MEDIUM
+	if speed >= IMPACT_LIGHT:
+		return DAMAGE_LIGHT
+	return 0.0
+
+
+## Урон от удара (уже во время рэгдолла). Будит спящего персонажа.
+func _registerImpact(speed: float) -> void:
+	if isUnconscious or Time.get_ticks_msec() < _spawnGraceUntil:
 		return
-	healthHandler.applyDamage(15.0) # тот же плейсхолдер, что и для обычного жёсткого падения
+	var now := Time.get_ticks_msec()
+	if now - _lastImpactMsec < IMPACT_COOLDOWN_MS:
+		return
+	var dmg := _damageForImpact(speed)
+	if dmg <= 0.0:
+		return
+	_lastImpactMsec = now
+	if LLMManager.debugTags:
+		Console.print("[color=YELLOW]Удар: сила %.0f -> урон %.0f[/color]" % [speed, dmg])
+	if isSleeping:
+		wakeUp()
+	_impactThisRagdoll = true
+	healthHandler.applyDamage(dmg)
 	if not shocked:
 		shock()
+
+
+## Разбудить спящего (сейчас - только от урона). Усталость остаётся какой
+## была, просто персонаж какое-то время не может снова заснуть.
+func wakeUp() -> void:
+	if not isSleeping:
+		return
+	isSleeping = false # sleep() увидит это на следующей итерации и выйдет сам
+	sleepParticle.emitting = false
+	_noSleepUntil = Time.get_ticks_msec() + WAKE_NO_SLEEP_MS
+	tempRagdoll(false) # долежать удар и встать обычным путём
 
 
 """
@@ -447,8 +556,13 @@ PLEASE FUCKING RECODE BOTH OF THESE
 
 """
 func shock() -> void:
-	if isUnconscious or beingDragged or Time.get_ticks_msec() < _spawnGraceUntil:
-		return # screamBIG - только настоящий удар/падение, не обычное хватание мышкой и не самый первый спавн
+	if isUnconscious or beingDragged or isSleeping or Time.get_ticks_msec() < _spawnGraceUntil:
+		# screamBIG - только настоящий удар/падение, не обычное хватание мышкой
+		# и не самый первый спавн. isSleeping: засыпая, sleep() сам переводит
+		# тело в рэгдолл, а это шлёт тот же сигнал sigragdoll, что и падение -
+		# раньше персонаж из-за этого вскрикивал, просто укладываясь спать.
+		# (Если удар будит спящего, wakeUp() снимает isSleeping ДО вызова shock.)
+		return
 	shocked = true
 	moodSys._tempVal(-5.0, 15)
 	moodSys.mood -= 2.5
@@ -466,7 +580,9 @@ func shock() -> void:
 
 	shocked = false
 
-func tempRagdoll(isHardFall: bool = false, silent: bool = false) -> void:
+func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: float = 0.0) -> void:
+	_impactThisRagdoll = false
+	_impactPrevValid = false
 	if isHardFall and not isUnconscious and Time.get_ticks_msec() >= _spawnGraceUntil:
 		# Урон и обновление спрайтов - сразу в момент падения/удара, а не
 		# позже, когда персонаж уже встаёт и говорит. Раньше оба совпадали
@@ -476,7 +592,13 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false) -> void:
 		# из-за этого урон не засчитывался вообще ни разу, пока персонаж не
 		# завершит хотя бы один цикл "встал" после спавна (launchflag
 		# становился true только в конце этой же функции).
-		healthHandler.applyDamage(15.0) # плейсхолдер, баланс потом
+		# Раз скорость уже хватило, чтобы сбить с ног - минимум лёгкий урон.
+		var dmg: float = maxf(DAMAGE_LIGHT, _damageForImpact(impactSpeed))
+		if LLMManager.debugTags:
+			Console.print("[color=YELLOW]Сбита с ног: сила %.0f -> урон %.0f[/color]" % [impactSpeed, dmg])
+		_lastImpactMsec = Time.get_ticks_msec()
+		_impactThisRagdoll = true
+		healthHandler.applyDamage(dmg)
 	moveSys.ragdoll(false)
 	ragdolled = true
 	moveSys.rigid.collision_layer = 0
@@ -529,7 +651,7 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false) -> void:
 	moveSys.initswithc(moveSys.states.idle)
 	var _upCategory := "start"
 	if launchflag:
-		if isHardFall:
+		if isHardFall or _impactThisRagdoll:
 			_upCategory = "fell"
 		elif not pet_timer.is_stopped() and pet_count >= 5:
 			_upCategory = "getUpPet"
@@ -602,8 +724,8 @@ func passivetalk() -> void:
 
 			var diaTimerMaximum = float(GlobalVariable.getNumFromString(str(gbData.settings["maxDialogueTime"])))
 
-			print(diaTimerMinimum, "max")
-			print(diaTimerMaximum, "min")
+			print(diaTimerMinimum, "min")
+			print(diaTimerMaximum, "max")
 			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum))).timeout
 			if not beingDragged and not isSleeping and not shocked:
 				dialogueSys.pool = dialogueSys.data.get("Passive", [])
@@ -726,7 +848,7 @@ const CATEGORY_SITUATION := {
 	"LightDamage": "Тебе только что было немного больно - лёгкий удар или падение, не критично, но неприятно.",
 	"MediumDamage": "Тебе только что было по-настоящему больно - серьёзный удар или падение.",
 	"HardDamage": "Тебе только что было ОЧЕНЬ больно - тяжёлый удар, здоровье на исходе, это серьёзно и страшно.",
-	"lastmoments": "Твоё здоровье равно нулю. Это последняя драматичная или слегка пафосная фраза, короткую ты произесёшь перед тем, как насвегда потеряешь сознание.",
+	"lastmoments": "Твоё здоровье равно нулю. Это твоя последняя короткая фраза, драматичная или слегка пафосная, перед тем как ты надолго потеряешь сознание.",
 	"healed": "Тебе только что помогли вылечиться, тебе физически стало лучше, но ты всё ещё в невесёлом настроении.",
 }
 
@@ -951,14 +1073,14 @@ func petLimb(limb: RigidBody2D):
 	if isUnconscious:
 		return
 	AudioManager.play_sfx(AudioManager.thudwoosh)
+	if isSleeping:
+		return # спит - звук касания есть, но без голоса (раньше голос звучал до этой проверки)
 	# Шипение (bark) уместно только при плохом настроении - при обычном или
 	# хорошем всегда используем whine вместо случайного 50/50 выбора.
 	if moodSys.mood < -20.0 and randf() < 0.5:
 		AudioManager.play_random(voiceSet["bark"], 0.375, 0, 1, true, 0.5, 'exp_pet', "bark")
 	else:
 		AudioManager.play_random(voiceSet["whine"], 0.375, 0, 1, true, 1, 'exp_pet', "whine")
-	if isSleeping:
-		return
 
 	if moodSys.mood < 10.0:
 		petReject()
