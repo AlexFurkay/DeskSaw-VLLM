@@ -1,0 +1,59 @@
+[gd_scene format=3]
+
+[ext_resource type="Shader" uid="uid://b1x03c3wn85hg" path="res://assets/shaders/outline.gdshader" id="1_sh"]
+[ext_resource type="Texture2D" path="res://assets/objectSpr/JuiceDobry.png" id="2_tx"]
+[ext_resource type="Script" uid="uid://cbm2skouhq87k" path="res://Scripts/impo/dragObj.gd" id="3_dr"]
+[ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_pr"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_det"]
+size = Vector2(48, 68)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_col"]
+size = Vector2(32, 52)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ol"]
+shader = ExtResource("1_sh")
+shader_parameter/thickness = 0.0
+shader_parameter/ring_count = 4
+shader_parameter/ring_offset = 0.0
+shader_parameter/outline_color = Color(0, 0, 0.22745098, 1)
+shader_parameter/border_clipping_fix = true
+shader_parameter/aspect_ratio = 1.0
+shader_parameter/square_border = true
+shader_parameter/offset = Vector2(0, 0)
+shader_parameter/max_or_add = false
+
+[node name="Body" type="RigidBody2D"]
+mass = 0.001
+metadata/Category = "object"
+
+[node name="Detector" type="Area2D" parent="."]
+
+[node name="Yeah" type="CollisionShape2D" parent="Detector"]
+shape = SubResource("RectangleShape2D_det")
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture_filter = 1
+material = SubResource("ShaderMaterial_ol")
+scale = Vector2(4, 4)
+texture = ExtResource("2_tx")
+
+[node name="Collision" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_col")
+
+[node name="draggable" type="Node" parent="." node_paths=PackedStringArray("sprite")]
+script = ExtResource("3_dr")
+sprite = NodePath("../Sprite")
+metadata/_custom_type_script = "uid://cbm2skouhq87k"
+
+[node name="properties" type="Node" parent="."]
+script = ExtResource("4_pr")
+propertyTable = {
+"consumable": true,
+"danger": 0,
+"interest": 2,
+"moodBoostIfConsumable": 3.0,
+"object": true,
+"replenishIfConsumable": 5.0,
+"tasteIfConsumable": 7
+}

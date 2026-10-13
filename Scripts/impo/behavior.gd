@@ -73,17 +73,20 @@ var isHungry := false
 var isSad := false
 var shocked := false
 var isUnconscious := false # 0 хп - навсегда (до перезапуска приложения), персонаж молчит и не приходит в себя
+var _finalLinePending := false # одна последняя фраза, которая ещё может прозвучать после отключки (см. _queueMessage)
 const CRITICAL_HEALTH_THRESHOLD := 20.0 # ниже этого - не может встать, но остаётся в сознании и говорит
 
 ## Сила удара = насколько резко изменилась скорость тела за один кадр
 ## физики (пикс/сек). Меряется в момент столкновения, а не в момент
 ## отпускания мышкой - поэтому считаются и броски, и просто падения с
-## высоты, и удары о стены, в любом направлении. Пороги - стартовая
-## прикидка, подбирать по ощущениям (toggleDebugTags печатает силу каждого
-## удара в консоль).
-const IMPACT_LIGHT := 700.0
-const IMPACT_MEDIUM := 1200.0
-const IMPACT_HARD := 1800.0
+## высоты, и удары о стены, в любом направлении. Пороги подбирать по
+## ощущениям (toggleDebugTags печатает силу каждого удара в консоль).
+## Ориентир: ящик 96 пикс, гравитация персонажа 980*0.8 - падение даже с
+## 6 ящиков друг на друге (~576 пикс) даёт ~950, это ещё НЕ урон. Падение
+## с самого верха экрана 1080p - около 1250, лёгкий урон.
+const IMPACT_LIGHT := 1150.0
+const IMPACT_MEDIUM := 1700.0
+const IMPACT_HARD := 2300.0
 const DAMAGE_LIGHT := 5.0
 const DAMAGE_MEDIUM := 15.0
 const DAMAGE_HARD := 30.0
@@ -94,7 +97,10 @@ var _impactPrevValid := false
 var _bodyPrevValid := false
 var _lastImpactMsec := -100000
 var _impactThisRagdoll := false # был ли настоящий удар за этот цикл рэгдолла - тогда при подъёме реплика "fell", а не "getUp"
-var _spawnSettled := false # пока персонаж падает при самом первом спавне (а это бывает несколько экранов высоты), удар о пол не считается
+## Бессмертие при спавне: персонаж появляется высоко за экраном и
+## гарантированно падает - до тех пор, пока он впервые не встанет на ноги
+## после этого падения, никакой урон не считается.
+var _spawnSettled := false
 
 ## Сколько персонаж не может снова заснуть после того, как его разбудили
 ## ударом. Без этого при усталости > 95 он засыпал бы обратно на следующем
@@ -112,6 +118,7 @@ func goUnconscious() -> void:
 	if isUnconscious:
 		return
 	isUnconscious = true
+	_finalLinePending = true
 	faceSys.setEmotion("sleep") # уже готовое состояние с закрытыми глазами, ничего рисовать не нужно
 
 
@@ -242,6 +249,11 @@ func _prewarmRareCategories() -> void:
 		t + "HardDamage": dialogueSys.data.get("HardDamage", []),
 		t + "lastmoments": dialogueSys.data.get("lastmoments", []),
 		t + "healed": dialogueSys.data.get("healed", []),
+		t + "fentanyl": dialogueSys.data.get("fentanyl", []),
+		t + "withdrawal": dialogueSys.data.get("withdrawal", []),
+		# готовая фраза нужна заранее: после передозировки персонаж сразу
+		# отключается, и "живой" запрос к ИИ уже не успел бы прозвучать
+		t + "overdose": dialogueSys.data.get("lastmoments", []),
 	}, {}, true, {}, {
 		t + "reallySleepy": CATEGORY_SITUATION.get("reallySleepy", ""),
 		t + "screamBIG": CATEGORY_SITUATION.get("screamBIG", ""),
@@ -257,6 +269,9 @@ func _prewarmRareCategories() -> void:
 		t + "HardDamage": CATEGORY_SITUATION.get("HardDamage", ""),
 		t + "lastmoments": CATEGORY_SITUATION.get("lastmoments", ""),
 		t + "healed": CATEGORY_SITUATION.get("healed", ""),
+		t + "fentanyl": CATEGORY_SITUATION.get("fentanyl", ""),
+		t + "withdrawal": CATEGORY_SITUATION.get("withdrawal", ""),
+		t + "overdose": CATEGORY_SITUATION.get("overdose", ""),
 	})
 
 var _messageQueue: Array = []      # [{text, speed}] shown in order; urgent entries get inserted at the front
@@ -271,9 +286,21 @@ var _queueTimer: Timer
 ## so a flurry of urgent reactions can't indefinitely starve getUp/hungry/etc.
 func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> void:
 	if isUnconscious:
+		# Последняя фраза (lastmoments/overdose) запрашивается ДО отключки,
+		# но ответ ИИ может прийти уже после неё - раньше он здесь молча
+		# выбрасывался. Пропускаем ровно одну срочную фразу и показываем сразу.
+		if urgent and _finalLinePending:
+			_finalLinePending = false
+			_messageQueue.clear()
+			_urgentInQueue = 0
+			var finalText := _applyStupid(text)
+			dialogueSys.setDia(finalText[0], speed + finalText[1], 2.0, true)
 		return # 0 хп - state/screen/grab и всё остальное тоже не должно звучать, не только _say()
 	if isSleeping:
 		return # ответ ИИ мог прийти уже после того, как персонаж уснул - во сне молчим
+	var processed := _applyStupid(text)
+	text = processed[0]
+	speed += processed[1]
 	if urgent and (dialogueSys.isTyping or not dialogueSys.dialogueTimer.is_stopped()):
 		# Urgent lines (screamBIG etc.) shouldn't politely wait behind
 		# whatever's already on screen - cut it off now. setDia()'s own
@@ -293,6 +320,15 @@ func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> vo
 		_messageQueue.pop_back() # don't let stale lines pile up forever
 
 	_tryShowQueued()
+
+
+## Тег [stupid] (заплетающийся язык) раньше работал только для фраз из
+## файла (dialogueSys.send), а ИИ-фразы шли через setDia и показали бы его
+## как текст. Возвращает [текст, поправка скорости].
+func _applyStupid(text: String) -> Array:
+	if text.find("[stupid]") == -1:
+		return [text, 0.0]
+	return [dialogueSys.stupify(text.replace("[stupid]", "")), -0.3]
 
 
 func _tryShowQueued() -> void:
@@ -335,6 +371,7 @@ func _initalSpawn() -> void:
 	hungerHandler.loadFromSave(petId)
 	healthHandler.loadFromSave(petId)
 	sleepHandler.loadFromSave(petId)
+	addiction = float(gbData.data["saw"][petId].get("addiction", 0.0))
 
 
 	tempRagdoll()
@@ -345,6 +382,7 @@ func _initalSpawn() -> void:
 	passivetalk()
 	checker()
 	itemWatch()
+	drugLoop()
 	pass
 
 func sleep():
@@ -469,7 +507,7 @@ func _physics_process(_delta: float) -> void:
 		# например с ящика) - раньше проверялась только горизонтальная
 		# скорость, и падение сверху вниз не считалось вообще.
 		var bodyVel: Vector2 = moveSys.rigid.linear_velocity
-		if _bodyPrevValid:
+		if _bodyPrevValid and _spawnSettled:
 			var hit := (_prevBodyVel - bodyVel).length()
 			if hit >= IMPACT_LIGHT:
 				_bodyPrevValid = false
@@ -493,12 +531,6 @@ func _trackRagdollImpact() -> void:
 		_impactPrevValid = false
 		return
 	var vel: Vector2 = moveSys.rigidtorso.linear_velocity
-	if not _spawnSettled:
-		if vel.length() < 50.0:
-			_spawnSettled = true # долетел до пола после спавна и успокоился
-		_prevTorsoVel = vel
-		_impactPrevValid = true
-		return
 	if _impactPrevValid:
 		var hit := (_prevTorsoVel - vel).length()
 		if hit >= IMPACT_LIGHT:
@@ -519,7 +551,7 @@ func _damageForImpact(speed: float) -> float:
 
 ## Урон от удара (уже во время рэгдолла). Будит спящего персонажа.
 func _registerImpact(speed: float) -> void:
-	if isUnconscious or Time.get_ticks_msec() < _spawnGraceUntil:
+	if isUnconscious or not _spawnSettled or Time.get_ticks_msec() < _spawnGraceUntil:
 		return
 	var now := Time.get_ticks_msec()
 	if now - _lastImpactMsec < IMPACT_COOLDOWN_MS:
@@ -536,6 +568,84 @@ func _registerImpact(speed: float) -> void:
 	healthHandler.applyDamage(dmg)
 	if not shocked:
 		shock()
+
+
+# ---------------- Фентанил ----------------
+## Доза: сильный, но временный подъём настроения, после него - спад ниже
+## исходного. Каждая доза добавляет зависимость (сохраняется в SAVE.json),
+## с ней следующие дозы действуют слабее, а без новой дозы начинается
+## ломка. OVERDOSE_DOSES доз подряд (каждая в пределах DOSE_CHAIN_MS от
+## предыдущей) - передозировка, отключка как при 0 ХП. Все числа -
+## стартовые, баланс потом.
+const HIGH_DURATION_SEC := 300.0      # сколько держится эффект одной дозы
+const HIGH_BOOST := 60.0              # прибавка к настроению у "чистого" персонажа
+const COMEDOWN_FRACTION := 0.3        # после эффекта настроение падает на эту долю от прибавки
+const ADDICTION_PER_DOSE := 20.0
+const ADDICTION_DECAY_PER_MIN := 1.0
+const WITHDRAWAL_THRESHOLD := 30.0    # с какой зависимости начинается ломка
+const DOSE_CHAIN_MS := 300000         # дозы ближе друг к другу, чем это, считаются "подряд"
+const OVERDOSE_DOSES := 4
+var addiction := 0.0
+var _dosesInRow := 0
+var _lastDoseMsec := -10000000
+var _nextWithdrawalLineMsec := 0
+
+
+func _isHigh() -> bool:
+	return Time.get_ticks_msec() - _lastDoseMsec < int(HIGH_DURATION_SEC * 1000.0)
+
+
+func _inWithdrawal() -> bool:
+	return addiction >= WITHDRAWAL_THRESHOLD and not _isHigh()
+
+
+## Вызывается из health_handler.gd, когда шприц с фентанилом попал в персонажа.
+func takeFentanyl() -> void:
+	if isUnconscious:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _lastDoseMsec > DOSE_CHAIN_MS:
+		_dosesInRow = 0
+	_dosesInRow += 1
+	_lastDoseMsec = now
+
+	if _dosesInRow >= OVERDOSE_DOSES:
+		dialogueSys.speedMod = 0.8
+		_say("overdose")
+		goUnconscious()
+		return
+
+	# чем сильнее зависимость, тем слабее эффект (толерантность)
+	var boost: float = HIGH_BOOST / (1.0 + addiction / 40.0)
+	moodSys.startDrugHigh(boost, HIGH_DURATION_SEC, boost * COMEDOWN_FRACTION)
+	addiction = minf(100.0, addiction + ADDICTION_PER_DOSE)
+	_saveAddiction()
+	dialogueSys.speedMod = 0.8
+	_say("fentanyl")
+
+
+func _saveAddiction() -> void:
+	if gbData.data["saw"].has(petId):
+		gbData.data["saw"][petId]["addiction"] = addiction
+
+
+## Раз в 30 сек: зависимость понемногу спадает сама, а в ломке настроение
+## ползёт вниз и время от времени звучит фраза из withdrawal.
+func drugLoop() -> void:
+	while get_tree():
+		await get_tree().create_timer(30.0).timeout
+		if isUnconscious:
+			continue
+		if addiction > 0.0:
+			addiction = maxf(0.0, addiction - ADDICTION_DECAY_PER_MIN * 0.5)
+			_saveAddiction()
+		if not _inWithdrawal():
+			continue
+		moodSys.mood = clampf(moodSys.mood - addiction * 0.02, moodSys.minmood, moodSys.maxmood)
+		var now := Time.get_ticks_msec()
+		if now >= _nextWithdrawalLineMsec and not isSleeping and not beingDragged and not shocked:
+			_nextWithdrawalLineMsec = now + randi_range(120000, 240000)
+			_say("withdrawal")
 
 
 ## Разбудить спящего (сейчас - только от урона). Усталость остаётся какой
@@ -583,7 +693,7 @@ func shock() -> void:
 func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: float = 0.0) -> void:
 	_impactThisRagdoll = false
 	_impactPrevValid = false
-	if isHardFall and not isUnconscious and Time.get_ticks_msec() >= _spawnGraceUntil:
+	if isHardFall and not isUnconscious and _spawnSettled and Time.get_ticks_msec() >= _spawnGraceUntil:
 		# Урон и обновление спрайтов - сразу в момент падения/удара, а не
 		# позже, когда персонаж уже встаёт и говорит. Раньше оба совпадали
 		# по времени с репликой, что на глаз незаметно для одних лишь цифр
@@ -592,13 +702,15 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		# из-за этого урон не засчитывался вообще ни разу, пока персонаж не
 		# завершит хотя бы один цикл "встал" после спавна (launchflag
 		# становился true только в конце этой же функции).
-		# Раз скорость уже хватило, чтобы сбить с ног - минимум лёгкий урон.
-		var dmg: float = maxf(DAMAGE_LIGHT, _damageForImpact(impactSpeed))
+		# Сбить с ног может и слабый толчок - урон только если удар
+		# дотягивает хотя бы до лёгкого порога.
+		var dmg: float = _damageForImpact(impactSpeed)
 		if LLMManager.debugTags:
 			Console.print("[color=YELLOW]Сбита с ног: сила %.0f -> урон %.0f[/color]" % [impactSpeed, dmg])
-		_lastImpactMsec = Time.get_ticks_msec()
-		_impactThisRagdoll = true
-		healthHandler.applyDamage(dmg)
+		if dmg > 0.0:
+			_lastImpactMsec = Time.get_ticks_msec()
+			_impactThisRagdoll = true
+			healthHandler.applyDamage(dmg)
 	moveSys.ragdoll(false)
 	ragdolled = true
 	moveSys.rigid.collision_layer = 0
@@ -610,7 +722,7 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		var waitTime: float = randf_range(10.0, 15.0) if aiOn else (getUpTimer + randf_range(0, 5))
 		await get_tree().create_timer(waitTime).timeout
 		if beingDragged:
-			if not isSleeping:
+			if not isSleeping and not isUnconscious:
 				if aiOn:
 					_dragEscalationLevel += 1
 					var idx: int = mini(_dragEscalationLevel - 1, DRAG_STAGE_DESCRIPTIONS.size() - 1)
@@ -631,6 +743,7 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		if moveSys.rigidtorso.linear_velocity.length() > 10.0:
 			continue
 		break
+	_spawnSettled = true # первое падение после спавна закончилось - дальше урон считается как обычно
 	if isUnconscious:
 		# 0 хп - персонаж остаётся в физическом рэгдолле навсегда (до
 		# перезапуска приложения). Ragdoll(false) уже включён в начале
@@ -749,8 +862,12 @@ func passivetalk() -> void:
 						sleepHandler.tiredness,
 						gbData.data["saw"][petId]["health"]
 					]
+					if _isHigh():
+						statLine += ", ты под действием фентанила - тебе слишком хорошо и всё плывёт"
+					elif _inWithdrawal():
+						statLine += ", у тебя ломка - тебе плохо без фентанила"
 					var examples: Array = _pickExamples(dialogueSys.pool.duplicate(), 10)
-					LLMManager.requestStateReaction(statLine, examples, _on_state_reaction)
+					LLMManager.requestStateReaction(statLine, examples, _on_state_reaction, _skinTag() + ":state")
 				else:
 					dialogueSys.send()
 		else:
@@ -813,7 +930,7 @@ func _getNearbyItemDescription() -> String:
 ## Categories that are a reaction to something sudden happening right now -
 ## they should jump straight to the front of the display queue instead of
 ## waiting behind whatever ambient line is already lined up, same as drag.
-const URGENT_CATEGORIES := ["petReject", "screamBIG", "fell", "pet", "LightDamage", "MediumDamage", "HardDamage", "lastmoments"]
+const URGENT_CATEGORIES := ["petReject", "screamBIG", "fell", "pet", "LightDamage", "MediumDamage", "HardDamage", "lastmoments", "fentanyl", "overdose"]
 
 ## Which [tag] each category's quotes originally used in TRANSLATION.json -
 ## AI-generated replacement text never includes this on its own, so it's
@@ -822,6 +939,7 @@ const CATEGORY_DISPLAY_TAG := {
 	"getUp": "[wave]", "getUpPet": "[wave]", "sleepy": "[wave]", "reallySleepy": "[wave]",
 	"EatGood": "[wave]", "start": "[wave]", "beingDragged": "[wave]",
 	"fell": "[shake]", "screamBIG": "[shake]", "petReject": "[shake]", "EatBad": "[shake]",
+	"fentanyl": "[stupid][wave]", "withdrawal": "[shake]", "overdose": "[stupid][shake]",
 }
 
 ## Явное описание того, что сейчас происходит с персонажем, для категорий,
@@ -848,8 +966,17 @@ const CATEGORY_SITUATION := {
 	"LightDamage": "Тебе только что было немного больно - лёгкий удар или падение, не критично, но неприятно.",
 	"MediumDamage": "Тебе только что было по-настоящему больно - серьёзный удар или падение.",
 	"HardDamage": "Тебе только что было ОЧЕНЬ больно - тяжёлый удар, здоровье на исходе, это серьёзно и страшно.",
-	"lastmoments": "Твоё здоровье равно нулю. Это твоя последняя короткая фраза, драматичная или слегка пафосная, перед тем как ты надолго потеряешь сознание.",
+	"lastmoments": "Твоё здоровье равно нулю. Это твоя последняя короткая фраза, драматичная или слегка пафосная, перед тем как ты навсегда потеряешь сознание.",
 	"healed": "Тебе только что помогли вылечиться, тебе физически стало лучше, но ты всё ещё в невесёлом настроении.",
+	"fentanyl": "Тебе только что вкололи фентанил. Накрывает тёплой волной - боль и тревога уходят, всё плывёт, тебе слишком хорошо.",
+	"withdrawal": "У тебя ломка - давно не было фентанила. Тебя знобит, всё ломит, ты раздражена и тебе очень плохо, ты хочешь ещё дозу.",
+	"overdose": "Тебе вкололи слишком много фентанила подряд - передозировка. Ты проваливаешься в тяжёлую темноту, это последние слова перед тем, как ты отключишься.",
+}
+
+## Категории без своих примеров в TRANSLATION.json - берут примеры из
+## другой, близкой по духу категории.
+const CATEGORY_EXAMPLES_FROM := {
+	"overdose": "lastmoments",
 }
 
 ## Body-part injury art, matched by filename through skinmapper's own
@@ -1018,7 +1145,7 @@ func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true) 
 			return
 		_lastSayTime[category] = now
 
-	dialogueSys.pool = dialogueSys.data.get(category, [])
+	dialogueSys.pool = dialogueSys.data.get(CATEGORY_EXAMPLES_FROM.get(category, category), [])
 	if gbData.settings.get("llmVisionEnabled", false):
 		var examples: Array = _pickExamples(dialogueSys.pool.duplicate(), 8)
 		var speed: float = dialogueSys.speedMod
@@ -1082,7 +1209,7 @@ func petLimb(limb: RigidBody2D):
 	else:
 		AudioManager.play_random(voiceSet["whine"], 0.375, 0, 1, true, 1, 'exp_pet', "whine")
 
-	if moodSys.mood < 10.0:
+	if moodSys.mood + moodSys.drugOffset < 10.0: # под фентанилом ласку принимает даже при плохом базовом настроении
 		petReject()
 		return
 

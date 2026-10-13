@@ -51,6 +51,8 @@ func _onItemEnter(body: Node2D) -> void:
 		return
 	if props.get("healIfConsumable", 0.0) > 0.0:
 		return # medical item - healthHandler handles this one, not food logic
+	if props.get("drug", "") != "":
+		return # препарат (фентанил) - тоже healthHandler, иначе тут прозвучало бы "не буду это есть"
 	foodDb = true
 
 	if hungry >= 98.0:

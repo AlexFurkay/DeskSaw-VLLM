@@ -22,9 +22,8 @@ extends Node
 signal llmReaction(text: String)
 signal aiEnabledChanged(enabled: bool)
 signal prewarmBatchFinished()
-## Все готовые пулы фраз сброшены (смена креативности/защиты от повторов,
-## reloadLore) - питомцы перезапускают прогрев, чтобы новые фразы были
-## сгенерированы уже с новыми настройками.
+## Все готовые пулы фраз сброшены (reloadLore) - питомцы перезапускают
+## прогрев, чтобы новые фразы были сгенерированы уже с новым лором.
 signal poolsCleared()
 
 const OLLAMA_URL := "http://127.0.0.1:11434/api/generate" # NOT "localhost" - on some Windows setups (VPN software installed even if inactive, IPv6/DNS quirks) resolving "localhost" can add seconds of delay per request; the literal loopback IP skips DNS resolution entirely
@@ -131,7 +130,33 @@ const OLD_LORE_PATH := "user://LORE.txt" # kept forever - never deleted, only re
 func _lorePathForSkin(skinName: String) -> String:
 	return "user://skin/%s/lore.txt" % skinName
 
+## Лор каждого скина отдельно (раньше всем питомцам подставлялся лор
+## defaultSkin - второй персонаж на экране говорил бы с чужой биографией).
+var _loreBySkin: Dictionary = {} # имя скина -> текст лора
+
+func _loreFor(skinName: String) -> String:
+	if not _loreBySkin.has(skinName):
+		var path := _lorePathForSkin(skinName)
+		var text := ""
+		if FileAccess.file_exists(path):
+			var f := FileAccess.open(path, FileAccess.READ)
+			text = f.get_as_text().strip_edges()
+			f.close()
+		_loreBySkin[skinName] = text
+	return _loreBySkin[skinName]
+
+
+## Из тега запроса "Скин:категория" достаёт имя скина. Запросы без скина
+## (screen - один скриншот на всех) идут с лором defaultSkin.
+func _skinFromTag(tag: String) -> String:
+	var t := tag.trim_prefix("prefetch:")
+	if t.contains(":"):
+		return t.get_slice(":", 0)
+	return String(gbData.settings.get("defaultSkin", "Default"))
+
+
 func _loadLore() -> void:
+	_loreBySkin.clear()
 	var skinName: String = gbData.settings.get("defaultSkin", "Default")
 	var path := _lorePathForSkin(skinName)
 	var oldFlatPath := "user://%slore.txt" % skinName.to_lower() # старое плоское расположение, до переноса в папку скина
@@ -341,8 +366,9 @@ func _buildBasePrompt(category: String = "") -> String:
 		parts.append("Изредка, только при очень хорошем настроении, можно слегка кокетничать - лёгкие тёплые комплименты, дружеский флирт, строго без сексуального подтекста.")
 	else:
 		parts.append("Флирт и романтический подтекст полностью исключены - только дружеское отношение.")
-	if lore != "":
-		parts.append("О себе ты знаешь следующее: " + lore)
+	var skinLore := _loreFor(_skinFromTag(category))
+	if skinLore != "":
+		parts.append("О себе ты знаешь следующее: " + skinLore)
 	# Only THIS category's own recent lines - a global "everything said
 	# recently" list bled unrelated categories' vocabulary/theme into each
 	# other (e.g. Full picking up "держать/отпусти" fresh from drag_level2).
@@ -366,9 +392,37 @@ func _on_screen_tick() -> void:
 		return
 
 	var images: Array = [Marshalls.raw_to_base64(png_bytes)]
-	var prompt := _buildBasePrompt("screen") + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Если на скриншоте видно маленькое пиксельное существо поверх окон - это ТЫ САМА, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. Прокомментируй содержимое экрана (окна, текст, видео и т.д.), а не то, кто на нём якобы физически присутствует или смотрит на тебя. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
+	var prompt := _buildBasePrompt("screen") + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Если на скриншоте видно маленькое пиксельное существо поверх окон - это ТЫ САМА, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. НЕ описывай и не пересказывай, что на экране (никаких 'Это окно...', 'Здесь видно...', 'На экране...') - человек и сам это видит. Вместо этого ОТРЕАГИРУЙ на увиденное как живой персонаж, своими словами и со своим отношением. Не начинай фразу со слова 'Это'. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
+	prompt += "\nПодход к реакции на этот раз: " + _pickScreenAngle()
 	prompt += _screenMoodHealthHint()
 	_enqueue(prompt, images, func(text): llmReaction.emit(text), "screen")
+
+
+## Почему экранные реакции звучали одинаково при любой креативности:
+## картинка перевешивала характер, и модель каждый раз просто ОПИСЫВАЛА
+## экран ("Это окно экспорта проекта..."), а описание одного и того же
+## экрана почти не зависит от температуры (проверено на qwen3-vl:8b при
+## 0.1 и 1.5). Запрет на описание + случайный "угол" реакции на каждый
+## скриншот дают разные по смыслу фразы. Углы общие для всех скинов - без
+## привязки к конкретному персонажу (охота и т.п. берётся из его лора).
+const SCREEN_ANGLES := [
+	"подколи человека за то, чем он сейчас занят.",
+	"дай короткий строгий совет по тому, что видишь.",
+	"свяжи увиденное со своим характером или прошлым.",
+	"выскажи личное мнение - нравится тебе это или нет.",
+	"зацепись за одну мелкую деталь на экране.",
+	"отреагируй эмоцией - скукой, азартом, удивлением или раздражением.",
+	"оцени, как человек справляется, в духе 'неплохо... для тебя'.",
+	"пошути над увиденным в своём стиле.",
+]
+var _lastScreenAngle := -1
+
+func _pickScreenAngle() -> String:
+	var idx := randi() % SCREEN_ANGLES.size()
+	if idx == _lastScreenAngle:
+		idx = (idx + 1) % SCREEN_ANGLES.size() # не два одинаковых подхода подряд
+	_lastScreenAngle = idx
+	return SCREEN_ANGLES[idx]
 
 
 ## Постепенная примесь состояния в screen-реакции - чем хуже здоровье и/или
@@ -467,19 +521,19 @@ func _filterExamplesForProfanity(lines: Array) -> Array:
 	return filtered
 
 
-func requestStateReaction(statLine: String, exampleLines: Array, callback: Callable) -> void:
+func requestStateReaction(statLine: String, exampleLines: Array, callback: Callable, tag: String = "state") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 
 	exampleLines = _filterExamplesForProfanity(exampleLines)
 
-	var prompt := _buildBasePrompt("state")
+	var prompt := _buildBasePrompt(tag)
 	prompt += "\nТвоё текущее состояние: " + statLine + "."
 	if exampleLines.size() > 0:
 		prompt += "\nПримеры того, как ты обычно говоришь в таком состоянии (не копируй дословно, ориентируйся только на стиль и настроение):\n- " + "\n- ".join(exampleLines)
 	prompt += "\nПридумай одну НОВУЮ короткую фразу в этом же духе. Сохраняй характер и примерную длину примеров."
 
-	_enqueue(prompt, [], callback, "state")
+	_enqueue(prompt, [], callback, tag)
 
 
 ## Lightweight variant for INSTANT events (petting, getting picked up,
@@ -1083,15 +1137,13 @@ func setInterval(minSeconds: float, maxSeconds: float) -> void:
 
 
 ## Console command: aiCreativity <0.0-1.5>
-## Креативность влияет только на НОВЫЕ запросы к модели - а большая часть
-## фраз берётся из заранее нагенерированных пулов (до 20 штук на категорию).
-## Без сброса пулов после смены значения ещё долго показывались старые
-## фразы, и казалось, что настройка вообще ни на что не влияет.
+## Готовые пулы фраз при смене НЕ сбрасываются (чтобы не ждать прогрев
+## заново) - новое значение применяется к пулам по мере их дозаполнения,
+## а к экранным реакциям - сразу, со следующего скриншота.
 func setCreativity(value: float) -> void:
 	creativity = clampf(value, 0.0, 1.5)
 	gbData.settings["llmCreativity"] = creativity
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
-	_resetPoolsForNewSettings()
 
 
 ## Console command: aiRepetitionGuard <1.0-2.0>
@@ -1099,13 +1151,6 @@ func setRepetitionGuard(value: float) -> void:
 	repetitionGuard = clampf(value, 1.0, 2.0)
 	gbData.settings["llmRepetitionGuard"] = repetitionGuard
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
-	_resetPoolsForNewSettings()
-
-
-func _resetPoolsForNewSettings() -> void:
-	_clearPrefetchPools()
-	Console.print("[color=CYAN]Готовые фразы сброшены - ИИ сгенерирует новые уже с новыми настройками (1-2 минуты).[/color]")
-	poolsCleared.emit()
 
 
 ## Console command: aiModel <name>

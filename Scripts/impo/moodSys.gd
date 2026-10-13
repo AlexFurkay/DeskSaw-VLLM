@@ -22,6 +22,20 @@ var maxmood = gbData.settings.get("maxMood", 100)
 var pet
 #for temporary events
 var tempOffset: float = 0.0
+## Отдельно от tempOffset: поглаживания/испуг перезаписывают tempOffset
+## через _tempVal(), и они бы мгновенно "сбивали" действие дозы.
+var drugOffset: float = 0.0
+var _drugTween: Tween
+
+## Фентанил: настроение резко вверх на boost, плавно спадает за duration,
+## в конце - "отходняк": базовое настроение падает на comedown.
+func startDrugHigh(boost: float, duration: float, comedown: float) -> void:
+	if _drugTween and _drugTween.is_valid():
+		_drugTween.kill()
+	drugOffset = clampf(drugOffset + boost, 0.0, 150.0)
+	_drugTween = create_tween()
+	_drugTween.tween_property(self, "drugOffset", 0.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	_drugTween.tween_callback(func(): mood = clampf(mood - comedown, minmood, maxmood))
 #make sure things are updated
 
 
@@ -69,7 +83,7 @@ func moodCheck(delta: float = 1.0) -> float:
 	_sync_mood()
 
 
-	return snappedf(clamp(mood + tempOffset, minmood, maxmood), 0.05)
+	return snappedf(clamp(mood + tempOffset + drugOffset, minmood, maxmood), 0.05)
 func tempCalc(total: float = 0.0):
 	total -= clamp(((1.0 - (gbData.data["saw"][petId]["health"] * 0.01)) * 3), 0.0, 3)
 	total = clamp(total, minmood, maxmood)

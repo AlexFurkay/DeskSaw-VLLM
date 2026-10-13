@@ -50,6 +50,16 @@ func _onItemEnter(body: Node2D) -> void:
 		return
 
 	var props = body.get_node("properties").propertyTable
+
+	# Препараты (сейчас только фентанил) - своя логика в behavior.gd
+	if props.get("drug", "") == "fentanyl":
+		healDb = true
+		AudioManager.play_sfx(AudioManager.eat) # заглушка, как и у лечения
+		get_parent().takeFentanyl()
+		body.queue_free()
+		awaitDB()
+		return
+
 	var healAmount: float = props.get("healIfConsumable", 0.0)
 
 	if healAmount <= 0.0:
