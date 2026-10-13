@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="Shader" uid="uid://b1x03c3wn85hg" path="res://assets/shaders/outline.gdshader" id="1_sh"]
-[ext_resource type="Texture2D" path="res://assets/objectSpr/Cap.png" id="2_tx"]
+[ext_resource type="Texture2D" path="res://assets/objectSpr/Beret.png" id="2_tx"]
 [ext_resource type="Script" uid="uid://cbm2skouhq87k" path="res://Scripts/impo/dragObj.gd" id="3_dr"]
 [ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_pr"]
 

@@ -225,6 +225,7 @@ func _startDrag(mousePos: Vector2) -> void:
 
 func _stopDrag() -> void:
 	_dragging = false
+	get_parent().set_meta("releasedAt", Time.get_ticks_msec()) # health_handler: фентанил действует, только если его дал игрок
 
 	if _use_x11_input_regions:
 		TransparentWindow.RemoveInputRect(_drag_capture_region_id)

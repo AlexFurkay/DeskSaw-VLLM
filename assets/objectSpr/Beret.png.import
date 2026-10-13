@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cs2q2ffn7u3"
-path="res://.godot/imported/Cap.png-2087db865d73ceac56a568d0549a593d.ctex"
+uid="uid://co6an6vbaanf6"
+path="res://.godot/imported/Beret.png-0fcf31e4e4f2a66798acb11bdaa5cf51.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/objectSpr/Cap.png"
-dest_files=["res://.godot/imported/Cap.png-2087db865d73ceac56a568d0549a593d.ctex"]
+source_file="res://assets/objectSpr/Beret.png"
+dest_files=["res://.godot/imported/Beret.png-0fcf31e4e4f2a66798acb11bdaa5cf51.ctex"]
 
 [params]
 

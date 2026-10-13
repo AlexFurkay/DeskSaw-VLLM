@@ -53,8 +53,13 @@ func _onItemEnter(body: Node2D) -> void:
 
 	var props = body.get_node("properties").propertyTable
 
-	# Препараты (сейчас только фентанил) - своя логика в behavior.gd
+	# Препараты (сейчас только фентанил) - своя логика в behavior.gd.
+	# Действует ТОЛЬКО если укол делает игрок: шприц у него в руке или
+	# только что отпущен. Сама себе персонаж не колет никогда - даже если
+	# шприц случайно окажется у головы (лежит на тумбочке, отскочил и т.п.).
 	if props.get("drug", "") == "fentanyl":
+		if not _givenByUser(body):
+			return
 		healDb = true
 		AudioManager.play_sfx(AudioManager.eat) # заглушка, как и у лечения
 		get_parent().takeFentanyl()
@@ -136,6 +141,14 @@ func _spawnBlood(countRange: Array) -> void:
 	get_tree().current_scene.add_child(burst)
 	burst.global_position = get_parent().moveSys.rigidtorso.global_position
 	burst.burst(randi_range(countRange[0], countRange[1]))
+
+
+func _givenByUser(body: Node) -> bool:
+	var drag = body.get_node_or_null("draggable")
+	if drag and drag._dragging:
+		return true
+	var releasedAt: int = body.get_meta("releasedAt", -100000)
+	return Time.get_ticks_msec() - releasedAt < 2000
 
 
 func awaitDB() -> void:

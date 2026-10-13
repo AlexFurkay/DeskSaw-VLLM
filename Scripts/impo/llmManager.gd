@@ -29,7 +29,7 @@ signal poolsCleared()
 const OLLAMA_URL := "http://127.0.0.1:11434/api/generate" # NOT "localhost" - on some Windows setups (VPN software installed even if inactive, IPv6/DNS quirks) resolving "localhost" can add seconds of delay per request; the literal loopback IP skips DNS resolution entirely
 
 var modelName := "qwen3-vl:8b-instruct"
-var creativity := 0.8    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
+var creativity := 0.7    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
 
 ## _on_screen_tick() runs on its own, independent of any specific pet, so it
 ## has no direct line to a pet's mood/health. behavior.gd/health_handler.gd
@@ -228,16 +228,33 @@ func _purgeProfaneLines() -> void:
 ## Finds the index of the first real sentence-ending punctuation in `s`,
 ## skipping over "..." (an ellipsis of 2+ dots is a pause, not a sentence
 ## end) - a plain single "." still counts. Returns -1 if none found.
-func _findSentenceEnd(s: String) -> int:
-	var i := 0
+## "…" (один символ-многоточие) - тоже пауза, а не конец: раньше
+## "Неплохо… для тебя" обрезалось до "Неплохо…".
+func _findSentenceEnd(s: String, from: int = 0) -> int:
+	var i := from
 	while i < s.length():
 		var c := s[i]
-		if c == "!" or c == "?" or c == "…":
+		if c == "!" or c == "?":
 			return i
-		if c == "." and (i + 1 >= s.length() or s[i + 1] != "."):
+		if c == "." and (i + 1 >= s.length() or s[i + 1] != ".") and (i == 0 or s[i - 1] != "."):
 			return i
 		i += 1
 	return -1
+
+
+## Оставляет первое предложение (отрезает ролевые "действия" после него),
+## но если оно короче 3 слов ("Шляпа?", "Ах ты!") - берёт и следующее:
+## раньше от "Шляпа? Ну ты и модник..." оставалось одно "Шляпа?".
+func _cutToFirstSentence(s: String) -> String:
+	var end := _findSentenceEnd(s)
+	while end > 0 and s.substr(0, end + 1).split(" ", false).size() < 3:
+		var nxt := _findSentenceEnd(s, end + 1)
+		if nxt == -1:
+			return s.strip_edges()
+		end = nxt
+	if end > 0:
+		return s.substr(0, end + 1).strip_edges()
+	return s.strip_edges()
 
 
 ## Heuristic: does this look like the model broke character entirely and
@@ -361,7 +378,7 @@ func reloadLore() -> void:
 
 func _buildBasePrompt(category: String = "") -> String:
 	var parts: Array[String] = []
-	parts.append("Ты - маленькое существо, которое живёт на рабочем столе человека. Ты женского рода - всегда согласуй слова по родам как о себе говорила бы девушка/самка ('я сделала', 'я готова', 'я была', а не 'сделал'/'готов'/'был'). Ты говоришь от СВОЕГО лица, только о своих чувствах и мыслях. Ты никогда не описываешь, что делает или чувствует человек, каким бы ни было действие ('держат', 'гладят' и т.п.) - оно происходит С ТОБОЙ, а не наоборот. Обращайся к человеку ТОЛЬКО на 'ты' - никогда 'вы'/'вам'/'держите'/'откройте', звучит слишком официально и совсем не в характере.")
+	parts.append("Ты - маленькое существо, которое живёт на рабочем столе человека. Ты женского рода - всегда согласуй слова по родам как о себе говорила бы девушка/самка ('я сделала', 'я готова', 'я была', а не 'сделал'/'готов'/'был'). Ты говоришь от СВОЕГО лица, только о своих чувствах и мыслях. Ты никогда не описываешь, что делает или чувствует человек, каким бы ни было действие ('держат', 'гладят' и т.п.) - оно происходит С ТОБОЙ, а не наоборот. Обращайся к человеку ТОЛЬКО на 'ты' - никогда 'вы'/'вам'/'держите'/'откройте', звучит слишком официально и совсем не в характере. Человек - мужского рода: о нём говори 'ты сделал', 'ты пришёл', 'ты перестал' (а о себе - в женском роде, как сказано выше).")
 	parts.append("Отвечай ТОЛЬКО по-русски, одной фразой (3-20 слов). Никогда не говори, что тебе что-то 'прислали' или 'отправили' - ты сама всё видишь и чувствуешь.")
 	parts.append("Выведи ТОЛЬКО саму реплику - без кавычек, без пояснений в скобках, без описания действий или тона (никаких '*зевает*', 'вздрагивает и говорит'). Только слова, которые ты произносишь вслух.")
 	parts.append("Почти всегда говори утверждением или восклицанием, а не вопросом - риторический вопрос ('Тебе снова нужно...?', 'Как вс...?') звучит неестественно из твоих уст. Вопрос уместен очень редко и только если он предельно простой и короткий.")
@@ -846,9 +863,7 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 				_logDebugLine(category, "REJECTED:TOO_SHORT", raw)
 			continue
 
-		var firstEnd := _findSentenceEnd(cleaned)
-		if firstEnd > 0:
-			cleaned = cleaned.substr(0, firstEnd + 1).strip_edges()
+		cleaned = _cutToFirstSentence(cleaned)
 
 		if _looksLikeGarbage(cleaned):
 			_logDebugLine(category, "REJECTED:GARBAGE", raw)
@@ -1066,9 +1081,7 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 		# ("надевает шляпу...", "вздрагиваю и..."). Cutting after the first
 		# terminator removes that second sentence outright, whatever it says.
 		if text != "":
-			var firstEnd := _findSentenceEnd(text)
-			if firstEnd > 0:
-				text = text.substr(0, firstEnd + 1).strip_edges()
+			text = _cutToFirstSentence(text)
 
 		# Only touch the ending if Ollama confirms num_predict actually cut
 		# generation short - a missing "." otherwise is a deliberate style
@@ -1241,7 +1254,7 @@ func listAvailableModels() -> void:
 ## защита от повторов]. При переключении модели (aiModel) применяются сами.
 ## Для модели не из списка текущие значения не трогаем.
 const MODEL_PRESETS := {
-	"qwen3-vl:8b-instruct": [0.8, 1.2],
+	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
 	"ministral-3:14b": [0.6, 1.1],
 }
 

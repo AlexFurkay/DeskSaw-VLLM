@@ -581,7 +581,7 @@ func _registerImpact(speed: float) -> void:
 
 
 # ---------------- Одежда ----------------
-## Предмет с "wearable" в propertyTable ("head" - шляпа/кепка, "eyes" -
+## Предмет с "wearable" в propertyTable ("head" - шляпа/берет, "eyes" -
 ## очки) надевается, когда его подносят к голове. В каждый слот - одна вещь.
 ## Сильный удар (KNOCKOFF_IMPACT) сбивает одежду, она падает обратно
 ## предметом. Надетое держится только в пределах запуска.
@@ -592,7 +592,7 @@ func _registerImpact(speed: float) -> void:
 ## берётся позиция по слоту.
 const WEAR_OFFSETS := {
 	"hat": Vector2(-1.5, -7.0),
-	"cap": Vector2(0.5, -7.0),
+	"beret": Vector2(-1.5, -5.5),
 	"glasses": Vector2(-1.5, 3.0),
 }
 const WEAR_SLOT_DEFAULT := {"head": "hat", "eyes": "glasses"}
@@ -648,6 +648,7 @@ func _knockOffClothes() -> void:
 			get_tree().current_scene.add_child(item)
 			item.global_position = pos
 			item.set_meta("itemName", w["key"])
+			_seenItems[item.get_instance_id()] = true # уже прозвучит clothesOff - отдельная реакция "предмет рядом" не нужна
 			if item is RigidBody2D:
 				item.linear_velocity = Vector2(randf_range(-250.0, 250.0), randf_range(-450.0, -250.0))
 				item.angular_velocity = randf_range(-8.0, 8.0)
@@ -913,30 +914,68 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 ## "itemName" не имя, а служебный объект ItemEntry, а этот код читал его
 ## в переменную типа String. Теперь предмет опознаётся по имени его файла
 ## сцены (burger.tscn -> "burger"), meta вообще не нужна.
+## Реакция - только на предмет, который ВПЕРВЫЕ оказался рядом (положили,
+## подкатился, персонаж сам подошёл), а не по таймеру на всё подряд:
+## раньше при куче предметов персонаж находил "ещё не обсуждённый" почти
+## каждый интервал. Плюс общий перерыв между любыми реакциями на предметы
+## и отдельный - на повтор того же самого предмета.
 const ITEM_NEAR_DISTANCE := 600.0 # пикс экрана при petSize 4 - что считается "рядом"
-const ITEM_REPEAT_MS := 300000
+const ITEM_GLOBAL_COOLDOWN_MS := 180000 # между любыми реакциями на предметы
+const ITEM_REPEAT_MS := 900000 # тот же предмет (по имени) - не чаще
 var _itemCommentedAt: Dictionary = {} # имя предмета -> когда последний раз комментировали
+var _seenItems: Dictionary = {} # instance_id предмета -> уже был рядом (новым не считается)
+var _lastItemReactionMsec := -ITEM_GLOBAL_COOLDOWN_MS
 
 func itemWatch() -> void:
+	var firstScan := true
 	while get_tree():
-		var minT := float(GlobalVariable.getNumFromString(str(gbData.settings.get("minDialogueTime", "30"))))
-		var maxT := float(GlobalVariable.getNumFromString(str(gbData.settings.get("maxDialogueTime", "65"))))
-		await get_tree().create_timer(randf_range(minT, maxf(minT, maxT))).timeout
+		await get_tree().create_timer(3.0).timeout
+		var fresh: Array = []
+		for body in _nearbyItemBodies():
+			var id: int = body.get_instance_id()
+			if _seenItems.has(id):
+				continue
+			_seenItems[id] = true
+			if not firstScan: # то, что уже лежало рядом при появлении персонажа, - не "новое"
+				fresh.append(body)
+		firstScan = false
+		if fresh.is_empty():
+			continue
 		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
 			continue
 		if beingDragged or isSleeping or shocked or isUnconscious or ragdolled:
 			continue
-		var key := _getNearbyItemKey()
+		var now := Time.get_ticks_msec()
+		if now - _lastItemReactionMsec < ITEM_GLOBAL_COOLDOWN_MS:
+			continue
+		var key := ""
+		for body in fresh:
+			var k := _itemKey(body)
+			if now - int(_itemCommentedAt.get(k, -ITEM_REPEAT_MS)) >= ITEM_REPEAT_MS:
+				key = k
+				break
 		if key == "":
 			continue
-		var now := Time.get_ticks_msec()
-		if now - int(_itemCommentedAt.get(key, -ITEM_REPEAT_MS)) < ITEM_REPEAT_MS:
-			continue
 		_itemCommentedAt[key] = now
+		_lastItemReactionMsec = now
 		var extra := ""
 		if hungerHandler.hungry < 30.0 and _isFoodKey(key):
 			extra = "\nТы голодна."
 		LLMManager.requestItemReaction(_skinTag(), ITEM_DESCRIPTIONS[key], _aiStateHint() + extra, _on_state_reaction)
+
+
+## Знакомые предметы (есть в ITEM_DESCRIPTIONS) в радиусе ITEM_NEAR_DISTANCE.
+func _nearbyItemBodies() -> Array:
+	var result: Array = []
+	var maxDist: float = ITEM_NEAR_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
+	for body in detectRange.inRadius.keys():
+		if not is_instance_valid(body):
+			continue
+		if not ITEM_DESCRIPTIONS.has(_itemKey(body)):
+			continue
+		if moveSys.rigidtorso.global_position.distance_to(body.global_position) < maxDist:
+			result.append(body)
+	return result
 
 
 ## Имя предмета по файлу его сцены ("res://scenes/objects/burger.tscn" -> "burger").
@@ -1055,25 +1094,10 @@ const ITEM_DESCRIPTIONS := {
 	"chair": "деревянный стул",
 	"nightstand": "прикроватная тумбочка с ящиками",
 	"hat": "шляпа",
-	"cap": "кепка",
+	"beret": "берет",
 	"glasses": "прозрачные очки",
 }
 
-## Ближайший знакомый предмет в радиусе ITEM_NEAR_DISTANCE, или "".
-func _getNearbyItemKey() -> String:
-	var bestKey := ""
-	var bestDist: float = ITEM_NEAR_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
-	for body in detectRange.inRadius.keys():
-		if not is_instance_valid(body):
-			continue
-		var key := _itemKey(body)
-		if not ITEM_DESCRIPTIONS.has(key):
-			continue
-		var d: float = moveSys.rigidtorso.global_position.distance_to(body.global_position)
-		if d < bestDist:
-			bestDist = d
-			bestKey = key
-	return bestKey
 
 ## Categories that are a reaction to something sudden happening right now -
 ## they should jump straight to the front of the display queue instead of
@@ -1117,7 +1141,7 @@ const CATEGORY_SITUATION := {
 	"lastmoments": "Твоё здоровье равно нулю. Это твоя последняя короткая фраза, драматичная или слегка пафосная, перед тем как ты навсегда потеряешь сознание.",
 	"healed": "Тебе только что помогли вылечиться, тебе физически стало лучше, но ты всё ещё в невесёлом настроении.",
 	"fentanyl": "Тебе только что вкололи фентанил. Накрывает тёплой волной - боль и тревога уходят, всё плывёт, тебе слишком хорошо.",
-	"withdrawal": "У тебя ломка - давно не было фентанила. Тебя знобит, всё ломит, ты раздражена и тебе очень плохо, ты хочешь ещё дозу.",
+	"withdrawal": "У тебя ломка - давно не было фентанила. Тебя знобит, всё ломит, ты раздражена и тебе очень плохо, ты хочешь ещё дозу и просишь человека дать её тебе.",
 	"overdose": "Тебе вкололи слишком много фентанила подряд - передозировка. Ты проваливаешься в тяжёлую темноту, это последние слова перед тем, как ты отключишься.",
 }
 
@@ -1347,6 +1371,28 @@ func wandering() -> void:
 			continue # просто постоять
 
 		await _walkTo(_pickWalkTarget())
+		_tryTossSyringe()
+
+
+## Дошла в ломке до шприца - толкает его в сторону курсора и требует,
+## чтобы укол сделал человек. Сама себе - никогда (см. health_handler:
+## фентанил действует, только если шприц держит/только что отпустил игрок).
+const TOSS_SITUATION := "У тебя ломка. Ты добралась до шприца с фентанилом, но колоть себя сама ни за что не станешь - ты толкаешь шприц к человеку и требуешь, чтобы укол сделал он."
+var _tossTarget: Node2D = null
+
+func _tryTossSyringe() -> void:
+	var syringe := _tossTarget
+	_tossTarget = null
+	if syringe == null or not is_instance_valid(syringe) or not _inWithdrawal() or ragdolled or isUnconscious or isSleeping:
+		return
+	var reach: float = 120.0 * float(gbData.settings.get("petScale", 4.0)) / 4.0
+	if absf(syringe.global_position.x - moveSys.rigid.global_position.x) > reach:
+		return
+	if syringe is RigidBody2D:
+		var toCursor: Vector2 = (moveSys.rigid.get_global_mouse_position() - syringe.global_position).normalized()
+		syringe.linear_velocity = toCursor * 650.0 + Vector2(0.0, -250.0)
+		syringe.angular_velocity = randf_range(-10.0, 10.0)
+	_say("withdrawal", 0.0, true, TOSS_SITUATION, "toss")
 
 
 func _pickWalkTarget() -> float:
@@ -1354,6 +1400,13 @@ func _pickWalkTarget() -> float:
 	var x: float = moveSys.rigid.global_position.x
 	var margin := w * 0.06
 
+	# ломка - к шприцу с фентанилом (колоть себя сама она НЕ может - только
+	# отбросит шприц к человеку, см. _tryTossSyringe)
+	if _inWithdrawal() and randf() < 0.8:
+		var syringe := _nearestBody(func(body, key): return key == "fentanyl")
+		if syringe:
+			_tossTarget = syringe
+			return syringe.global_position.x
 	# голодна - к ближайшей еде
 	if hungerHandler.hungry < 30.0 and randf() < 0.7:
 		var food := _nearestBody(func(body, key): return _isFoodKey(key))
