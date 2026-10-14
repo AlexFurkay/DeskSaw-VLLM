@@ -529,8 +529,14 @@ func _physics_process(_delta: float) -> void:
 			moveSys.jump()
 	#detect speed and aiosdhfopjkasfguopjasfgsdfhcvio[]
 	#and ragdoll based on taht
-	if not ragdolled and (abs(moveSys.rigid.linear_velocity.x) > moveSys.ragdollspeed or beingDragged):
+	var vx: float = moveSys.rigid.linear_velocity.x
+	# Собственная ходьба (идёт в ту же сторону, скорость лишь немного выше
+	# порога) - не "сбита с ног". Настоящий толчок даёт скорость заметно выше.
+	var ownWalk: bool = moveSys.currstate == moveSys.states.moving and signf(vx) == signf(moveSys.dir) and absf(vx) < moveSys.ragdollspeed * 1.3
+	if not ragdolled and ((absf(vx) > moveSys.ragdollspeed and not ownWalk) or beingDragged):
 		_bodyPrevValid = false
+		if not beingDragged:
+			print("KNOCK[%s] horizontal vx=%.0f state=%s" % [_skinTag(), moveSys.rigid.linear_velocity.x, moveSys.states.keys()[moveSys.currstate]])
 		tempRagdoll(not beingDragged, false, abs(moveSys.rigid.linear_velocity.x)) # true = genuine uncontrolled fall, not a hand-release
 	elif not ragdolled:
 		# Стоит на ногах: ловим жёсткое приземление (падение вертикально,
@@ -541,6 +547,7 @@ func _physics_process(_delta: float) -> void:
 			var hit := (_prevBodyVel - bodyVel).length()
 			if hit >= IMPACT_LIGHT:
 				_bodyPrevValid = false
+				print("KNOCK[%s] landing hit=%.0f prev=%s now=%s state=%s" % [_skinTag(), hit, _prevBodyVel, bodyVel, moveSys.states.keys()[moveSys.currstate]])
 				tempRagdoll(true, false, hit)
 				return
 		_prevBodyVel = bodyVel
@@ -594,6 +601,7 @@ func _registerImpact(speed: float) -> void:
 	_lastImpactMsec = now
 	if LLMManager.debugTags:
 		Console.print("[color=YELLOW]Удар: сила %.0f -> урон %.0f[/color]" % [speed, dmg])
+	print("IMPACT[%s] hit=%.0f dmg=%.0f" % [_skinTag(), speed, dmg])
 	if isSleeping:
 		wakeUp()
 	_impactThisRagdoll = true
@@ -1581,8 +1589,9 @@ func _walkTo(targetX: float) -> void:
 		speedMul = 0.8
 	elif isSad:
 		speedMul = 0.9
-	elif moodSys.mood > 50.0:
-		speedMul = 1.15
+	# Быстрее обычного НЕ разгоняем: физика ходьбы "перелетает" лимит
+	# скорости, и при x1.15 персонаж разгонялся до ~597 - выше порога
+	# "сбита с ног" (575), то есть сбивал сам себя (054P, настроение > 50).
 	var high := _isHigh()
 	if high:
 		speedMul *= 0.8 # плюс случайные остановки ниже - этого хватает, чтобы походка была "пьяной"
