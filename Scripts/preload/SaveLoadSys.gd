@@ -112,6 +112,42 @@ func _ready():
 	InitAutosave()
 
 
+func _skinVersion(charJsonPath: String) -> int:
+	if not FileAccess.file_exists(charJsonPath):
+		return 0
+	var data = JSON.parse_string(FileAccess.get_file_as_string(charJsonPath))
+	return int(data.get("version", 0)) if data is Dictionary else 0
+
+
+## Обновление существующего скина: только картинки + character.json.
+func _copySkinFiles(srcRoot: String, dstRoot: String, onlyArtAndPassport: bool) -> int:
+	var srcDir := DirAccess.open(srcRoot)
+	if srcDir == null:
+		return 0
+	var count := 0
+	var entries := srcDir.get_files()
+	for entryName in entries:
+		var fileName: String = entryName.trim_suffix(".import")
+		if fileName != entryName and fileName in entries:
+			continue
+		var ext := fileName.get_extension().to_lower()
+		if onlyArtAndPassport and not (ext in ["png", "jpg", "jpeg"] or fileName == "character.json"):
+			continue
+		var srcPath := srcRoot + "/" + fileName
+		var dstPath := dstRoot + "/" + fileName
+		if ext in ["png", "jpg", "jpeg"]:
+			var tex: Texture2D = load(srcPath)
+			if tex and tex.get_image().save_png(dstPath) == OK:
+				count += 1
+		else:
+			var out := FileAccess.open(dstPath, FileAccess.WRITE)
+			if out:
+				out.store_buffer(FileAccess.get_file_as_bytes(srcPath))
+				out.close()
+				count += 1
+	return count
+
+
 ## Копирует в user://skin/ любые скины, зашитые в саму сборку под
 ## res://defaults/skins/<Имя>/, которых у игрока ещё НЕТ. Вызывается на
 ## КАЖДОМ запуске (не только первом) - так при обновлении, добавляющем
@@ -131,7 +167,15 @@ func _syncBundledSkins() -> void:
 	for skinName in skinNames:
 		var userSkinDir: String = skinfilepath + "/" + skinName
 		if DirAccess.dir_exists_absolute(userSkinDir):
-			print("SYNC DEBUG: '%s' - у игрока уже есть папка, пропускаю" % skinName)
+			# Обновление скина: если в паспорте сборки "version" выше, чем у игрока,
+			# перезаписываем ТЕКСТУРЫ и паспорт (фразы и лор не трогаем - вдруг
+			# игрок их правил). Без поля version скин не обновляется никогда.
+			var bundledVer := _skinVersion(bundledRoot + "/" + skinName + "/character.json")
+			if bundledVer > 0 and _skinVersion(userSkinDir + "/character.json") < bundledVer:
+				var updated := _copySkinFiles(bundledRoot + "/" + skinName, userSkinDir, true)
+				print("SaveLoadSys: скин '%s' обновлён до версии %d (%d файлов)" % [skinName, bundledVer, updated])
+			else:
+				print("SYNC DEBUG: '%s' - у игрока уже есть папка, пропускаю" % skinName)
 			continue # у игрока уже есть эта папка - не трогаем, вдруг он сам её менял
 
 		var madeDir := DirAccess.make_dir_recursive_absolute(userSkinDir)

@@ -666,13 +666,45 @@ const CHAT_ANGLES := [
 	"ответь с иронией над ситуацией.",
 ]
 
-func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable) -> void:
+## Отношение персонажа к другому - из паспорта (relations[папка скина]).
+func relationTo(skinName: String, otherSkin: String) -> String:
+	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+		if FileAccess.file_exists(path):
+			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if data is Dictionary and data.get("relations") is Dictionary:
+				var r := String(data["relations"].get(otherSkin, ""))
+				return "" if r == "?" else r
+	return ""
+
+
+## Один ИИ-персонаж сам заговаривает с другим, стоящим рядом.
+func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var tag := skinTag + ":pettalk"
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\nРядом с тобой на рабочем столе стоит другой персонаж - %s. Скажи ему что-нибудь коротко и в своём характере: заговори, подколи, спроси о чём-то или прокомментируй его." % PlayerManager.displayNameFor(otherSkin)
+	var rel := relationTo(skinTag, otherSkin)
+	if rel != "":
+		prompt += "\nТвоё отношение к нему: " + rel + "."
+	prompt += "\nТвоё состояние: " + stateText.strip_edges() + "\nТвоя реплика (только сама реплика):"
+	_enqueue(prompt, [], callback, tag)
+
+
+func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
-	prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Это живой разговор: отвечай по смыслу его слов, живо и в своём характере, можно одной-двумя фразами." % speaker
+	if speakerSkin == "":
+		prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Это живой разговор: отвечай по смыслу его слов, живо и в своём характере, можно одной-двумя фразами." % speaker
+	else:
+		# ответ другому ИИ-персонажу (behavior.petTalkLoop)
+		prompt += "\nС тобой заговорил %s - другой персонаж, который живёт рядом на рабочем столе. Ответь ему коротко, по смыслу его слов и в своём характере." % speaker
+		var rel := relationTo(skinTag, speakerSkin)
+		if rel != "":
+			prompt += " Твоё отношение к нему: " + rel + "."
 	prompt += "\nКаждый ответ строй ПО-НОВОМУ: не копируй начало, концовку или шаблон своих прошлых ответов из разговора ниже. Не начинай ответ с повтора слов собеседника."
 	var worn := _wornOutPhrases(tag)
 	if worn.size() > 0:

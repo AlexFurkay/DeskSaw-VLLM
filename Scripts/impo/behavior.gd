@@ -447,6 +447,7 @@ func _initalSpawn() -> void:
 	checker()
 	itemWatch()
 	drugLoop()
+	petTalkLoop()
 	pass
 
 func sleep():
@@ -891,12 +892,102 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 			var close := text.find(">")
 			action = text.substr(5, close - 5)
 			text = text.substr(close + 1)
+		elif chatHistory.size() > 0:
+			# модель согласилась словами, но забыла метку - угадываем сами
+			action = _guessChatAction(String(chatHistory[chatHistory.size() - 1].get("text", "")), text)
 		_queueMessage(text, 1.0, true)
 		# голос при ответе: обычный, при плохом настроении - злой
 		AudioManager.play_random(voiceSet["bark" if moodSys.mood < -20.0 else "whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 		onReply.call(text)
 		if action != "":
 			_doChatAction(action))
+
+
+## Запасной вариант, если в ответе нет метки действия: в реплике игрока есть
+## просьба, а в ответе - согласие без отказа.
+const CHAT_REQUEST_WORDS := {
+	"come": ["подойди", "иди сюда", "иди ко мне", "ко мне", "сюда", "подходи"],
+	"lie": ["ляг", "ложись", "ляжь", "приляг"],
+	"sit": ["сядь", "садись", "присядь"],
+	"stand": ["встань", "вставай"],
+	"jump": ["прыгни", "прыгай"],
+	"away": ["отойди", "отойти"],
+}
+const CHAT_YES_WORDS := ["иду", "бегу", "сейчас", "ладно", "хорошо", "так и быть", "давай", "уже", "подойду", "лягу", "сяду", "встаю", "прыгаю", "ок"]
+const CHAT_NO_WORDS := ["нет", "не буду", "не хочу", "не пойду", "не стану", "ни за что", "отстань", "сам "]
+
+func _guessChatAction(request: String, reply: String) -> String:
+	var req := request.to_lower()
+	var rep := " " + reply.to_lower() + " "
+	for w in CHAT_NO_WORDS:
+		if rep.contains(w):
+			return ""
+	var agreed := false
+	for w in CHAT_YES_WORDS:
+		if rep.contains(w):
+			agreed = true
+			break
+	if not agreed:
+		return ""
+	for action in CHAT_REQUEST_WORDS.keys():
+		for w in CHAT_REQUEST_WORDS[action]:
+			if req.contains(w):
+				return action
+	return ""
+
+
+## Случайный разговор двух ИИ-персонажей, стоящих рядом: один заговаривает,
+## второй отвечает. Редко - не чаще раза в PET_TALK_COOLDOWN_MS на всех.
+const PET_TALK_DISTANCE := 900.0 # пикс экрана при petSize 4
+const PET_TALK_COOLDOWN_MS := 180000
+static var _lastPetTalkMsec := -PET_TALK_COOLDOWN_MS
+
+func petTalkLoop() -> void:
+	while get_tree():
+		await get_tree().create_timer(randf_range(60.0, 120.0)).timeout
+		if isPlayer or isUnconscious or isSleeping or beingDragged or ragdolled or shocked:
+			continue
+		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
+			continue
+		if Time.get_ticks_msec() - _lastPetTalkMsec < PET_TALK_COOLDOWN_MS or randf() < 0.4:
+			continue
+		var other = _nearestTalkPartner()
+		if other == null:
+			continue
+		_lastPetTalkMsec = Time.get_ticks_msec()
+		var otherSkin: String = other._skinTag()
+		LLMManager.requestPetOpener(_skinTag(), otherSkin, _petStats() + _aiStateHint(), func(line: String):
+			_queueMessage(line, 1.0, true)
+			AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+			if is_instance_valid(other):
+				other.replyToPet(_skinTag(), line))
+
+
+func _nearestTalkPartner() -> Node:
+	var maxDist: float = PET_TALK_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
+	for pet in get_tree().get_nodes_in_group("pets"):
+		if pet == self or pet.isPlayer or pet.isUnconscious or pet.isSleeping:
+			continue
+		if moveSys.rigidtorso.global_position.distance_to(pet.moveSys.rigidtorso.global_position) < maxDist:
+			return pet
+	return null
+
+
+func _petStats() -> String:
+	return "настроение %.0f из 100, здоровье %.0f из 100" % [moodSys.mood + moodSys.drugOffset, healthHandler.health]
+
+
+## Ответ другому ИИ-персонажу (вызывает его petTalkLoop).
+func replyToPet(speakerSkin: String, line: String) -> void:
+	if isPlayer or isUnconscious or isSleeping:
+		return
+	var speakerName: String = PlayerManager.displayNameFor(speakerSkin)
+	var onReply := func(text: String):
+		if text.begins_with("<act:"):
+			text = text.substr(text.find(">") + 1) # действия - только по просьбе игрока
+		_queueMessage(text, 1.0, true)
+		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+	LLMManager.requestChatReply(_skinTag(), speakerName, [{"who": speakerName, "text": line}], _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin)
 
 
 ## Действие, на которое ИИ-персонаж сам согласился в разговоре с игроком.
