@@ -1,0 +1,13 @@
+{
+	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
+	"version": 1,
+	"textVersion": 1,
+	"name": "Orange",
+	"gender": "male",
+	"race": "Orange",
+	"saw": "Saw-02",
+	"relations": {
+		"Orange": "good - своя раса",
+		"*": "good: простодушно дружелюбен ко всем, хочет дружить, не замечает подколок"
+	}
+}

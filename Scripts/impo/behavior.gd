@@ -407,11 +407,11 @@ func _tryShowQueued() -> void:
 	dialogueSys.setDia(entry["text"], entry["speed"], 2.0, true)
 
 
-func _on_llm_reaction(text: String) -> void:
+func _on_llm_reaction(text: String, direct: bool = false) -> void:
 	if isPlayer or beingDragged or isSleeping or shocked:
 		return
 	# у нескольких питомцев на экране — не все обязаны реагировать разом
-	if gbData.data["saw"].size() > 1 and randf() < 0.5:
+	if not direct and gbData.data["saw"].size() > 1 and randf() < 0.5:
 		return
 	_queueMessage(text)
 
@@ -940,8 +940,8 @@ func _guessChatAction(request: String, reply: String) -> String:
 ## второй отвечает. Редко - не чаще раза в PET_TALK_COOLDOWN_MS на всех.
 const PET_TALK_DISTANCE := 900.0 # пикс экрана при petSize 4
 const PET_TALK_COOLDOWN_MS := 180000
-const PET_REPLY_PAUSE_MIN := 4.0 # пауза после того, как первый договорил, сек
-const PET_REPLY_PAUSE_MAX := 7.0
+const PET_REPLY_PAUSE_MIN := 3.6 # пауза после того, как первый договорил, сек
+const PET_REPLY_PAUSE_MAX := 6.3
 static var _lastPetTalkMsec := -PET_TALK_COOLDOWN_MS
 
 func petTalkLoop() -> void:
@@ -987,7 +987,7 @@ func replyToPet(speakerSkin: String, line: String) -> void:
 	# Ответ генерируется сразу, но показывается не раньше, чем собеседник
 	# допечатает свою фразу (~0.04 с на букву, x8 на знаках препинания) + пауза -
 	# иначе реплики шли почти впритык.
-	var showAt: int = Time.get_ticks_msec() + int((line.length() * 0.06 + randf_range(PET_REPLY_PAUSE_MIN, PET_REPLY_PAUSE_MAX)) * 1000.0)
+	var showAt: int = Time.get_ticks_msec() + int((line.length() * 0.054 + randf_range(PET_REPLY_PAUSE_MIN, PET_REPLY_PAUSE_MAX)) * 1000.0)
 	var onReply := func(text: String):
 		if text.begins_with("<act:"):
 			text = text.substr(text.find(">") + 1) # действия - только по просьбе игрока

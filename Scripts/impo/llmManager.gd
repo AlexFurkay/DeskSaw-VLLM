@@ -590,22 +590,39 @@ func _buildBasePrompt(category: String = "") -> String:
 	return "\n".join(parts)
 
 
+func _pickScreenSpeaker() -> Node:
+	var candidates: Array = []
+	for pet in get_tree().get_nodes_in_group("pets"):
+		if not (pet.isPlayer or pet.isSleeping or pet.isUnconscious or pet.beingDragged or pet.shocked):
+			candidates.append(pet)
+	return null if candidates.is_empty() else candidates[randi() % candidates.size()]
+
+
 func _on_screen_tick() -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		_scheduleScreenTick()
 		return
 
-	var png_bytes: PackedByteArray = ScreenCapture.GetScreenshotPng()
+	# Реакцию на экран говорит ОДИН случайный ИИ-персонаж - своим лором, родом
+	# и состоянием. Раньше одна фраза (с лором defaultSkin) рассылалась всем,
+	# и Expie говорил "я бы сделала точнее" голосом Voyager.
+	var speaker: Node = _pickScreenSpeaker()
 	_scheduleScreenTick()
+	if speaker == null:
+		return
+	var tag: String = speaker._skinTag() + ":screen"
 
+	var png_bytes: PackedByteArray = ScreenCapture.GetScreenshotPng()
 	if png_bytes.is_empty():
 		return
 
 	var images: Array = [Marshalls.raw_to_base64(png_bytes)]
-	var prompt := _buildBasePrompt("screen") + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Если на скриншоте видно маленькое пиксельное существо поверх окон - это {ТЫ САМА|ТЫ САМ}, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. НЕ описывай и не пересказывай, что на экране (никаких 'Это окно...', 'Здесь видно...', 'На экране...') - человек и сам это видит. Вместо этого ОТРЕАГИРУЙ на увиденное как живой персонаж, своими словами и со своим отношением. Не начинай фразу со слова 'Это'. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
+	var prompt := _buildBasePrompt(tag) + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Маленькие пиксельные существа поверх окон - это {ты сама|ты сам} и твои соседи по рабочему столу, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. НЕ описывай и не пересказывай, что на экране (никаких 'Это окно...', 'Здесь видно...', 'На экране...') - человек и сам это видит. Вместо этого ОТРЕАГИРУЙ на увиденное как живой персонаж, своими словами и со своим отношением. Не начинай фразу со слова 'Это'. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
 	prompt += "\nПодход к реакции на этот раз: " + _pickScreenAngle()
-	prompt += _screenMoodHealthHint()
-	_enqueue(prompt, images, func(text): llmReaction.emit(text), "screen")
+	prompt += speaker._aiStateHint()
+	_enqueue(prompt, images, func(text):
+		if is_instance_valid(speaker):
+			speaker._on_llm_reaction(text, true), tag)
 
 
 ## Почему экранные реакции звучали одинаково при любой креативности:
@@ -758,16 +775,52 @@ func relationTo(skinName: String, otherSkin: String) -> String:
 	return ""
 
 
+## Кто это: имя + вид, номер Saw и род из паспорта ("Voyager (вид Voyager, Saw-07, женского рода)").
+func aboutCharacter(skinName: String) -> String:
+	var shown: String = PlayerManager.displayNameFor(skinName)
+	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+		if FileAccess.file_exists(path):
+			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if data is Dictionary:
+				var bits: Array = []
+				if String(data.get("race", "")) != "":
+					bits.append("вид " + String(data["race"]))
+				if String(data.get("saw", "")) != "":
+					bits.append(String(data["saw"]))
+				bits.append("женского рода" if String(data.get("gender", "")) == "female" else "мужского рода")
+				return "%s (%s)" % [shown, ", ".join(bits)]
+	return shown
+
+
+## Поводы для разговора двух персонажей (один выбирается случайно).
+const PET_TOPICS := [
+	"то, чем сейчас занят человек за компьютером - пожалуйся, похвали или пошути об этом.",
+	"еда - чем вас тут кормят и чего бы хотелось.",
+	"ваше прошлое: лаборатория, тесты, корпорация, которая вас создала.",
+	"внешность или привычки собеседника - что тебе в нём кажется странным, смешным или впечатляющим.",
+	"ваши виды: чем твой вид лучше или хуже его вида.",
+	"человек, который с вами возится: как он с вами обращается.",
+	"скука - предложи собеседнику чем-нибудь заняться.",
+	"что-то недавно случившееся с тобой здесь (падение, сон, еда, тебя таскали курсором).",
+	"сон и усталость - кто из вас больше спит.",
+	"просто подколи собеседника в своём стиле.",
+	"спроси у собеседника что-то личное и простое.",
+	"страх - чего ты боишься здесь, на рабочем столе.",
+]
+
+
 ## Один ИИ-персонаж сам заговаривает с другим, стоящим рядом.
 func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable) -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":pettalk"
 	var prompt := _buildBasePrompt(tag)
-	prompt += "\nРядом с тобой на рабочем столе стоит другой персонаж - %s. Скажи ему что-нибудь коротко и в своём характере: заговори, подколи, спроси о чём-то или прокомментируй его." % PlayerManager.displayNameFor(otherSkin)
+	prompt += "\nРядом с тобой на рабочем столе стоит другой персонаж - %s. Заговори с ним коротко и в своём характере." % aboutCharacter(otherSkin)
 	var rel := relationTo(skinTag, otherSkin)
 	if rel != "":
 		prompt += "\nТвоё отношение к нему: " + rel + "."
+	# конкретный повод - без него реплики были гладкими, но ни о чём
+	prompt += "\nПовод заговорить: " + PET_TOPICS[randi() % PET_TOPICS.size()]
 	prompt += "\nТвоё состояние: " + stateText.strip_edges() + "\nТвоя реплика (только сама реплика):"
 	_enqueue(prompt, [], callback, tag)
 
@@ -782,7 +835,7 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 		prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Это живой разговор: отвечай по смыслу его слов, живо и в своём характере, можно одной-двумя фразами." % speaker
 	else:
 		# ответ другому ИИ-персонажу (behavior.petTalkLoop)
-		prompt += "\nС тобой заговорил %s - другой персонаж, который живёт рядом на рабочем столе. Ответь ему коротко, по смыслу его слов и в своём характере." % speaker
+		prompt += "\nС тобой заговорил %s - другой персонаж, который живёт рядом на рабочем столе. Ответь ему коротко, по смыслу его слов и в своём характере." % aboutCharacter(speakerSkin)
 		var rel := relationTo(skinTag, speakerSkin)
 		if rel != "":
 			prompt += " Твоё отношение к нему: " + rel + "."

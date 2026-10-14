@@ -1,0 +1,13 @@
+{
+	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
+	"version": 1,
+	"textVersion": 1,
+	"name": "Milky",
+	"gender": "male",
+	"race": "Milky",
+	"saw": "Saw-03",
+	"relations": {
+		"Milky": "good - своя раса",
+		"*": "neutral: вежливо, но прохладно и немного свысока; уважает тех, кто хорошо делает своё дело"
+	}
+}

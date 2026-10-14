@@ -1,0 +1,13 @@
+{
+	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
+	"version": 1,
+	"textVersion": 1,
+	"name": "Leapy",
+	"gender": "male",
+	"race": "Leapy",
+	"saw": "Saw-04",
+	"relations": {
+		"Leapy": "good - своя раса",
+		"*": "friendly teasing: по-приятельски задирает, подначивает и зовёт соревноваться, без злобы"
+	}
+}

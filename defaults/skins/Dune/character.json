@@ -1,0 +1,13 @@
+{
+	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
+	"version": 1,
+	"textVersion": 1,
+	"name": "Dune",
+	"gender": "male",
+	"race": "Dune",
+	"saw": "Saw-12",
+	"relations": {
+		"Dune": "good - своя раса",
+		"*": "neutral-голодный: равнодушен, в каждом сначала видит 'еду?', не понимает эмоций"
+	}
+}
