@@ -11,6 +11,8 @@ var bb: Array = ["[shake]", "[wave]"]
 var isTyping: bool = false
 var pool: Array = []
 var speedMod: float = 1.0
+## Во сколько раз дольше реплика висит на экране после печати (у перса-игрока 1.5).
+var holdMultiplier: float = 1.0
 
 signal starttalking()
 signal stoptalking()
@@ -71,7 +73,7 @@ func typeOut(string: String, speed_multiplier: float = 1.0):
 
 	isTyping = false
 	stoptalking.emit()
-	await get_tree().create_timer(string.length() * 0.2).timeout
+	await get_tree().create_timer(string.length() * 0.2 * holdMultiplier).timeout
 
 	if tre == h:
 		richtextlabel.visible_characters = 0

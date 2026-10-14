@@ -21,6 +21,8 @@ var speech: AudioStream
 @export var thudwoosh: AudioStream = load("res://assets/sounds/effects/thudswoosh.ogg")
 #random sfx
 @export var eat: AudioStream = load("res://assets/sounds/effects/eatCasSFX.wav")
+@export var heal: AudioStream = load("res://assets/sounds/effects/heal.mp3") # лечение: бинт/шприц/аптечка
+@export var injection: AudioStream = load("res://assets/sounds/effects/injection.mp3") # укол фентанила
 #----------------
 
 # NOTE: all individual sound toggles are handled in this script, but they are assigned in settings. not auto-made.

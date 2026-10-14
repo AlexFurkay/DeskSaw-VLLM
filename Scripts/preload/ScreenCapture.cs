@@ -27,7 +27,10 @@ public partial class ScreenCapture : Node // Autoloaded
 
     // How wide the sent image is, in pixels. Vision models don't need
     // full 4K - downscaling keeps requests fast and cheap.
-    private const int MAX_WIDTH = 1024;
+    // 1280: текст на скриншоте читается лучше, чем при 1024, а картинка
+    // занимает ~900 мест контекста модели. 1920x1080 заняла бы ~2000 из 4096
+    // (num_ctx) вместе с лором и правилами - на грани переполнения.
+    private const int MAX_WIDTH = 1280;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BITMAPINFOHEADER

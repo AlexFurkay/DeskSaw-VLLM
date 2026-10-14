@@ -61,7 +61,7 @@ func _onItemEnter(body: Node2D) -> void:
 		if not _givenByUser(body) or get_parent().isPlayer:
 			return # перс-игроку фентанил не действует (механика отключена) - шприц просто не тратится
 		healDb = true
-		AudioManager.play_sfx(AudioManager.eat) # заглушка, как и у лечения
+		AudioManager.play_sfx(AudioManager.injection)
 		get_parent().takeFentanyl()
 		body.queue_free()
 		awaitDB()
@@ -76,7 +76,7 @@ func _onItemEnter(body: Node2D) -> void:
 	if health >= maxhealth:
 		awaitDB() # already full - item just gets consumed silently, no reaction
 	else:
-		AudioManager.play_sfx(AudioManager.eat) # заглушка, замени на свой звук лечения при желании
+		AudioManager.play_sfx(AudioManager.heal)
 		health = clamp(health + healAmount, minhealth, maxhealth)
 		pet.health = health
 		LLMManager.lastKnownHealth = health

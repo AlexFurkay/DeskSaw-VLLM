@@ -1,0 +1,23 @@
+{
+	"_comment": "Паспорт персонажа (ЗАГЛУШКА, игра пока не читает этот файл). gender: female/male - род, в котором персонаж говорит о себе. race/saw: раса и номер. relations: отношение к другим расам (good/neutral/bad/hostile или любое описание словами); к своей расе - всегда good. '?' = ещё не задано.",
+	"name": "Voyager",
+	"gender": "female",
+	"race": "Voyager",
+	"saw": "Saw-07",
+	"relations": {
+		"Voyager (Saw-07)": "good",
+		"Experiment (Saw-01)": "neutral",
+		"Saw-02": "?",
+		"Saw-03": "?",
+		"Saw-04": "?",
+		"Saw-05": "?",
+		"Saw-06": "?",
+		"Saw-08": "?",
+		"Saw-09": "?",
+		"Saw-10": "?",
+		"Saw-11": "?",
+		"Saw-12": "?",
+		"Saw-13": "?",
+		"Saw-14": "?"
+	}
+}

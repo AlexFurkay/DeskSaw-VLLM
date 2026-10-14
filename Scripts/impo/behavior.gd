@@ -189,6 +189,13 @@ func _ready() -> void:
 		PlayerManager.adopt(self, _skinTag())
 		_autopilotSleepAt = Time.get_ticks_msec() + randi_range(180000, 300000)
 		moodSys.mood = PLAYER_MOOD # настроение у игрока отключено (petLimb и пр. читают moodSys.mood напрямую)
+		# реплики игрока - белые с чёрной обводкой и висят в 1.5 раза дольше,
+		# чтобы в разговоре было видно, кто говорит
+		dialogueSys.holdMultiplier = 1.5
+		var rtl: RichTextLabel = dialogueSys.richtextlabel
+		rtl.add_theme_color_override("default_color", Color.WHITE)
+		rtl.add_theme_color_override("font_outline_color", Color.BLACK)
+		rtl.add_theme_constant_override("outline_size", 4)
 
 
 	#im very sorry that i had to comment this out i have no idea what its supposed to do and it was throwing an error
