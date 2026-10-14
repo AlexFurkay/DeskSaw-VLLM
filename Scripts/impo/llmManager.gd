@@ -359,6 +359,74 @@ func _isFuzzyDuplicateOf(text: String, others: Array) -> bool:
 	return false
 
 
+## Чат: ответ "залип", если почти повторяет один из прошлых ответов или
+## кончается теми же тремя словами ("...ты снова в деле?").
+## Обороты из трёх слов, которые встречаются в 2+ последних ответах чата -
+## "затёртые" (так "ты снова в деле" прилипло ко всем ответам подряд).
+func _wornOutPhrases(tag: String) -> Array:
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	recent = recent.slice(maxi(0, recent.size() - 6))
+	var counts := {}
+	for line in recent:
+		var w := _normWords(String(line))
+		var seen := {}
+		for i in range(0, w.size() - 2):
+			var tri := " ".join(w.slice(i, i + 3))
+			if not seen.has(tri):
+				seen[tri] = true
+				counts[tri] = int(counts.get(tri, 0)) + 1
+	var result: Array = []
+	for tri in counts.keys():
+		if counts[tri] >= 2:
+			result.append(tri)
+	return result.slice(0, 4)
+
+
+## Убирает из ответа куски (между " — ", " - ", ", "), где сидит затёртый
+## оборот. Если от фразы почти ничего не остаётся - возвращает как было.
+func _stripWornClause(tag: String, text: String) -> String:
+	var worn := _wornOutPhrases(tag)
+	if worn.is_empty():
+		return text
+	var parts := text.replace(" - ", " — ").split(" — ")
+	var kept: Array = []
+	for part in parts:
+		var joined := " " + " ".join(_normWords(part)) + " "
+		var bad := false
+		for tri in worn:
+			if joined.contains(" " + tri + " "):
+				bad = true
+				break
+		if not bad:
+			kept.append(part.strip_edges())
+	var result := " — ".join(kept).strip_edges().trim_suffix(",").strip_edges()
+	if result.split(" ", false).size() < 2:
+		return text
+	if not (result.ends_with(".") or result.ends_with("!") or result.ends_with("?") or result.ends_with("…")):
+		result += "."
+	return result
+
+
+func _chatLooksStuck(tag: String, text: String) -> bool:
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	recent = recent.slice(maxi(0, recent.size() - 6))
+	if _isFuzzyDuplicateOf(text, recent):
+		return true
+	var joined := " " + " ".join(_normWords(text)) + " "
+	for tri in _wornOutPhrases(tag):
+		if joined.contains(" " + tri + " "):
+			return true
+	var words := _normWords(text)
+	if words.size() < 3:
+		return false
+	var tail := " ".join(words.slice(words.size() - 3))
+	for old in recent:
+		var ow := _normWords(String(old))
+		if ow.size() >= 3 and " ".join(ow.slice(ow.size() - 3)) == tail:
+			return true
+	return false
+
+
 ## Hard enforcement for "don't repeat yourself" - the prompt-based instruction
 ## alone isn't reliable (small models sometimes copy the very "don't repeat
 ## this" examples instead of avoiding them). Catches exact repeats and
@@ -554,6 +622,10 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
 	prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Ответь на его последнюю реплику как в живом разговоре: по смыслу его слов, коротко и в своём характере." % speaker
+	prompt += "\nКаждый ответ строй ПО-НОВОМУ: не копируй начало, концовку или шаблон своих прошлых ответов из разговора ниже. Не начинай ответ с повтора слов собеседника."
+	var worn := _wornOutPhrases(tag)
+	if worn.size() > 0:
+		prompt += "\nЭти обороты ты уже затёрла до дыр - НЕ используй их ни в каком виде: \"" + "\", \"".join(worn) + "\"."
 	prompt += "\nТвоё состояние: " + stateText.strip_edges()
 	if chatHistory.size() > 0:
 		var lines: Array = []
@@ -1026,7 +1098,7 @@ func _processQueue() -> void:
 		"stream": false,
 		"options": {
 			"repeat_penalty": repetitionGuard,
-			"temperature": creativity,
+			"temperature": float(job.get("temperature", creativity)), # повтор ответа в чате идёт чуть "смелее"
 			"num_predict": predictBudget,
 			"num_ctx": 4096
 		}
@@ -1152,7 +1224,24 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 			rejectReason = "ROLE_INVERSION"
 			text = ""
 
-		# в разговоре с игроком повтор лучше молчания - не отбрасываем
+		# В разговоре с игроком повтор лучше молчания - не отбрасываем насовсем,
+		# но один раз переспрашиваем модель: 8B залипает на шаблоне своих же
+		# прошлых ответов из истории ("X - значит, ты снова в деле?" раз за разом).
+		if text != "" and _currentTag.ends_with(":chat") and int(_currentJob.get("retry", 0)) == 0 and _chatLooksStuck(_currentTag, text):
+			_logDebugLine(_currentTag, "RETRY:SAME_PATTERN", text)
+			var again: Dictionary = _currentJob.duplicate()
+			again["retry"] = 1
+			again["temperature"] = minf(1.2, creativity + 0.25)
+			again["prompt"] = String(again["prompt"]).trim_suffix("\nТвой ответ (только сама реплика):") + "\nВНИМАНИЕ: ты уже отвечала так: \"" + text + "\". Скажи СОВСЕМ по-другому - другими словами, с другим началом и другой концовкой.\nТвой ответ (только сама реплика):"
+			_queue.push_front(again)
+			_processQueue()
+			return
+		# переспрос тоже вернул затёртый оборот - отрезаем ту часть фразы, где он
+		if text != "" and _currentTag.ends_with(":chat") and int(_currentJob.get("retry", 0)) > 0:
+			var stripped := _stripWornClause(_currentTag, text)
+			if stripped != text:
+				_logDebugLine(_currentTag, "STRIPPED_WORN", text + "  -->  " + stripped)
+				text = stripped
 		if text != "" and not _currentTag.ends_with(":chat") and _looksLikeRepeat(_currentTag, text):
 			rejectReason = "REPEAT"
 			text = ""

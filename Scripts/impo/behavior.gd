@@ -84,6 +84,7 @@ var _playerDir := 0.0
 var _playerJump := false
 var _forcedSleep := false # сон автопилота: не просыпается сам, только по включению управления
 var _autopilotSleepAt := 0 # когда автопилот уложит игрока спать (3-5 мин без управления)
+const PLAYER_MOOD := 50.0 # у игрока настроение не считается
 const CRITICAL_HEALTH_THRESHOLD := 20.0 # ниже этого - не может встать, но остаётся в сознании и говорит
 
 ## Сила удара = насколько резко изменилась скорость тела за один кадр
@@ -187,6 +188,7 @@ func _ready() -> void:
 	if isPlayer:
 		PlayerManager.adopt(self, _skinTag())
 		_autopilotSleepAt = Time.get_ticks_msec() + randi_range(180000, 300000)
+		moodSys.mood = PLAYER_MOOD # настроение у игрока отключено (petLimb и пр. читают moodSys.mood напрямую)
 
 
 	#im very sorry that i had to comment this out i have no idea what its supposed to do and it was throwing an error
@@ -394,6 +396,8 @@ func _initalSpawn() -> void:
 	hungerHandler.loadFromSave(petId)
 	healthHandler.loadFromSave(petId)
 	sleepHandler.loadFromSave(petId)
+	if isPlayer:
+		moodSys.mood = PLAYER_MOOD # после загрузки сейва, иначе перезапишется шаблонным
 	# зависимость от фентанила живёт только в пределах одного запуска
 	gbData.data["saw"][petId].erase("addiction") # старое поле из 051 - убираем из сейва
 
@@ -447,9 +451,13 @@ func checker():
 	while get_tree():
 		#this was calling each function like 90 times per check which is why everyting was very extreme!
 		#DONT DO THAT MISTAKE AGAIN!
-		hungerHandler.hungercheck()
-		var sleepN = sleepHandler.sleepCheck()
-		var moodN = moodSys.moodCheck(.5)
+		# Перс-игрок на автопилоте: еда и сон не тратятся. Настроение у игрока
+		# отключено совсем (ровные 50) - меньше лишних расчётов и сохранений.
+		var statsFrozen: bool = isPlayer and not playerControlled
+		if not statsFrozen:
+			hungerHandler.hungercheck()
+		var sleepN = sleepHandler.tiredness if statsFrozen else sleepHandler.sleepCheck()
+		var moodN = PLAYER_MOOD if isPlayer else moodSys.moodCheck(.5)
 		if not shocked and not isSleeping:
 			#sleep stuff
 			currentEmotion = emotionz.normal
@@ -782,8 +790,8 @@ func takeFentanyl() -> void:
 func drugLoop() -> void:
 	while get_tree():
 		await get_tree().create_timer(30.0).timeout
-		if isUnconscious:
-			continue
+		if isUnconscious or isPlayer:
+			continue # у игрока ломки нет
 		if addiction > 0.0:
 			addiction = maxf(0.0, addiction - ADDICTION_DECAY_PER_MIN * 0.5)
 		if not _inWithdrawal():
@@ -852,6 +860,8 @@ func _forceSleep() -> void:
 	_messageQueue.clear()
 	_urgentInQueue = 0
 	moveSys.rigidtorso.linear_velocity = Vector2.ZERO
+	if isPlayer:
+		PlayerManager._showStatus("Игрок уснул (автопилот) - %s, чтобы разбудить" % PlayerManager.currentKeys())
 	sleep()
 
 
@@ -1495,6 +1505,8 @@ func wandering() -> void:
 		var restChance := 0.06
 		if isTired:
 			restChance = 0.3
+		if isPlayer:
+			restChance = 0.0 # у игрока "прилечь" путалось со сном автопилота - он просто засыпает по таймеру
 		if randf() < restChance:
 			moveSys.initswithc(moveSys.states.resting) # присесть/прилечь (сам встанет через 2-3 мин)
 			continue

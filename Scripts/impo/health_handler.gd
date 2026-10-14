@@ -58,8 +58,8 @@ func _onItemEnter(body: Node2D) -> void:
 	# только что отпущен. Сама себе персонаж не колет никогда - даже если
 	# шприц случайно окажется у головы (лежит на тумбочке, отскочил и т.п.).
 	if props.get("drug", "") == "fentanyl":
-		if not _givenByUser(body):
-			return
+		if not _givenByUser(body) or get_parent().isPlayer:
+			return # перс-игроку фентанил не действует (механика отключена) - шприц просто не тратится
 		healDb = true
 		AudioManager.play_sfx(AudioManager.eat) # заглушка, как и у лечения
 		get_parent().takeFentanyl()
