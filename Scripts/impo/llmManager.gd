@@ -409,6 +409,79 @@ func _wornOutPhrases(tag: String) -> Array:
 	return result.slice(0, 4)
 
 
+## Навязчивые темы: значимое слово (5+ букв, сравнение по первым 5 буквам,
+## чтобы "мышками"/"мышки" и "охотиться"/"охоты" считались одним), которое
+## есть в 3+ из последних 6 фраз. Ловит то, что пропускают тройки слов:
+## "Мой хвост сегодня светится/мерцает...", "...мешаешь мне охотиться за мышками".
+## Чат и разговор с персонажами одного скина считаются вместе. Латиница
+## пропускается - это имена (Expie, Voyager), к ним обращаться можно.
+## Возвращает {основа: слово в последней форме}.
+const _MOTIF_STOP := ["просто", "сейчас", "только", "очень", "снова", "опять", "когда", "потому", "может", "хочешь", "хочется", "сегодня", "всегда", "теперь", "здесь", "почему", "ничего", "немного"]
+func _obsessiveWords(tag: String) -> Dictionary:
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	recent = recent.slice(maxi(0, recent.size() - 6))
+	var skin := _skinFromTag(tag)
+	if tag.ends_with(":chat") or tag.ends_with(":pettalk"):
+		var sibling := skin + (":pettalk" if tag.ends_with(":chat") else ":chat")
+		var other: Array = _recentLinesByCategory.get(sibling, [])
+		recent = recent + other.slice(maxi(0, other.size() - 3))
+	var counts := {}
+	var forms := {}
+	for line in recent:
+		var seen := {}
+		for w in _normWords(String(line)):
+			if w.length() < 5 or not _isCyrillicWord(w):
+				continue
+			var stem := w.substr(0, 5)
+			if _MOTIF_STOP.has(w) or seen.has(stem):
+				continue
+			seen[stem] = true
+			counts[stem] = int(counts.get(stem, 0)) + 1
+			forms[stem] = w
+	var result := {}
+	for stem in counts.keys():
+		if counts[stem] >= 3:
+			result[stem] = forms[stem]
+	return result
+
+
+func _isCyrillicWord(w: String) -> bool:
+	var c := w.unicode_at(0)
+	return (c >= 0x0430 and c <= 0x044F) or c == 0x0451
+
+
+func _hitsObsession(tag: String, text: String) -> bool:
+	var motifs := _obsessiveWords(tag)
+	if motifs.is_empty():
+		return false
+	for w in _normWords(text):
+		if w.length() >= 5 and motifs.has(w.substr(0, 5)):
+			return true
+	return false
+
+
+## Одно и то же начало из двух слов в одной из 4 последних фраз
+## ("Мне немного грустно..." / "Мне немного одиноко...").
+func _sameOpener(tag: String, text: String) -> bool:
+	var words := _normWords(text)
+	if words.size() < 3:
+		return false
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	for old in recent.slice(maxi(0, recent.size() - 4)):
+		var ow := _normWords(String(old))
+		if ow.size() >= 2 and ow[0] == words[0] and ow[1] == words[1]:
+			return true
+	return false
+
+
+## Блок промпта про навязчивые темы (пусто, если их нет).
+func _obsessionHint(tag: String) -> String:
+	var motifs := _obsessiveWords(tag)
+	if motifs.is_empty():
+		return ""
+	return _g(_skinFromTag(tag), "\nТы уже {зациклилась|зациклился} на этих темах - в этой фразе их НЕ упоминай совсем, скажи о чём-то другом: ") + ", ".join(motifs.values()) + "."
+
+
 ## Убирает из ответа куски (между " — ", " - ", ", "), где сидит затёртый
 ## оборот. Если от фразы почти ничего не остаётся - возвращает как было.
 func _stripWornClause(tag: String, text: String) -> String:
@@ -443,6 +516,8 @@ func _chatLooksStuck(tag: String, text: String) -> bool:
 	for tri in _wornOutPhrases(tag):
 		if joined.contains(" " + tri + " "):
 			return true
+	if _sameOpener(tag, text) or _hitsObsession(tag, text):
+		return true
 	var words := _normWords(text)
 	if words.size() < 3:
 		return false
@@ -461,7 +536,9 @@ func _chatLooksStuck(tag: String, text: String) -> bool:
 ## "Ты снова..." every time) regardless of what the model intended. Checked
 ## only within the SAME category - see _rememberLine for why.
 func _looksLikeRepeat(category: String, text: String) -> bool:
-	return _isFuzzyDuplicateOf(text, _recentLinesByCategory.get(category, []))
+	if _isFuzzyDuplicateOf(text, _recentLinesByCategory.get(category, [])):
+		return true
+	return _sameOpener(category, text) or _hitsObsession(category, text)
 
 
 ## Console command: reloadLore
@@ -507,6 +584,9 @@ func _buildBasePrompt(category: String = "") -> String:
 		var worn := _wornOutPhrases(category)
 		if worn.size() > 0:
 			parts.append("Эти обороты ты уже {затёрла|затёр} до дыр - НЕ используй их: \"" + "\", \"".join(worn) + "\".")
+	var obsession := _obsessionHint(category)
+	if obsession != "":
+		parts.append(obsession.strip_edges())
 	return "\n".join(parts)
 
 

@@ -940,6 +940,8 @@ func _guessChatAction(request: String, reply: String) -> String:
 ## второй отвечает. Редко - не чаще раза в PET_TALK_COOLDOWN_MS на всех.
 const PET_TALK_DISTANCE := 900.0 # пикс экрана при petSize 4
 const PET_TALK_COOLDOWN_MS := 180000
+const PET_REPLY_PAUSE_MIN := 4.0 # пауза после того, как первый договорил, сек
+const PET_REPLY_PAUSE_MAX := 7.0
 static var _lastPetTalkMsec := -PET_TALK_COOLDOWN_MS
 
 func petTalkLoop() -> void:
@@ -982,9 +984,18 @@ func replyToPet(speakerSkin: String, line: String) -> void:
 	if isPlayer or isUnconscious or isSleeping:
 		return
 	var speakerName: String = PlayerManager.displayNameFor(speakerSkin)
+	# Ответ генерируется сразу, но показывается не раньше, чем собеседник
+	# допечатает свою фразу (~0.04 с на букву, x8 на знаках препинания) + пауза -
+	# иначе реплики шли почти впритык.
+	var showAt: int = Time.get_ticks_msec() + int((line.length() * 0.06 + randf_range(PET_REPLY_PAUSE_MIN, PET_REPLY_PAUSE_MAX)) * 1000.0)
 	var onReply := func(text: String):
 		if text.begins_with("<act:"):
 			text = text.substr(text.find(">") + 1) # действия - только по просьбе игрока
+		var wait: int = showAt - Time.get_ticks_msec()
+		if wait > 0:
+			await get_tree().create_timer(wait / 1000.0).timeout
+		if isUnconscious or isSleeping or not is_inside_tree():
+			return
 		_queueMessage(text, 1.0, true)
 		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 	LLMManager.requestChatReply(_skinTag(), speakerName, [{"who": speakerName, "text": line}], _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin)
@@ -1517,14 +1528,10 @@ func _applyInjuryLook() -> void:
 	var damagedCount: int = clampi(totalParts - healthyParts, 0, totalParts)
 	var injured: Array = _injuryOrder.slice(0, damagedCount)
 
-	# Overall severity, for parts that have more than one tier of art
-	# (currently just the head) - how far into its own Disfigured1/2/3
-	# progression an already-picked part should be.
+	# У всех частей, включая голову, одно состояние травмы (Disfigured1).
+	# Раньше голова шла 1->2->3, и кадры рта разных степеней не совпадали
+	# с кадром головы - лицо мерцало во время речи.
 	var severity: int = 1
-	if hp <= 15.0:
-		severity = 3
-	elif hp <= 40.0:
-		severity = 2
 
 	for i in allSprites.size():
 		var sprite = allSprites[i]
