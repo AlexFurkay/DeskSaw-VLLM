@@ -39,8 +39,8 @@ var lastKnownMood: float = 50.0
 var lastKnownHealth: float = 100.0
 var lastKnownDrugLevel: int = 0 # 0 - трезвая, 1 - лёгкий приход, 2 - сильный, -1 - ломка (см. behavior._drugLevel)
 var repetitionGuard := 1.2 # was "repeat_penalty" - higher = less likely to repeat the same words/phrases
-var minScreenInterval := 30.0
-var maxScreenInterval := 60.0
+var minScreenInterval := 60.0
+var maxScreenInterval := 120.0
 
 ## Free text loaded from user://LORE.txt - reload at runtime with `reloadLore`.
 var lore := ""
@@ -752,7 +752,8 @@ func relationTo(skinName: String, otherSkin: String) -> String:
 		if FileAccess.file_exists(path):
 			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 			if data is Dictionary and data.get("relations") is Dictionary:
-				var r := String(data["relations"].get(otherSkin, ""))
+				# "*" - отношение ко всем, кто не указан отдельно
+				var r := String(data["relations"].get(otherSkin, data["relations"].get("*", "")))
 				return "" if r == "?" else r
 	return ""
 

@@ -8,8 +8,8 @@
 		"x2": 0.0
 	},
 	"expieDialogueSize": 7.0,
-	"minDialogueTime": "30.0",
-	"maxDialogueTime": "65.0",
+	"minDialogueTime": "60.0",
+	"maxDialogueTime": "120.0",
 	"minMood": -100.0,
 	"maxMood": 100.0,
 	"hungerDecayRate": 0.1,

@@ -119,6 +119,36 @@ func _skinVersion(charJsonPath: String) -> int:
 	return int(data.get("version", 0)) if data is Dictionary else 0
 
 
+func _skinTextVersion(charJsonPath: String) -> int:
+	if not FileAccess.file_exists(charJsonPath):
+		return 0
+	var data = JSON.parse_string(FileAccess.get_file_as_string(charJsonPath))
+	return int(data.get("textVersion", 0)) if data is Dictionary else 0
+
+
+## Обновление фраз и лора скина: если в паспорте сборки "textVersion" выше,
+## чем у игрока, старые TRANSLATION.json и lore.txt сохраняются рядом
+## (*.bak-textN) и заменяются новыми; паспорт тоже копируется, иначе
+## замена повторялась бы на каждом запуске.
+func _updateSkinTexts(srcRoot: String, dstRoot: String, skinName: String) -> void:
+	var newVer := _skinTextVersion(srcRoot + "/character.json")
+	var oldVer := _skinTextVersion(dstRoot + "/character.json")
+	if newVer <= 0 or oldVer >= newVer:
+		return
+	for fileName in ["TRANSLATION.json", "lore.txt", "character.json"]:
+		var srcPath: String = srcRoot + "/" + fileName
+		if not FileAccess.file_exists(srcPath):
+			continue
+		var dstPath: String = dstRoot + "/" + fileName
+		if fileName != "character.json" and FileAccess.file_exists(dstPath):
+			DirAccess.copy_absolute(dstPath, "%s.bak-text%d" % [dstPath, oldVer])
+		var out := FileAccess.open(dstPath, FileAccess.WRITE)
+		if out:
+			out.store_buffer(FileAccess.get_file_as_bytes(srcPath))
+			out.close()
+	print("SaveLoadSys: фразы и лор скина '%s' обновлены до версии текстов %d (старые - *.bak-text%d)" % [skinName, newVer, oldVer])
+
+
 ## Обновление существующего скина: только картинки + character.json.
 func _copySkinFiles(srcRoot: String, dstRoot: String, onlyArtAndPassport: bool) -> int:
 	var srcDir := DirAccess.open(srcRoot)
@@ -170,8 +200,11 @@ func _syncBundledSkins() -> void:
 			# Обновление скина: если в паспорте сборки "version" выше, чем у игрока,
 			# перезаписываем ТЕКСТУРЫ и паспорт (фразы и лор не трогаем - вдруг
 			# игрок их правил). Без поля version скин не обновляется никогда.
+			# обе версии читаем ДО копирования - каждое обновление перезаписывает паспорт
 			var bundledVer := _skinVersion(bundledRoot + "/" + skinName + "/character.json")
-			if bundledVer > 0 and _skinVersion(userSkinDir + "/character.json") < bundledVer:
+			var needArt: bool = bundledVer > 0 and _skinVersion(userSkinDir + "/character.json") < bundledVer
+			_updateSkinTexts(bundledRoot + "/" + skinName, userSkinDir, skinName)
+			if needArt:
 				var updated := _copySkinFiles(bundledRoot + "/" + skinName, userSkinDir, true)
 				print("SaveLoadSys: скин '%s' обновлён до версии %d (%d файлов)" % [skinName, bundledVer, updated])
 			else:
