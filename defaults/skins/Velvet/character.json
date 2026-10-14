@@ -1,7 +1,7 @@
 {
 	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
 	"version": 1,
-	"textVersion": 2,
+	"textVersion": 3,
 	"name": "Velvet",
 	"gender": "female",
 	"race": "Velvet",
