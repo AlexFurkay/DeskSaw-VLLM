@@ -157,6 +157,9 @@ func initswithc(state: states):
 			print("resting")
 			self.get_parent().wander = false
 			var r = randi_range(1, 2)
+			if forcedRestPose != 0: # просьба игрока "сядь"/"ляг" (behavior._doChatAction)
+				r = forcedRestPose
+				forcedRestPose = 0
 			var resttime = randi_range(120, 200)
 			animplay.play("sit" if r == 1 else "laydown")
 
@@ -212,6 +215,8 @@ func phystate(_delta: float):
 ## Игрок под управлением смотрит по направлению движения, а не на курсор -
 ## иначе при ходьбе "от курсора" включалась медленная ходьба задом.
 var faceMoveDir := false
+## 1 - сесть, 2 - лечь: следующий отдых примет эту позу, а не случайную
+var forcedRestPose := 0
 
 func detFlip():
 	if currstate == states.ragdoll:

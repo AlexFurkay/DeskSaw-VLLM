@@ -37,13 +37,24 @@ func _ready() -> void:
 	spawnButton.get_parent().move_child(playerButton, spawnButton.get_index() + 1)
 	playerButton.pressed.connect(_on_spawn_player_press)
 
+## Стандартный Experiment и скин Expie - один и тот же персонаж ("Expie" -
+## ласковое сокращение). Полная версия (раны, фразы, род, паспорт) живёт в
+## папке скина Expie - кнопка "Experiment (Default)" спавнит именно её, а
+## отдельная кнопка "Expie" в списке не показывается.
+const EXPIE_SKIN := "Expie"
+
+func _defaultSkinPath() -> String:
+	var p := _root_path.path_join(EXPIE_SKIN).path_join("/")
+	return p if DirAccess.dir_exists_absolute(p) else "res://assets/Body/"
+
+
 func _update() -> void:
 	if !visible:
 		return
 	# refresh expie display
 	skinNameLabel.text = get_skin_name()
 	GlobalVariable.userSkinPath = (
-		"res://assets/Body/" if selectedSkin == null
+		_defaultSkinPath() if selectedSkin == null
 		else selectedSkin.path
 	)
 	expieDisplayWidget.ApplyTextures(GlobalVariable.userSkinPath)
@@ -102,8 +113,8 @@ func scan_for_skins() -> void:
 		# NOT the same as gbData.settings.defaultSkin - that setting is now
 		# user-configurable and can legitimately point at a real custom
 		# character (e.g. VoyagerAlt), which should still show up here.
-		if directory_name == "Default" or directory_name == "Body":
-			continue
+		if directory_name == "Default" or directory_name == "Body" or directory_name == EXPIE_SKIN:
+			continue # Expie = "Experiment (Default)" сверху
 		# register otherwise.
 		var _skin = SkinEntry.new()
 		_skin.name = directory_name
@@ -141,14 +152,15 @@ func _on_skin_button_press(skin_entry = null) -> void:
 
 func _on_spawn_button_press() -> void:
 	GlobalVariable.userSkinPath = (
-		"res://assets/Body/" if selectedSkin == null
+		_defaultSkinPath() if selectedSkin == null
 		else selectedSkin.path
 	)
 	spawnExpie()
 
 func _on_spawn_player_press() -> void:
-	var path: String = "res://assets/Body/" if selectedSkin == null else selectedSkin.path
-	PlayerManager.spawnPlayer(path, "Body" if selectedSkin == null else selectedSkin.name)
+	var path: String = _defaultSkinPath() if selectedSkin == null else selectedSkin.path
+	var skinName: String = ("Body" if path.begins_with("res://") else EXPIE_SKIN) if selectedSkin == null else selectedSkin.name
+	PlayerManager.spawnPlayer(path, skinName)
 
 
 func _on_skin_folder_button_press() -> void:

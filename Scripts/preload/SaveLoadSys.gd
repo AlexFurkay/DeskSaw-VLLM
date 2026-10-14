@@ -31,7 +31,40 @@ const conPath = "user://CONFIG.json"
 const skinfilepath = "user://skin"
 
 
+## Форк хранит данные в своей папке (%APPDATA%\DDnAKFRK\DeskSawVLLM), чтобы не
+## конфликтовать со стоковым DeskSaw (deedee14\desksawPRE-RELEASE). При первом
+## запуске новой версии всё из старой папки КОПИРУЕТСЯ (не переносится -
+## стоковый DeskSaw остаётся со своими данными).
+const OLD_DATA_DIR := "deedee14/desksawPRE-RELEASE"
+
+func _migrateOldDataDir() -> void:
+	if FileAccess.file_exists("user://CONFIG.json") or FileAccess.file_exists("user://SAVE.json"):
+		return # уже есть свои данные
+	var oldRoot := OS.get_data_dir().path_join(OLD_DATA_DIR)
+	if not DirAccess.dir_exists_absolute(oldRoot):
+		return
+	var copied := _copyDirRecursive(oldRoot, ProjectSettings.globalize_path("user://"))
+	print("SaveLoadSys: данные перенесены из %s (%d файлов)" % [oldRoot, copied])
+
+
+func _copyDirRecursive(from: String, to: String) -> int:
+	var count := 0
+	DirAccess.make_dir_recursive_absolute(to)
+	var dir := DirAccess.open(from)
+	if dir == null:
+		return 0
+	for f in dir.get_files():
+		if DirAccess.copy_absolute(from.path_join(f), to.path_join(f)) == OK:
+			count += 1
+	for sub in dir.get_directories():
+		if sub in ["logs", "shader_cache", "objectdb_snapshots"]:
+			continue # служебное, не нужно
+		count += _copyDirRecursive(from.path_join(sub), to.path_join(sub))
+	return count
+
+
 func _ready():
+	_migrateOldDataDir()
 	# Настройки грузим ПЕРВЫМИ (было после сохранения) - иначе самый первый
 	# персонаж на чистой установке создаётся до того, как defaultSkin вообще
 	# прочитан, и молча получает "Default" вместо того, что реально задано.

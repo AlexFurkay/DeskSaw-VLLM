@@ -501,6 +501,12 @@ func _buildBasePrompt(category: String = "") -> String:
 		var lastFew: Array = recentForThis.slice(maxi(0, recentForThis.size() - 4))
 		parts.append("Вот что ты только что {говорила|говорил} В ЭТОЙ ЖЕ ситуации:\n- " + "\n- ".join(lastFew))
 		parts.append("Дословно или почти дословно эти фразы НЕ повторяй - реагируй на текущий момент заново.")
+	# Затёртые обороты (3 слова в 2+ недавних фразах ЭТОЙ категории) - запрещаем
+	# явно: иначе модель залипает на шаблоне ("...хоть и сижу - даже когти...").
+	if not category.ends_with(":chat"): # у чата свой такой же блок
+		var worn := _wornOutPhrases(category)
+		if worn.size() > 0:
+			parts.append("Эти обороты ты уже {затёрла|затёр} до дыр - НЕ используй их: \"" + "\", \"".join(worn) + "\".")
 	return "\n".join(parts)
 
 
@@ -563,9 +569,9 @@ func stateHint(mood: float, health: float, drugLevel: int) -> String:
 	var drug := ""
 	match drugLevel:
 		1:
-			drug = "\nТы сейчас под фентанилом - лёгкий приход: тебе тепло и спокойно, мысли чуть плывут, это слегка слышно в реакции."
+			drug = "\nТы сейчас под фентанилом (лёгкий приход): ты спокойнее и мягче обычного. Пусть это лишь слегка окрашивает тон - говори своими обычными словами, не описывай сам приход."
 		2:
-			drug = "\nТы сейчас сильно под фентанилом - тебя накрыло: мысли плывут и путаются, тебе слишком хорошо, реакция заторможенная и мечтательная."
+			drug = "\nТы сейчас сильно под фентанилом: ты {рассеянна, расслаблена и слишком довольна|рассеян, расслаблен и слишком доволен}, отвечаешь медленнее и мягче. Передавай это тоном и простыми словами, НЕ описывая ощущения ('плывёт', 'волна', 'тепло' и т.п.) в каждой фразе."
 		-1:
 			drug = "\nУ тебя ломка без фентанила - тебя знобит, всё ломит и раздражает, это сквозит в реакции."
 	return _moodHealthHint(mood, health) + drug
@@ -642,6 +648,13 @@ func requestItemReaction(skinTag: String, itemDescription: String, stateHintText
 ## встаёт первым в очередь, а идущую фоновую генерацию пакета фраз
 ## прерывает (она потом повторится). Без примеров из TRANSLATION.json -
 ## только лор, состояние и сам разговор.
+## Действия, на которые ИИ-персонаж может согласиться в чате (метка в ответе).
+const CHAT_ACTIONS := {
+	"подойти": "come", "лечь": "lie", "сесть": "sit",
+	"встать": "stand", "прыгнуть": "jump", "отойти": "away",
+}
+var _actionRegex := RegEx.create_from_string("\\[\\s*(?:ДЕЙСТВИЕ|Действие|действие)\\s*:\\s*([^\\]]+)\\]")
+
 ## Случайный тон ответа в чате - чтобы разговор не был однотонным.
 const CHAT_ANGLES := [
 	"ответь с подколкой, но по делу.",
@@ -678,6 +691,7 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 	if own.size() > 0:
 		prompt += _g(skinTag, "\nЧто ты сама недавно {говорила|говорил} вслух вне разговора (в том числе комментарии к экрану). Если собеседник спрашивает о чём-то из этого - ты помнишь, что {имела|имел} в виду:\n- ") + "\n- ".join(own)
 	prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
+	prompt += "\nЕсли собеседник просит тебя что-то СДЕЛАТЬ (подойти, лечь, сесть, встать, прыгнуть, отойти) - реши сама в своём характере и по настроению, согласиться или отказаться, и скажи это в ответе. ТОЛЬКО если соглашаешься, в самом конце допиши метку одного действия: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]. Если отказываешься или ни о чём не просили - без метки."
 	if chatHistory.size() > 0:
 		var lines: Array = []
 		for entry in chatHistory:
@@ -689,7 +703,7 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 	prompt += "\nТвой ответ (только сама реплика):"
 
 	# в разговоре чуть "смелее" обычного - живее и разнообразнее
-	var job := {"prompt": _g(skinTag, prompt), "images": [], "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.15)}
+	var job := {"prompt": _g(skinTag, prompt), "images": [], "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.05)}
 	if busy and _currentTag.begins_with("prefetch:") and not _currentJob.is_empty():
 		# прерываем фоновый пакет - ответ человеку важнее
 		http.cancel_request()
@@ -1218,6 +1232,16 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 
 	var isPrefetchBatch: bool = _currentTag.begins_with("prefetch:")
 
+	# Чат: метку действия "[ДЕЙСТВИЕ: подойти]" вырезаем ДО всех чисток
+	# (обрезка по предложениям её бы потеряла) и передаём персонажу в начале
+	# текста как "<act:come>" - behavior.replyToPlayer выполнит действие.
+	var chatAction := ""
+	if _currentTag.ends_with(":chat"):
+		var m := _actionRegex.search(text)
+		if m:
+			chatAction = CHAT_ACTIONS.get(m.get_string(1).strip_edges().to_lower(), "")
+			text = _actionRegex.sub(text, "", true).strip_edges()
+
 	if not isPrefetchBatch:
 		var rawReply := text
 		text = text.replace("*", "").strip_edges()
@@ -1316,6 +1340,9 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 
 	if text != "" and not isPrefetchBatch:
 		_rememberLine(_currentTag, text.trim_prefix("[" + _currentTag + "] ") if debugTags and _currentTag != "" else text)
+
+	if text != "" and chatAction != "":
+		text = "<act:%s>%s" % [chatAction, text]
 
 	if text != "" and cb.is_valid():
 		cb.call(text)

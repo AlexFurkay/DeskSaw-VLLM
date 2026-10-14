@@ -1918,7 +1918,7 @@ colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
 radius = 350.0
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_0vd41"]
-size = Vector2(17.992195, 22.019926)
+size = Vector2(26, 30)
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_73j8h"]
 radius = 5.0990195

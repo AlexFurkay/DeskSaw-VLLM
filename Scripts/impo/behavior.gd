@@ -886,8 +886,50 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 	if not _worn.is_empty():
 		stats += ", на тебе надето: " + _wornDescription()
 	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), _recentSpoken(), func(text: String):
+		var action := ""
+		if text.begins_with("<act:"):
+			var close := text.find(">")
+			action = text.substr(5, close - 5)
+			text = text.substr(close + 1)
 		_queueMessage(text, 1.0, true)
-		onReply.call(text))
+		# голос при ответе: обычный, при плохом настроении - злой
+		AudioManager.play_random(voiceSet["bark" if moodSys.mood < -20.0 else "whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+		onReply.call(text)
+		if action != "":
+			_doChatAction(action))
+
+
+## Действие, на которое ИИ-персонаж сам согласился в разговоре с игроком.
+var _commandUntil := 0 # пока выполняется просьба игрока - обычные прогулки ждут
+
+func _doChatAction(action: String) -> void:
+	if isUnconscious or isSleeping or ragdolled:
+		return
+	print("CHAT ACTION[%s]: %s" % [_skinTag(), action])
+	_commandUntil = Time.get_ticks_msec() + 15000
+	match action:
+		"come", "away":
+			if moveSys.currstate == moveSys.states.resting:
+				moveSys.initswithc(moveSys.states.idle)
+			wander = true
+			var px: float = PlayerManager.player.moveSys.rigid.global_position.x if PlayerManager.hasPlayer() else moveSys.rigid.get_global_mouse_position().x
+			var x: float = moveSys.rigid.global_position.x
+			var target := px - signf(px - x) * 110.0 # подойти, но не вплотную
+			if action == "away":
+				target = x - signf(px - x) * 400.0
+			target = clampf(target, 60.0, float(GlobalVariable.screenWidth) - 60.0)
+			await _walkTo(target, true)
+		"lie", "sit":
+			moveSys.dir = 0
+			moveSys.forcedRestPose = 2 if action == "lie" else 1
+			moveSys.initswithc(moveSys.states.resting)
+		"stand":
+			if moveSys.currstate == moveSys.states.resting:
+				moveSys.initswithc(moveSys.states.idle)
+				wander = true
+		"jump":
+			moveSys.jump()
+	_commandUntil = 0
 
 
 func _forceSleep() -> void:
@@ -1520,6 +1562,9 @@ var _baseMaxSpeed := -1.0
 
 func wandering() -> void:
 	while get_tree():
+		if Time.get_ticks_msec() < _commandUntil:
+			await get_tree().create_timer(0.5).timeout # выполняет просьбу игрока
+			continue
 		if isPlayer and playerControlled:
 			await get_tree().create_timer(0.5).timeout # ходит человек
 			continue
@@ -1632,7 +1677,7 @@ func _nearestBody(filter: Callable) -> Node2D:
 	return best
 
 
-func _walkTo(targetX: float) -> void:
+func _walkTo(targetX: float, isCommand: bool = false) -> void:
 	if _baseMaxSpeed < 0.0:
 		_baseMaxSpeed = moveSys.maxspeed
 	var speedMul := 1.0
@@ -1656,6 +1701,8 @@ func _walkTo(targetX: float) -> void:
 	while t < timeLimit:
 		if not wander or ragdolled or isSleeping or isUnconscious or beingDragged:
 			break
+		if not isCommand and Time.get_ticks_msec() < _commandUntil:
+			break # игрок о чём-то попросил - обычная прогулка уступает
 		var x: float = moveSys.rigid.global_position.x
 		var dx := targetX - x
 		if absf(dx) < 25.0:
