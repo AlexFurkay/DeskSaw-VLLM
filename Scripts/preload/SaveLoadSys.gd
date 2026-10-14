@@ -201,6 +201,8 @@ func addPet(skin: String = "Default") -> String:
 
 	data["saw"][newId] = data["sawTemplate"].duplicate(true)
 	data["saw"][newId]["skin"] = skin
+	# случайное стартовое настроение: каждый новый персонаж приходит немного по-своему
+	data["saw"][newId]["mood"] = snappedf(randf_range(45.0, 65.0), 0.05)
 
 
 	savetodisk(savePath, data)

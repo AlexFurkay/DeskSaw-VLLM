@@ -1,0 +1,11 @@
+{
+	"_comment": "Паспорт персонажа - заполняет автор. gender: female/male - род, в котором персонаж говорит о себе (игра читает). relations: отношение к другим персонажам, КЛЮЧ = название папки скина (VoyagerAlt, Expie...); значение - good/neutral/bad/hostile или описание словами; к своей расе всегда good. '?' = ещё не задано (пока не используется).",
+	"name": "Expie",
+	"gender": "male",
+	"race": "Experiment",
+	"saw": "Saw-01",
+	"relations": {
+		"Expie": "good",
+		"VoyagerAlt": "?"
+	}
+}

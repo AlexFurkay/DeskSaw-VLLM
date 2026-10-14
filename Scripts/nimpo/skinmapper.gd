@@ -78,8 +78,17 @@ func swapTex(sprite: Sprite2D, skinFileNames: Dictionary):
 		"name": file_name,
 		"texture": tex
 	}
+## В собранной игре картинки из res:// не лежат обычными файлами (Godot хранит
+## их импортированными), FileAccess.file_exists для них всегда false - из-за
+## этого у стандартного Expie не грузились закрытые глаза и т.п. Для res://
+## спрашиваем ResourceLoader.
+func texExists(path: String) -> bool:
+	if path.begins_with("res:"):
+		return ResourceLoader.exists(path)
+	return FileAccess.file_exists(path)
+
 func loadUserTex(userPath: String):
-	if not FileAccess.file_exists(userPath):
+	if not texExists(userPath):
 		return null
 
 	# load internal resources directly, prevents the

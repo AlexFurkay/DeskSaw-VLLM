@@ -270,6 +270,8 @@ func invertPoints(val: bool, setup: bool = false):
 
 
 func checkJump():
+	if faceMoveDir:
+		return # перс-игрок под управлением прыгает только сам (W/пробел), без автопрыжка через препятствия
 	if wallDetect.is_colliding() and !heightDetect.is_colliding() and dir != 0.0 and !backwards:
 		jump()
 	pass

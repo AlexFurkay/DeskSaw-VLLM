@@ -70,10 +70,10 @@ func _headTextureFor(key: String) -> String:
 func _hasTexture(texture_name: String) -> bool:
 	if loadedspritesData == null:
 		return false
-	if FileAccess.file_exists(loadedspritesData.userSkinPath + texture_name):
+	if loadedspritesData.texExists(loadedspritesData.userSkinPath + texture_name):
 		return true
 	if loadedspritesData.userSkinPath != loadedspritesData.resPath:
-		return FileAccess.file_exists(loadedspritesData.resPath + texture_name)
+		return loadedspritesData.texExists(loadedspritesData.resPath + texture_name)
 	return false
 
 func _ready() -> void:
