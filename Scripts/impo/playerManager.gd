@@ -74,6 +74,12 @@ func hasPlayer() -> bool:
 static func displayNameFor(skinName: String) -> String:
 	if skinName == "" or skinName == "Body" or skinName == "Default":
 		return "Experiment"
+	# имя из паспорта (VoyagerAlt -> Voyager), иначе название папки
+	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+		if FileAccess.file_exists(path):
+			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if data is Dictionary and String(data.get("name", "")) != "":
+				return String(data["name"])
 	return skinName
 
 
