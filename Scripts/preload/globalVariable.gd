@@ -2,6 +2,9 @@ extends Node
 
 #i probably shouldve put these here earlier but better late than never
 
+## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
+const BUILD := "054.98Pru"
+
 var pop = preload("res://scenes/ui/popup.tscn")
 #ill fix the scripts that redefine these when it bothers me enough
 var screenWidth: int = DisplayServer.screen_get_usable_rect().size.x
@@ -51,9 +54,9 @@ func makePopUp(text: String, parent: CanvasLayer, position: Vector2) -> bool:
 	newpop.labelText = text
 
 	#configure
-	newpop.titleText = "Hey!"
-	newpop.yesButtonText = "Yes"
-	newpop.noButtonText = "No"
+	newpop.titleText = "Эй!"
+	newpop.yesButtonText = "Да"
+	newpop.noButtonText = "Нет"
 	newpop.position = position
 	#ts dont work
 	newpop.size = Vector2(500, 300)

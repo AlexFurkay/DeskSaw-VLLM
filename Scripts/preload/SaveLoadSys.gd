@@ -37,6 +37,12 @@ const skinfilepath = "user://skin"
 ## стоковый DeskSaw остаётся со своими данными).
 const OLD_DATA_DIR := "deedee14/desksawPRE-RELEASE"
 
+## События запуска (перенос данных, обновления скинов) - для diagnostics.txt
+var startupNotes: Array = []
+func _note(msg: String) -> void:
+	print(msg)
+	startupNotes.append(msg)
+
 func _migrateOldDataDir() -> void:
 	if FileAccess.file_exists("user://CONFIG.json") or FileAccess.file_exists("user://SAVE.json"):
 		return # уже есть свои данные
@@ -44,7 +50,7 @@ func _migrateOldDataDir() -> void:
 	if not DirAccess.dir_exists_absolute(oldRoot):
 		return
 	var copied := _copyDirRecursive(oldRoot, ProjectSettings.globalize_path("user://"))
-	print("SaveLoadSys: данные перенесены из %s (%d файлов)" % [oldRoot, copied])
+	_note("SaveLoadSys: данные перенесены из %s (%d файлов)" % [oldRoot, copied])
 
 
 func _copyDirRecursive(from: String, to: String) -> int:
@@ -146,7 +152,7 @@ func _updateSkinTexts(srcRoot: String, dstRoot: String, skinName: String) -> voi
 		if out:
 			out.store_buffer(FileAccess.get_file_as_bytes(srcPath))
 			out.close()
-	print("SaveLoadSys: фразы и лор скина '%s' обновлены до версии текстов %d (старые - *.bak-text%d)" % [skinName, newVer, oldVer])
+	_note("SaveLoadSys: фразы и лор скина '%s' обновлены до версии текстов %d (старые - *.bak-text%d)" % [skinName, newVer, oldVer])
 
 
 ## Обновление существующего скина: только картинки + character.json.
@@ -206,7 +212,7 @@ func _syncBundledSkins() -> void:
 			_updateSkinTexts(bundledRoot + "/" + skinName, userSkinDir, skinName)
 			if needArt:
 				var updated := _copySkinFiles(bundledRoot + "/" + skinName, userSkinDir, true)
-				print("SaveLoadSys: скин '%s' обновлён до версии %d (%d файлов)" % [skinName, bundledVer, updated])
+				_note("SaveLoadSys: скин '%s' обновлён до версии %d (%d файлов)" % [skinName, bundledVer, updated])
 			else:
 				print("SYNC DEBUG: '%s' - у игрока уже есть папка, пропускаю" % skinName)
 			continue # у игрока уже есть эта папка - не трогаем, вдруг он сам её менял
@@ -260,7 +266,7 @@ func _syncBundledSkins() -> void:
 					copiedCount += 1
 				else:
 					print("SYNC DEBUG: не смог записать %s" % dstPath)
-		print("SaveLoadSys: добавлен новый зашитый скин '%s' (%d файлов скопировано из %d найденных)" % [skinName, copiedCount, realFiles])
+		_note("SaveLoadSys: добавлен новый зашитый скин '%s' (%d файлов скопировано из %d найденных)" % [skinName, copiedCount, realFiles])
 
 #this bug fuxking sucks so im removing it once and for all
 #automatically detect if the user is missing a setting or something related to that

@@ -131,13 +131,13 @@ flat = true
 alignment = 1
 selected = 0
 item_count = 4
-popup/item_0/text = "Console"
+popup/item_0/text = "Консоль"
 popup/item_0/id = 0
-popup/item_1/text = "Settings"
+popup/item_1/text = "Настройки"
 popup/item_1/id = 3
-popup/item_2/text = "Skins"
+popup/item_2/text = "Скины"
 popup/item_2/id = 2
-popup/item_3/text = "Items"
+popup/item_3/text = "Предметы"
 popup/item_3/id = 3
 
 [node name="MarginContainer" type="MarginContainer" parent="." unique_id=212749622]
@@ -216,7 +216,7 @@ alignment = 1
 custom_minimum_size = Vector2(60, 0)
 layout_mode = 2
 toggle_mode = true
-text = "Behavior"
+text = "Поведение"
 icon_alignment = 1
 expand_icon = true
 metadata/type = "bool"
@@ -225,7 +225,7 @@ metadata/type = "bool"
 custom_minimum_size = Vector2(60, 0)
 layout_mode = 2
 toggle_mode = true
-text = "Audio"
+text = "Звук"
 icon_alignment = 1
 expand_icon = true
 metadata/type = "bool"
@@ -234,7 +234,7 @@ metadata/type = "bool"
 custom_minimum_size = Vector2(60, 0)
 layout_mode = 2
 toggle_mode = true
-text = "General
+text = "Общее
 "
 icon_alignment = 1
 expand_icon = true
@@ -244,7 +244,7 @@ metadata/type = "bool"
 custom_minimum_size = Vector2(60, 0)
 layout_mode = 2
 toggle_mode = true
-text = "Debug"
+text = "Отладка"
 icon_alignment = 1
 expand_icon = true
 metadata/type = "bool"
@@ -284,35 +284,35 @@ theme_override_constants/separation = -1
 
 [node name="TitleCard" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=2051856741 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Invincible 
-[i]Prevents death, mood loss, hunger, trust loss...[/i]"
+label = "Неуязвимость
+[i]Без смерти, потери настроения, голода, доверия...[/i]"
 key = "invincible"
 
 [node name="Lobotomy" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1319685572 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Enable mood"
+label = "Включить настроение"
 key = "lobotomize"
 flipValue = true
 defaultValue = true
 
 [node name="Hungry" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1390057350 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Enable hunger"
+label = "Включить голод"
 key = "hungerEnabled"
 
 [node name="Sleepy" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=62469743 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Enable sleep cycles"
+label = "Включить сон"
 key = "sleepEnabled"
 
 [node name="Silence" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=877578037 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Disable ALL speech"
+label = "Отключить ВСЮ речь"
 key = "mute"
 
 [node name="SilenceSoft" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1248303193 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Disable passive speech"
+label = "Отключить фоновую речь (говорит только в ответ на действия)"
 key = "mutePassive"
 
 [node name="MinDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227112 instance=ExtResource("12_qw8t2")]
@@ -372,38 +372,38 @@ theme_override_constants/separation = -1
 
 [node name="MasterVolume" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=706210843 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Master Volume"
+label = "Общая громкость"
 key = "soundVolume"
 valueType = "percentage"
 updateVolume = true
 
 [node name="MuteDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=450165030 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Mute dialogue sounds"
+label = "Выключить звук печати фраз"
 key = "dialogueSoundEnabled"
 flipValue = true
 
 [node name="MuteWhine" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=1936769998 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Mute whining sounds"
+label = "Выключить обычные звуки голоса"
 key = "whiningSoundEnabled"
 flipValue = true
 
 [node name="MuteBark" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=23294389 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Mute barking sounds"
+label = "Выключить агрессивные звуки (шипение, лай, крик)"
 key = "barkSoundEnabled"
 flipValue = true
 
 [node name="MutePet" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=55793242 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Mute petting sounds"
+label = "Выключить звук поглаживания"
 key = "pettingSoundEnabled"
 flipValue = true
 
 [node name="MuteEating" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/AudioPanel/ScrollContainer/VBoxContainer" unique_id=369630809 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Mute eating sounds"
+label = "Выключить звук еды"
 key = "eatingSoundEnabled"
 flipValue = true
 
@@ -428,7 +428,7 @@ theme_override_constants/separation = -1
 
 [node name="Monitor" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=27978876 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Default monitor"
+label = "Монитор по умолчанию"
 key = "defaultMonitor"
 sliderMaximum = 9.0
 sliderStep = 1.0
@@ -440,7 +440,7 @@ theme_override_constants/separation = 0
 
 [node name="FPSIdle" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer/HBoxContainer" unique_id=1765739864 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Max FPS: Idle"
+label = "Макс. FPS в простое"
 key = "maxFPSIdle"
 defaultValue = 60.0
 sliderMinimum = 30.0
@@ -450,7 +450,7 @@ valueType = "int"
 
 [node name="FPSInteract" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer/HBoxContainer" unique_id=1759542382 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Max FPS: Interacting"
+label = "Макс. FPS при взаимодействии"
 key = "maxFPSInteract"
 defaultValue = 60.0
 sliderMinimum = 30.0
@@ -460,19 +460,19 @@ valueType = "int"
 
 [node name="Persistence" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=671056008 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Keep spawned expies across sessions"
+label = "Сохранять персонажей между запусками"
 key = "expiePersistence"
 defaultValue = true
 
 [node name="UpdateNotif" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967685 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Update notification"
+label = "Уведомление об обновлениях"
 key = "updNotif"
 defaultValue = true
 
 [node name="NoPersPopup" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=783160364 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Disable 'too many expies!?' popup"
+label = "Не показывать окно «слишком много персонажей»"
 key = "noPersPopup"
 
 [node name="FontSize" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1753755982 instance=ExtResource("9_r80vr")]
@@ -487,20 +487,20 @@ valueType = "int"
 [node name="Pixel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1687074210 instance=ExtResource("5_hils5")]
 visible = false
 layout_mode = 2
-label = "Enable pixel rendering"
+label = "Пиксельная отрисовка"
 key = "pixel"
 
 [node name="Vulkan" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1691357632 instance=ExtResource("5_hils5")]
 visible = false
 layout_mode = 2
-label = "Use Vulkan [rainbow](Doesn't work!)[/rainbow]"
+label = "Vulkan [rainbow](не работает!)[/rainbow]"
 key = "useVulkan"
 
 [node name="OpenFolder" type="Button" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1666032789]
 layout_mode = 2
 size_flags_vertical = 8
 offset_transform_enabled = true
-text = "Open save data folder"
+text = "Открыть папку сохранений"
 autowrap_mode = 3
 script = ExtResource("7_onf55")
 
@@ -508,7 +508,7 @@ script = ExtResource("7_onf55")
 layout_mode = 2
 size_flags_vertical = 8
 offset_transform_enabled = true
-text = "Close Application"
+text = "Закрыть приложение"
 autowrap_mode = 3
 script = ExtResource("7_fjui6")
 
@@ -534,19 +534,19 @@ theme_override_constants/separation = -1
 [node name="OiYou" type="RichTextLabel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=336281227]
 layout_mode = 2
 bbcode_enabled = true
-text = "Hello! You shouldn't mess with these ones [i]unless you know what you're doing.[/i]"
+text = "Привет! Эти настройки лучше не трогать, [i]если не знаешь, что делаешь.[/i]"
 fit_content = true
 horizontal_alignment = 1
 
 [node name="SkinName" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=737089591 instance=ExtResource("12_qw8t2")]
 layout_mode = 2
-label = "Default skin folder name"
+label = "Папка скина по умолчанию"
 key = "defaultSkin"
 defaultValue = "Body"
 
 [node name="MoodMin" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1160899127 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Minimum mood"
+label = "Минимальное настроение"
 key = "minMood"
 sliderMinimum = -100.0
 sliderMaximum = 100.0
@@ -554,7 +554,7 @@ sliderStep = 0.2
 
 [node name="MoodMax" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1660641891 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Maximum mood"
+label = "Максимальное настроение"
 key = "maxMood"
 sliderMinimum = -100.0
 sliderMaximum = 100.0
@@ -563,30 +563,30 @@ sliderStep = 0.2
 [node name="HungerRate" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1872999209 instance=ExtResource("9_r80vr")]
 visible = false
 layout_mode = 2
-label = "Hunger rate
-[rainbow](Currenly unused)[/rainbow]"
+label = "Скорость голода
+[rainbow](пока не используется)[/rainbow]"
 key = "hungerDecayRate"
 sliderMinimum = -1.0
 
 [node name="Disclaimer" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1937617048 instance=ExtResource("5_hils5")]
 visible = false
 layout_mode = 2
-label = "Toggle disclaimer at bootup
-[i]No longer used[/i]"
+label = "Предупреждение при запуске
+[i]больше не используется[/i]"
 key = "messageEnabled"
 flipValue = true
 
 [node name="Normalize" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=168003765 instance=ExtResource("9_r80vr")]
 visible = false
 layout_mode = 2
-label = "Normalize"
+label = "Нормализация"
 key = "normalize"
 sliderMinimum = -1.0
 
 [node name="UseVulkan" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=556117969 instance=ExtResource("5_hils5")]
 visible = false
 layout_mode = 2
-label = "Use Vulkan Rendering [color=red][wave] (REQUIRES RESTART)"
+label = "Отрисовка Vulkan [color=red][wave] (НУЖЕН ПЕРЕЗАПУСК)"
 key = "useVulkan"
 
 [node name="SkinsView" type="Panel" parent="MarginContainer/ViewportPanel" unique_id=1098396453 node_paths=PackedStringArray("defaultSkinButton", "spawnButton", "openFolderButton", "refreshButton", "openDBButton", "expieDisplayWidget", "skinsButtonList", "skinNameLabel")]
@@ -657,7 +657,7 @@ size_flags_horizontal = 3
 
 [node name="DefaultSkinButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer/ScrollContainer/VBoxContainer" unique_id=1892626913]
 layout_mode = 2
-text = "Experiment (Default)"
+text = "Experiment (по умолчанию)"
 autowrap_mode = 3
 
 [node name="OptionsMarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer" unique_id=1591849225]
@@ -678,7 +678,7 @@ alignment = 1
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
-text = "Open skins folder"
+text = "Открыть папку скинов"
 autowrap_mode = 3
 autowrap_trim_flags = 192
 clip_text = true
@@ -692,7 +692,7 @@ text = "↻"
 layout_mode = 2
 size_flags_vertical = 4
 theme_override_colors/font_color = Color(0.13137114, 0.6858215, 0.86762196, 1)
-text = " Skins Database"
+text = " База скинов"
 autowrap_mode = 3
 
 [node name="DisplayPanel" type="Panel" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer" unique_id=319510509]
@@ -750,7 +750,7 @@ text = "<"
 
 [node name="SpawnButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/Selector" unique_id=2042383996]
 layout_mode = 2
-text = " Spawn "
+text = " Создать "
 
 [node name="NextButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/DisplayPanel/VBoxContainer/Selector" unique_id=350446503]
 visible = false
@@ -819,7 +819,7 @@ theme_override_font_sizes/bold_italics_font_size = 16
 theme_override_font_sizes/italics_font_size = 16
 theme_override_font_sizes/mono_font_size = 16
 bbcode_enabled = true
-text = "[color=ED2B42]MOST IF NOT ALL ASSETS ARE RIPPED FROM 
+text = "[color=ED2B42]БОЛЬШАЯ ЧАСТЬ АССЕТОВ ВЗЯТА ИЗ 
 [color=2BEDD6]https://casualtiesunknown.miraheze.org/wiki/[/color]"
 fit_content = true
 horizontal_alignment = 1

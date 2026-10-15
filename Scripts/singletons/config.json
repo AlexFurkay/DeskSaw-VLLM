@@ -8,6 +8,9 @@
 		"x2": 0.0
 	},
 	"expieDialogueSize": 7.0,
+	"logAiLines": true,
+	"maxFPSIdle": 60.0,
+	"maxFPSInteract": 60.0,
 	"minDialogueTime": "60.0",
 	"maxDialogueTime": "120.0",
 	"petTalkMin": "180",

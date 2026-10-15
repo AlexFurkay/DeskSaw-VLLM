@@ -32,7 +32,7 @@ func _ready() -> void:
 
 	# Персонаж-игрок (PlayerManager): кнопка рядом со Spawn
 	var playerButton := Button.new()
-	playerButton.text = " Spawn as player "
+	playerButton.text = " Создать за игрока "
 	spawnButton.get_parent().add_child(playerButton)
 	spawnButton.get_parent().move_child(playerButton, spawnButton.get_index() + 1)
 	playerButton.pressed.connect(_on_spawn_player_press)

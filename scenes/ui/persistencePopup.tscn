@@ -57,7 +57,7 @@ offset_bottom = 15.0
 grow_horizontal = 2
 grow_vertical = 2
 theme = ExtResource("2_c7vgj")
-text = "WARNING! TOO MANY EXPIES!?"
+text = "ВНИМАНИЕ! СЛИШКОМ МНОГО ПЕРСОНАЖЕЙ!?"
 
 [node name="Close" type="Button" parent="TitleBar" unique_id=38507318]
 visible = false
@@ -115,13 +115,13 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme = ExtResource("3_e6j3v")
 bbcode_enabled = true
-text = "HOLD IT RIGHT THERE!
+text = "А НУ СТОЯТЬ!
 
-You have 20 (or more) Expies registered in your persistence data. Keeping these many emotionally complex creatures loaded at once could cause considerable performance issues.
+У тебя сохранено 20 (или больше) персонажей. Столько эмоционально сложных существ одновременно могут заметно нагрузить компьютер.
 
-Are you sure you want to maintain these many?
+Точно оставить их всех?
 
-(You can disable this message in settings)"
+(Это окно можно отключить в настройках)"
 fit_content = true
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -140,13 +140,13 @@ layout_mode = 2
 [node name="YesButton" type="Button" parent="MarginContainer/ViewportPanel/VBoxContainer/MarginContainer/HBoxContainer" unique_id=1326940879]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "YES. BRING THEM IN!"
+text = "ДА. ВСЕХ СЮДА!"
 autowrap_mode = 3
 
 [node name="NoButton" type="Button" parent="MarginContainer/ViewportPanel/VBoxContainer/MarginContainer/HBoxContainer" unique_id=695481625]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Nah... get rid of them."
+text = "Не-а... убери их."
 autowrap_mode = 3
 
 [node name="Resize" type="Button" parent="." unique_id=706981152]

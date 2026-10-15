@@ -38,6 +38,7 @@ AudioManager="*uid://kyyjq6geettk"
 CommandsGlobal="*uid://cdrh1cuyfy75f"
 GlobalKeys="*res://Scripts/preload/GlobalKeys.cs"
 PlayerManager="*res://Scripts/impo/playerManager.gd"
+Diagnostics="*res://Scripts/preload/diagnostics.gd"
 
 [display]
 

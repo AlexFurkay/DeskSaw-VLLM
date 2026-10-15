@@ -57,6 +57,17 @@ func _get_scene_texture(scene_path: String) -> Texture:
 	push_error("sprite2d node not found on scene '%s'" % [scene_path])
 	return Texture.new()
 
+## Русские названия на карточках (054.98). Внутри игры и в командах
+## spawn / clear_items предметы по-прежнему зовутся по имени файла.
+const ITEM_RU_NAMES := {
+	"banana": "банан", "bandage": "бинт", "beret": "берет", "bread": "хлеб",
+	"burger": "бургер", "chair": "стул", "containercrate": "ящик",
+	"fentanyl": "фентанил", "geofruit": "геофрукт", "glasses": "очки",
+	"hat": "шляпа", "juicedobry": "сок «Добрый»", "medcrate": "медящик",
+	"medkit": "аптечка", "nightstand": "тумбочка", "pizzaslice": "пицца",
+	"sawblade": "пила", "syringe": "шприц", "yellowflesh": "жёлтая плоть",
+}
+
 ## Clear and regenerate interactable buttons for all available items.
 ## '_generate_item_list' should have been called at this point.
 func _generate_buttons() -> void:
@@ -69,7 +80,7 @@ func _generate_buttons() -> void:
 		itemContainer.add_child(btn)
 		btn.name = "%sItemWidget" % [item_entry.name]
 		btn.owner = itemContainer
-		btn.itemName = item_entry.name
+		btn.itemName = ITEM_RU_NAMES.get(item_entry.name, item_entry.name)
 		btn.itemIcon = item_entry.icon
 		# mind you, this' like that because of the referenced scene's anatomy
 		btn.find_child("Button").pressed.connect(_on_item_button_press.bind(item_entry))
@@ -86,7 +97,9 @@ func _on_item_button_press(item: ItemEntry) -> void:
 ## Recalculate item list columns using our root width
 func _recalculate_columns() -> void:
 	# (sort of) compensate for margin, how many times root fits into widget width
-	itemContainer.columns = round((root.size.x - 132) / 180)
+	# карточка 180 px растёт вместе с текстом консоли (terminalMain.textScale)
+	var cardWidth: float = 180.0 * preload("res://Scripts/ui/terminal/terminalMain.gd").textScale()
+	itemContainer.columns = maxi(1, int(round((root.size.x - 132) / cardWidth)))
 
 # wiki stuff
 # i feel like this should be it's own node scene but i felt way too lazy tbh.

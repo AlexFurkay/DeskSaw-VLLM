@@ -85,7 +85,7 @@ public partial class TransparentWindow : Node
 
 		_lastClickthroughState = false;
 
-		_maxFPSIdle = 45;
+		_maxFPSIdle = 60; // 054.98: было 45 - простой тоже 60 (и курсор над персом ловится быстрее)
 		_maxFPSInteract = 60;
 
 		// can't directly call "gbData" from a cs script.
@@ -190,7 +190,7 @@ public partial class TransparentWindow : Node
 		{ // shouldnt be able to reach this, but just in case.
 			return;
 		}
-		_maxFPSIdle = (int)gbData.Call("GetSetting", "maxFPSIdle", 45);
+		_maxFPSIdle = (int)gbData.Call("GetSetting", "maxFPSIdle", 60);
 		_maxFPSInteract = (int)gbData.Call("GetSetting", "maxFPSInteract", 60);
 		// GD.Print($"{_maxFPSIdle} : {_maxFPSInteract}");
 		Engine.MaxFps = _lastClickthroughState ? _maxFPSIdle : _maxFPSInteract;
