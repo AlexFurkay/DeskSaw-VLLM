@@ -477,7 +477,7 @@ key = "noPersPopup"
 
 [node name="FontSize" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1753755982 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Dialogue font size"
+label = "Размер текста фраз персонажей (по умолчанию 7)"
 key = "expieDialogueSize"
 sliderMinimum = 3.0
 sliderMaximum = 12.0

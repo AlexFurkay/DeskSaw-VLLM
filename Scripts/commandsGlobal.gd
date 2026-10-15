@@ -120,6 +120,10 @@ func _cmd_despawnPet() -> void:
 
 
 func _despawnChoice(answer: String, pets: Array) -> void:
+	if answer != "" and Console.has_command(answer.split(" ", false)[0]):
+		Console.print("Выход из удаления.")
+		Console.execute(answer)
+		return
 	if not answer.is_valid_int() or int(answer) < 0 or int(answer) > pets.size():
 		Console.print("[color=ORANGE]Нужна цифра от 0 до %d - удаление отменено, введи despawnPet ещё раз.[/color]" % pets.size())
 		return
@@ -225,7 +229,7 @@ func _ready():
 	Console.create_command("aiCreativity", _cmd_aiCreativity, "0.0-1.5, выше = более дикие/случайные ответы, ниже = безопаснее/предсказуемее")
 	Console.create_command("aiRepetitionGuard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова")
 	Console.create_command("aiModel", _cmd_aiModel, "переключает модель Ollama, которую использует ИИ (сама скачает её через Ollama, если ещё не скачана)")
-	Console.create_command("banwords", _cmd_banwords, "управление словами/фразами, которые ИИ никогда не должен использовать")
+	Console.create_command("banwords", _cmd_banwords, "список слов/фраз, которые ИИ никогда не должен использовать: после списка вводи номер (удалить), слово (добавить) или 0 (выход)")
 	Console.create_command("reloadLore", LLMManager.reloadLore, "перезагружает user://LORE.txt")
 	Console.create_command("resizeConsole", resize, "изменить размер консоли")
 	#dont use this it breaks alot of shit Console.create_command("reload", reload, "reload everything")
@@ -329,6 +333,7 @@ func _cmd_banwords(w1: String = "", w2: String = "", w3: String = "", w4: String
 
 	if w1 == "":
 		_printBanwordsMenu(words)
+		Console.pending_input = _banwordsAnswer
 		return
 
 	if w1 == "0" and w2 == "":
@@ -347,6 +352,7 @@ func _cmd_banwords(w1: String = "", w2: String = "", w3: String = "", w4: String
 	elif w1.is_valid_int() and w2 == "":
 		Console.print("[color=YELLOW]Введи номер ЕЩЁ РАЗ через пробел, чтобы подтвердить удаление (например: banwords %s %s).[/color]" % [w1, w1])
 		_printBanwordsMenu(words)
+		Console.pending_input = _banwordsAnswer
 		return
 	else:
 		var parts: Array = []
@@ -361,6 +367,7 @@ func _cmd_banwords(w1: String = "", w2: String = "", w3: String = "", w4: String
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
 	LLMManager.setBanWords(words)
 	_printBanwordsMenu(words)
+	Console.pending_input = _banwordsAnswer
 
 func _printBanwordsMenu(words: Array) -> void:
 	Console.print("Запрещённые слова/фразы:")
@@ -368,6 +375,53 @@ func _printBanwordsMenu(words: Array) -> void:
 		Console.print("(пусто)")
 	for i in words.size():
 		Console.print("%d. %s" % [i + 1, words[i]])
-	Console.print(">Для удаления слова из списка укажи его номер ДВАЖДЫ через пробел (например: banwords 2 2)")
-	Console.print(">Для ввода слова напиши его после команды и нажми ENTER (например: banwords ты снова)")
-	Console.print(">Чтобы выйти без изменений, введи: banwords 0")
+	Console.print("[color=ORANGE]Введи цифру 0, чтобы выйти из списка[/color]")
+	Console.print("[color=ORANGE]Введи номер, чтобы удалить слово (потом тот же номер ещё раз - подтвердить)[/color]")
+	Console.print("[color=ORANGE]Введи слово или фразу, чтобы добавить её[/color]")
+
+
+## 054.96: banwords работает как despawnPet - после списка просто вводишь
+## ответ, без "banwords" впереди. Список ждёт ответов, пока не введёшь 0.
+## Если введена другая команда консоли - выходим из списка и выполняем её
+## (иначе "toggleAI" стал бы запрещённым словом).
+func _banwordsAnswer(answer: String) -> void:
+	var words: Array = gbData.settings.get("llmBanWords", [])
+	if answer == "0":
+		Console.print("Выход из списка запрещённых слов.")
+		return
+	if Console.has_command(answer.split(" ", false)[0]):
+		Console.print("Выход из списка запрещённых слов.")
+		Console.execute(answer)
+		return
+	if answer.is_valid_int():
+		var idx := int(answer) - 1
+		if idx < 0 or idx >= words.size():
+			Console.print("[color=RED]Нет слова под таким номером.[/color]")
+		else:
+			Console.print("[color=YELLOW]Удалить «%s»? Введи %s ещё раз, чтобы подтвердить, или что угодно другое - отмена.[/color]" % [words[idx], answer])
+			Console.pending_input = _banwordsConfirm.bind(idx, answer)
+			return
+	else:
+		words.append(answer)
+		Console.print("Добавлено: [color=GREEN]%s[/color]" % answer)
+		_saveBanwords(words)
+	_printBanwordsMenu(words)
+	Console.pending_input = _banwordsAnswer
+
+
+func _banwordsConfirm(answer: String, idx: int, number: String) -> void:
+	var words: Array = gbData.settings.get("llmBanWords", [])
+	if answer == number and idx < words.size():
+		Console.print("Удалено: [color=RED]%s[/color]" % words[idx])
+		words.remove_at(idx)
+		_saveBanwords(words)
+	else:
+		Console.print("Удаление отменено.")
+	_printBanwordsMenu(words)
+	Console.pending_input = _banwordsAnswer
+
+
+func _saveBanwords(words: Array) -> void:
+	gbData.settings["llmBanWords"] = words
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	LLMManager.setBanWords(words)
