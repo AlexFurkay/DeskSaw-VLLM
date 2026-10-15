@@ -44,11 +44,35 @@ func _ready() -> void:
 	_descLabel.scroll_active = false
 	_descLabel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_descLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_descLabel.add_theme_font_size_override("normal_font_size", 14)
+	# 054.95: при 14 описание было еле видно - теперь в 3 раза крупнее
+	# (в 1.5 раза, как весь текст вкладки, и ещё в 2 раза сверху)
+	_descLabel.add_theme_font_size_override("normal_font_size", DESC_FONT_SIZE)
+	_descLabel.add_theme_font_size_override("italics_font_size", DESC_FONT_SIZE)
 	var displayBox: Node = spawnButton.get_parent().get_parent()
 	displayBox.add_child(_descLabel)
 
+	# весь остальной текст вкладки - в 1.5 раза крупнее
+	_scaleFontsUnder(self, TEXT_SCALE)
+
+const TEXT_SCALE := 1.5
+const DESC_FONT_SIZE := 42
 var _descLabel: RichTextLabel
+
+func _scaleFont(c: Control, factor: float) -> void:
+	if c == _descLabel or c.has_meta("fontScaled"):
+		return
+	c.set_meta("fontScaled", true)
+	if c is Button or c is Label or c is LineEdit:
+		c.add_theme_font_size_override("font_size", int(round(c.get_theme_font_size("font_size") * factor)))
+	elif c is RichTextLabel:
+		for key in ["normal_font_size", "bold_font_size", "italics_font_size"]:
+			c.add_theme_font_size_override(key, int(round(c.get_theme_font_size(key) * factor)))
+
+func _scaleFontsUnder(node: Node, factor: float) -> void:
+	for child in node.get_children():
+		if child is Control:
+			_scaleFont(child, factor)
+		_scaleFontsUnder(child, factor)
 
 ## "description" из character.json скина (папка игрока, потом встроенная).
 func _skinDescription(skinName: String) -> String:
@@ -161,6 +185,7 @@ func regenerate_buttons() -> void:
 		btn.owner = skinsButtonList
 		btn.text = skin.name
 		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_scaleFont(btn, TEXT_SCALE)
 		btn.pressed.connect(_on_skin_button_press.bind(skin))
 		skinButtons.append(btn)
 

@@ -98,6 +98,9 @@ func validate_argument_count(args: PackedStringArray, cmd: Dictionary) -> bool:
 
 	return true
 
+## Если задано - следующая введённая строка передаётся сюда (DeskSaw).
+var pending_input: Callable = Callable()
+
 ## Execute command. First word must be a command name, other is arguments.
 func execute(string: String) -> void:
 	var args: PackedStringArray = string.split(" ", false)
@@ -108,6 +111,14 @@ func execute(string: String) -> void:
 	_history_index = _history.size()
 
 	self.print("[color=GRAY]> " + string + "[/color]")
+
+	# Команда ждёт ответа (например, despawnPet - номер питомца): эта строка
+	# уходит ей, а не выполняется как новая команда.
+	if pending_input.is_valid():
+		var answer := pending_input
+		pending_input = Callable()
+		answer.call(string.strip_edges())
+		return
 
 	if not has_command(args[0]):
 		return self.error("Command '%s' not found." % string)

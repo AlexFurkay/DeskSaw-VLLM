@@ -83,6 +83,10 @@ var playerControlled := false
 var _playerDir := 0.0
 var _playerJump := false
 var _playerSit := false
+## звук "меня держат" у перса-игрока - не чаще, чем раз в столько секунд
+const PLAYER_DRAG_SOUND_MIN := 4.5
+const PLAYER_DRAG_SOUND_MAX := 6.0
+var _playerDragSoundAt := 0
 var _playerSitPrev := false
 var _forcedSleep := false # сон автопилота: не просыпается сам, только по включению управления
 var _autopilotSleepAt := 0 # когда автопилот уложит игрока спать (3-5 мин без управления)
@@ -983,12 +987,14 @@ func petTalkLoop() -> void:
 		var talkRange := petTalkRange()
 		_nextPetTalkMsec = Time.get_ticks_msec() + int(randf_range(talkRange.x, talkRange.y) * 1000.0)
 		var otherSkin: String = other._skinTag()
+		# всего реплик в разговоре (вместе с первой): раньше всегда ровно 2
+		var turns := randi_range(PET_TALK_TURNS_MIN, PET_TALK_TURNS_MAX)
 		LLMManager.requestPetOpener(_skinTag(), otherSkin, _petStats() + _aiStateHint(), func(line: String):
 			_queueMessage(line, 1.0, true)
 			AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 			notePetLine(other, PlayerManager.displayNameFor(_skinTag()), line)
 			if is_instance_valid(other):
-				other.replyToPet(self, line), _petTalkWith(other), other._petStats())
+				other.replyToPet(self, line, turns - 1), _petTalkWith(other), other._petStats())
 
 
 ## Память разговоров с другими ИИ-персами: у каждого перса своя, по каждому
@@ -1022,6 +1028,14 @@ func _nearestTalkPartner() -> Node:
 	return null
 
 
+## Стоит ли этот собеседник всё ещё рядом (для продолжения разговора).
+func _nearestTalkPartnerIs(other: Node) -> bool:
+	if not is_instance_valid(other):
+		return false
+	var maxDist: float = PET_TALK_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0 * 1.5 # отойти чуть дальше - можно
+	return moveSys.rigidtorso.global_position.distance_to(other.moveSys.rigidtorso.global_position) < maxDist
+
+
 func _petStats() -> String:
 	var hp: float = healthHandler.health
 	var wound := ", тяжёлые раны" if hp <= 30.0 else (", есть раны" if hp <= 60.0 else "")
@@ -1029,8 +1043,15 @@ func _petStats() -> String:
 
 
 ## Ответ другому ИИ-персонажу (вызывает его petTalkLoop).
-func replyToPet(speaker: Node, line: String) -> void:
-	if isPlayer or isUnconscious or isSleeping or not is_instance_valid(speaker):
+## turnsLeft - сколько реплик в разговоре ещё осталось, считая этот ответ.
+## Если больше одной - собеседник ответит на ответ, и так по очереди.
+const PET_TALK_TURNS_MIN := 2
+const PET_TALK_TURNS_MAX := 6
+func replyToPet(speaker: Node, line: String, turnsLeft: int = 1) -> void:
+	if turnsLeft < 1 or isPlayer or isUnconscious or isSleeping or not is_instance_valid(speaker):
+		return
+	# разговор обрывается, если кого-то схватили, уронили или он отошёл
+	if beingDragged or ragdolled or shocked or _nearestTalkPartnerIs(speaker) == false:
 		return
 	var speakerSkin: String = speaker._skinTag()
 	var speakerName: String = PlayerManager.displayNameFor(speakerSkin)
@@ -1054,6 +1075,8 @@ func replyToPet(speaker: Node, line: String) -> void:
 		notePetLine(speaker, myName, text)
 		if is_instance_valid(speaker):
 			speaker.notePetLine(self, myName, text) # собеседник тоже запоминает ответ
+			if turnsLeft > 1:
+				speaker.replyToPet(self, text, turnsLeft - 1)
 	LLMManager.requestChatReply(_skinTag(), speakerName, talk, _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin, "", speaker._petStats())
 
 
@@ -1176,6 +1199,7 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 	moveSys.rigid.collision_mask = 0
 	moveSys.rigid.freeze = true
 	_dragEscalationLevel = 0
+	_playerDragSoundAt = Time.get_ticks_msec() + int(PLAYER_DRAG_SOUND_MIN * 1000.0) # звук захвата уже прозвучал
 	while true:
 		var aiOn: bool = gbData.settings.get("llmVisionEnabled", false)
 		var waitTime: float = randf_range(10.0, 15.0) if aiOn else (getUpTimer + randf_range(0, 5))
@@ -1183,7 +1207,14 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 			waitTime = 1.5 # игроку незачем ждать ИИ-реплик - встаёт почти сразу
 		await get_tree().create_timer(waitTime).timeout
 		if beingDragged:
-			if not isSleeping and not isUnconscious:
+			# у игрока цикл крутится раз в 1.5 с (чтобы быстро вставать), но звук
+			# "меня держат" от этого шёл каждые 1.5 с - для игрока он реже
+			var playerSoundDue := true
+			if isPlayer:
+				playerSoundDue = Time.get_ticks_msec() >= _playerDragSoundAt
+				if playerSoundDue:
+					_playerDragSoundAt = Time.get_ticks_msec() + int(randf_range(PLAYER_DRAG_SOUND_MIN, PLAYER_DRAG_SOUND_MAX) * 1000.0)
+			if not isSleeping and not isUnconscious and playerSoundDue:
 				if aiOn:
 					_dragEscalationLevel += 1
 					var idx: int = mini(_dragEscalationLevel - 1, DRAG_STAGE_DESCRIPTIONS.size() - 1)

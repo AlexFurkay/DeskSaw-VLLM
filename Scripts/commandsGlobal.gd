@@ -95,8 +95,47 @@ func _cmd_petSize(value: float) -> void:
 	Console.print("Размер новых питомцев и предметов: [color=CYAN]%s[/color] (заспавни новых, чтобы увидеть - на уже существующих не действует)" % value)
 
 
+## 054.95: раньше удаляла всех сразу. Теперь показывает список (до 8, по
+## порядку спавна) и ждёт номер: 0 - выход, 1-8 - удалить одного.
+## Убрать всех разом по-прежнему можно командой clearItems entity.
+const DESPAWN_LIST_MAX := 8
 func _cmd_despawnPet() -> void:
-	clearObj("entity")
+	var pets: Array = []
+	for pet in get_tree().get_nodes_in_group("pets"):
+		if is_instance_valid(pet) and not pet.is_queued_for_deletion():
+			pets.append(pet)
+	if pets.is_empty():
+		Console.print("Питомцев на экране нет.")
+		return
+	# petId вида "id7" - чем больше число, тем позже заспавнен
+	pets.sort_custom(func(a, b): return int(String(a.petId).trim_prefix("id")) < int(String(b.petId).trim_prefix("id")))
+	pets = pets.slice(0, DESPAWN_LIST_MAX)
+	Console.print("[color=ORANGE]Введи цифру 0, чтобы выйти из удаления[/color]")
+	Console.print("[color=ORANGE]Введи цифру 1-%d, чтобы удалить питомца[/color]" % pets.size())
+	Console.print("0. выход")
+	for i in pets.size():
+		var p = pets[i]
+		Console.print("%d. %s%s" % [i + 1, PlayerManager.displayNameFor(p._skinTag()), " (игрок)" if p.isPlayer else ""])
+	Console.pending_input = _despawnChoice.bind(pets)
+
+
+func _despawnChoice(answer: String, pets: Array) -> void:
+	if not answer.is_valid_int() or int(answer) < 0 or int(answer) > pets.size():
+		Console.print("[color=ORANGE]Нужна цифра от 0 до %d - удаление отменено, введи despawnPet ещё раз.[/color]" % pets.size())
+		return
+	var n := int(answer)
+	if n == 0:
+		Console.print("Выход из удаления.")
+		return
+	var pet = pets[n - 1]
+	if not is_instance_valid(pet):
+		Console.print("Этого питомца уже нет на экране.")
+		return
+	var shown: String = PlayerManager.displayNameFor(pet._skinTag())
+	var wrapper: Node = pet.get_parent().get_parent()
+	gbData.removePet(String(pet.petId))
+	wrapper.queue_free()
+	Console.print("Удалён: %s" % shown)
 
 
 func clearObj(category: String = "object"):
@@ -195,7 +234,7 @@ func _ready():
 	#Console.create_command("setMood", _setmood, "debugging tool that doesnt work because i disabled mood stuff for this build")
 	Console.create_command("spawn", _additem, "")
 	Console.create_command("clearItems", clearObj, "очищает по 'entity', 'object' или конкретному имени предмета/скина")
-	Console.create_command("despawnPet", _cmd_despawnPet, "удаляет текущего питомца(ев) с экрана, чтобы можно было заспавнить нового")
+	Console.create_command("despawnPet", _cmd_despawnPet, "показывает список питомцев на экране и удаляет одного по номеру (всех разом - clearItems entity)")
 	Console.create_command("spawnExpie", spawnExpie, "создаёт Савианина на основе твоего скина по умолчанию")
 	Console.create_command("change_player_mode", _cmd_changePlayerMode, "меняет клавиши входа/выхода из управления игроком (сейчас: Ctrl+Alt+P). Клавиши пишутся ВРУЧНУЮ через + без пробелов, например: change_player_mode Ctrl+Shift+K. Можно: Ctrl, Alt, Shift, Win + одна обычная клавиша (A-Z, 0-9, F1-F24, Space, Tab, Home, End, Insert, Delete, PageUp, PageDown, стрелки Left/Right/Up/Down)")
 	Console.create_command("petSize", _cmd_petSize, "меняет размер персонажа (по умолчанию 4.0) - действует на новых заспавненных, не на уже существующих")

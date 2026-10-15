@@ -607,6 +607,37 @@ func _stripWornClause(tag: String, text: String) -> String:
 	return result
 
 
+## Конец фразы (3 последних слова) совпал с концом одной из недавних -
+## отрезаем последний кусок после " — " или ", " ("Expie — странный, но
+## ты знаешь: я всё равно с тобой" -> "Expie — странный"). Если от фразы
+## остаётся меньше 3 слов - возвращаем как было.
+func _stripRepeatedTail(tag: String, text: String) -> String:
+	var words := _normWords(text)
+	if words.size() < 5:
+		return text
+	var tail := " ".join(words.slice(words.size() - 3))
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	var repeated := false
+	for old in recent.slice(maxi(0, recent.size() - 6)):
+		var ow := _normWords(String(old))
+		if ow.size() >= 3 and " ".join(ow.slice(ow.size() - 3)) == tail:
+			repeated = true
+			break
+	if not repeated:
+		return text
+	var cut := -1
+	for sep in [" — ", " - ", ", но ", ": ", ", "]:
+		cut = maxi(cut, text.rfind(sep))
+	if cut <= 0:
+		return text
+	var head := text.substr(0, cut).strip_edges()
+	if head.split(" ", false).size() < 3:
+		return text
+	if not (head.ends_with(".") or head.ends_with("!") or head.ends_with("?") or head.ends_with("…")):
+		head += "."
+	return head
+
+
 func _chatLooksStuck(tag: String, text: String) -> bool:
 	var recent: Array = _recentLinesByCategory.get(tag, [])
 	recent = recent.slice(maxi(0, recent.size() - 6))
@@ -723,6 +754,8 @@ func _on_screen_tick() -> void:
 	var images: Array = [Marshalls.raw_to_base64(png_bytes)]
 	var prompt := _buildBasePrompt(tag) + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Маленькие пиксельные существа поверх окон - это {ты сама|ты сам} и твои соседи по рабочему столу, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. НЕ описывай и не пересказывай, что на экране (никаких 'Это окно...', 'Здесь видно...', 'На экране...') - человек и сам это видит. Вместо этого ОТРЕАГИРУЙ на увиденное как живой персонаж, своими словами и со своим отношением. Не начинай фразу со слова 'Это'. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
 	prompt += "\nПодход к реакции на этот раз: " + _pickScreenAngle()
+	# в 054.94 Voyager говорила человеку "ты застряла", "ты решила"
+	prompt += "\nЧеловек за компьютером - парень: о нём только в мужском роде ('ты застрял', 'ты решил', 'ты пытался')."
 	prompt += speaker._aiStateHint()
 	_enqueue(prompt, images, func(text):
 		if is_instance_valid(speaker):
@@ -1672,9 +1705,23 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 		# переспрос тоже вернул затёртый оборот - отрезаем ту часть фразы, где он
 		if text != "" and _currentTag.ends_with(":chat") and int(_currentJob.get("retry", 0)) > 0:
 			var stripped := _stripWornClause(_currentTag, text)
+			stripped = _stripRepeatedTail(_currentTag, stripped)
 			if stripped != text:
 				_logDebugLine(_currentTag, "STRIPPED_WORN", text + "  -->  " + stripped)
 				text = stripped
+		# Фразы о состоянии и реакции на экран: раньше повтор просто
+		# выбрасывался, а модель раз за разом выдавала то же самое ("Мне немного
+		# грустно, но я всё ещё здесь...") - и перс молчал. Теперь один переспрос.
+		var isStateLike: bool = _currentTag.ends_with(":state") or _currentTag.ends_with(":screen")
+		if text != "" and isStateLike and int(_currentJob.get("retry", 0)) == 0 and _looksLikeRepeat(_currentTag, text):
+			_logDebugLine(_currentTag, "RETRY:REPEAT", text)
+			var again2: Dictionary = _currentJob.duplicate()
+			again2["retry"] = 1
+			again2["temperature"] = minf(1.2, creativity + 0.25)
+			again2["prompt"] = String(again2["prompt"]) + _g(_skinFromTag(_currentTag), "\nВНИМАНИЕ: ты {хотела|хотел} сказать \"") + text + "\" - но почти это же ты уже {говорила|говорил}. Скажи о СОВСЕМ другом: другая мысль, другие слова, другое начало и другая концовка."
+			_queue.push_front(again2)
+			_processQueue()
+			return
 		if text != "" and not _currentTag.ends_with(":chat") and _looksLikeRepeat(_currentTag, text):
 			rejectReason = "REPEAT"
 			text = ""
