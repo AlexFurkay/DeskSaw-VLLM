@@ -26,10 +26,58 @@ func _ready() -> void:
 		and gbData.settings.ConsoleSize.x
 		and gbData.settings.ConsoleSize.y
 	):
-		_resize_console(Vector2(gbData.settings.ConsoleSize.x,gbData.settings.ConsoleSize.y), false)
+		var startSize := Vector2(gbData.settings.ConsoleSize.x, gbData.settings.ConsoleSize.y)
+		# размер по умолчанию (никто не растягивал) - под крупный текст
+		if startSize.is_equal_approx(DEFAULT_CONSOLE_SIZE):
+			startSize *= textScale()
+		# и никогда не больше экрана (на 1080p окно, растянутое на 4K, не влезало)
+		var screen := Vector2(GlobalVariable.screenWidth, GlobalVariable.screenHeight) * 0.9
+		startSize = startSize.min(screen)
+		_resize_console(startSize, false)
 		print("%s: initial resize called properly!" % [name])
-	
+
+	# текст всех вкладок - под разрешение экрана; вкладки создают кнопки и на
+	# ходу (список скинов, предметы), их ловим через node_added
+	_scaleFontsUnder(self)
+	get_tree().node_added.connect(_on_node_added)
+
 	CommandsGlobal.runInitialCommands.emit()
+
+
+## 054.96: текст консоли был задан в пикселях - на 4K мелкий, на 1080p
+## огромный. Множитель = 1.5 (крупнее, чем было, по просьбе) x высота экрана
+## относительно 4K (2160): на 4K - 1.5, на 1440p - 1.0, на 1080p - 0.75.
+const BASE_TEXT_SCALE := 1.5
+const REFERENCE_SCREEN_HEIGHT := 2160.0
+const DEFAULT_CONSOLE_SIZE := Vector2(580, 320)
+
+static func textScale() -> float:
+	return BASE_TEXT_SCALE * clampf(float(GlobalVariable.screenHeight) / REFERENCE_SCREEN_HEIGHT, 0.4, 2.0)
+
+
+func _scaleFont(c: Control) -> void:
+	if c.has_meta("fontScaled"):
+		return
+	c.set_meta("fontScaled", true)
+	var k := textScale()
+	if c is Button or c is Label or c is LineEdit or c is TextEdit:
+		c.add_theme_font_size_override("font_size", maxi(6, int(round(c.get_theme_font_size("font_size") * k))))
+	elif c is RichTextLabel:
+		for key in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size", "mono_font_size"]:
+			c.add_theme_font_size_override(key, maxi(6, int(round(c.get_theme_font_size(key) * k))))
+
+
+func _scaleFontsUnder(node: Node) -> void:
+	for child in node.get_children():
+		if child is Control:
+			_scaleFont(child)
+		_scaleFontsUnder(child)
+
+
+func _on_node_added(node: Node) -> void:
+	if node is Control and is_ancestor_of(node):
+		# после _ready самого узла - он мог выставить свой размер
+		_scaleFont.call_deferred(node)
 
 ## Resizes the console using stored data variables
 func _resize_console(v, force) -> void:

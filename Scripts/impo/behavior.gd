@@ -285,7 +285,7 @@ func _prewarmRareCategories() -> void:
 		t + "LightDamage": dialogueSys.data.get("LightDamage", []),
 		t + "MediumDamage": dialogueSys.data.get("MediumDamage", []),
 		t + "HardDamage": dialogueSys.data.get("HardDamage", []),
-		t + "lastmoments": dialogueSys.data.get("lastmoments", []),
+		# lastmoments - сразу из файла (_say), как start: пул не генерируем
 		t + "healed": dialogueSys.data.get("healed", []),
 		t + "fentanyl": dialogueSys.data.get("fentanyl", []),
 		t + "withdrawal": dialogueSys.data.get("withdrawal", []),
@@ -305,7 +305,6 @@ func _prewarmRareCategories() -> void:
 		t + "LightDamage": CATEGORY_SITUATION.get("LightDamage", ""),
 		t + "MediumDamage": CATEGORY_SITUATION.get("MediumDamage", ""),
 		t + "HardDamage": CATEGORY_SITUATION.get("HardDamage", ""),
-		t + "lastmoments": CATEGORY_SITUATION.get("lastmoments", ""),
 		t + "healed": CATEGORY_SITUATION.get("healed", ""),
 		t + "fentanyl": CATEGORY_SITUATION.get("fentanyl", ""),
 		t + "withdrawal": CATEGORY_SITUATION.get("withdrawal", ""),
@@ -607,6 +606,10 @@ func _physics_process(_delta: float) -> void:
 		var bodyVel: Vector2 = moveSys.rigid.linear_velocity
 		if _bodyPrevValid and _spawnSettled:
 			var hit := (_prevBodyVel - bodyVel).length()
+			# рывок вверх от собственного прыжка (прыжок срабатывает в момент
+			# касания пола, скорость "вниз" сразу становится "вверх") - не удар
+			if Time.get_ticks_msec() - moveSys.lastJumpMsec < 150:
+				hit = 0.0
 			if hit >= IMPACT_LIGHT:
 				_bodyPrevValid = false
 				print("KNOCK[%s] landing hit=%.0f prev=%s now=%s state=%s" % [_skinTag(), hit, _prevBodyVel, bodyVel, moveSys.states.keys()[moveSys.currstate]])
@@ -1472,6 +1475,8 @@ func _on_state_reaction(text: String) -> void:
 ## (occasional CAPS on a word, sharper tone) fits the moment better than the
 ## usual calm delivery.
 ## Какие фразы может сказать сам персонаж-игрок (только голод и боль).
+## Эти фразы у ИИ-персов тоже берутся прямо из файла (без ИИ-пула).
+const FILE_ONLY_CATEGORIES := ["lastmoments"]
 const PLAYER_FILE_CATEGORIES := ["hungry", "LightDamage", "MediumDamage", "HardDamage", "lastmoments"]
 const LOUD_CATEGORIES := ["getUp", "getUpPet", "fell", "screamBIG", "LightDamage", "MediumDamage", "HardDamage"]
 
@@ -1722,6 +1727,13 @@ func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true, 
 			var own: Array = dialogueSys.data.get(CATEGORY_EXAMPLES_FROM.get(category, category), [])
 			if not own.is_empty():
 				_queueMessage(String(own.pick_random()), dialogueSys.speedMod, category in URGENT_CATEGORIES)
+		return
+	# 054.96: последние слова - сразу из файла персонажа, как start. Звучат
+	# раз за жизнь, ради них не стоит держать целый ИИ-пул (и ждать его).
+	if category in FILE_ONLY_CATEGORIES:
+		var fromFile: Array = dialogueSys.data.get(category, [])
+		if not fromFile.is_empty():
+			_queueMessage(String(fromFile.pick_random()), dialogueSys.speedMod, true)
 		return
 	if not ignoreCooldown and cooldown > 0.0:
 		var now := Time.get_ticks_msec()

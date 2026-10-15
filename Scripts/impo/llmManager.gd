@@ -47,7 +47,7 @@ var screenTimer: Timer
 var busy := false
 var _prefetchPools: Dictionary = {}   # category -> Array[String] ready-made lines
 var _prefetchPending: Dictionary = {} # category -> bool, true while a refill is in flight
-const PREFETCH_TARGET := 10
+const PREFETCH_TARGET := 8 # 054.96: -20% (было 10), генерация шла слишком долго
 ## Окно контекста модели. 4096 стало впритык: правила (~970 токенов) + лор
 ## (630-1040) + скриншот (~1080) или история чата. 6144 у qwen3-vl:8b ещё
 ## целиком помещается в 8 ГБ видеопамяти (5.67 ГБ против 5.51 при 4096),
@@ -59,16 +59,16 @@ const PREFETCH_REFILL_AT := 3
 ## побольше, чтобы разнообразия хватало дольше и повторы в начале сессии
 ## случались реже.
 const PREFETCH_TARGET_OVERRIDES := {
-	"pet": 25,
-	"petReject": 12,
-	"getUp": 12,
-	"getUpPet": 12,
-	"beingDragged": 12,
-	"screamBIG": 12,
-	"drag_level0": 15,
-	"drag_level1": 15,
-	"drag_level2": 15,
-	"fell": 15,
+	"pet": 20,
+	"petReject": 10,
+	"getUp": 10,
+	"getUpPet": 10,
+	"beingDragged": 10,
+	"screamBIG": 10,
+	"drag_level0": 12,
+	"drag_level1": 12,
+	"drag_level2": 12,
+	"fell": 12,
 }
 
 ## Ключ пула - "Скин:категория" (например "Expie:pet"); настройки выше заданы
@@ -245,7 +245,7 @@ func _loadLore() -> void:
 
 func _createLoreTemplate(path: String, skinName: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_string("Ты %s.\n\nОпиши здесь: происхождение персонажа, характер, как он относится к человеку рядом с собой, тон речи.\nЭтот файл читается заново командой reloadLore в консоли." % skinName)
+	f.store_string("Ты %s.\n\nОпиши здесь: происхождение персонажа, характер, как он относится к человеку рядом с собой, тон речи.\nЭтот файл читается заново командой reload_lore в консоли." % skinName)
 	f.close()
 
 

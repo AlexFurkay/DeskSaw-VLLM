@@ -281,12 +281,17 @@ func checkJump():
 		jump()
 	pass
 
+## Когда был последний собственный прыжок: behavior не считает этот рывок
+## скорости ударом о землю (с зажатым прыжком перс-игрок получал урон).
+var lastJumpMsec := -100000
+
 func jump():
 	if floorRay.is_colliding() and jumpTimer <= 0.0:
 		var vel = rigid.linear_velocity
 		vel.y = jumpPower
 		rigid.linear_velocity = vel
 		jumpTimer = jumpCoolDown
+		lastJumpMsec = Time.get_ticks_msec()
 
 
 func ragdoll(val: bool):

@@ -125,7 +125,7 @@ func _despawnChoice(answer: String, pets: Array) -> void:
 		Console.execute(answer)
 		return
 	if not answer.is_valid_int() or int(answer) < 0 or int(answer) > pets.size():
-		Console.print("[color=ORANGE]Нужна цифра от 0 до %d - удаление отменено, введи despawnPet ещё раз.[/color]" % pets.size())
+		Console.print("[color=ORANGE]Нужна цифра от 0 до %d - удаление отменено, введи despawn_pet ещё раз.[/color]" % pets.size())
 		return
 	var n := int(answer)
 	if n == 0:
@@ -177,6 +177,32 @@ func setmonitor(monitorIndex: int = 0):
 	var clamped: int = clampi(monitorIndex, 0, maxi(maxIndex, 0))
 	DisplayServer.window_set_current_screen(clamped)
 	GlobalVariable.Fresize()
+	# 054.96: запоминаем выбор (при запуске игра сама вызывает set_monitor
+	# с сохранённым номером, а раньше сохранять было нечему)
+	if int(gbData.settings.get("defaultMonitor", 0)) != clamped:
+		gbData.settings["defaultMonitor"] = clamped
+		gbData.savetodisk("user://CONFIG.json", gbData.settings)
+		Console.print("Монитор: [color=CYAN]%d[/color] (из %d), запомнено." % [clamped, maxIndex + 1])
+
+
+## Случайный персонаж из папок скинов (раньше spawnExpie спавнил скин,
+## последним выбранный во вкладке Skins, - обычно Voyager).
+func _cmd_randomSawian() -> void:
+	var names: Array = []
+	var dir := DirAccess.open("user://skin")
+	if dir:
+		for d in dir.get_directories():
+			if d != "Default" and d != "Body":
+				names.append(d)
+	if names.is_empty():
+		Console.print("[color=RED]Не нашлось ни одного скина в папке skin.[/color]")
+		return
+	var pick: String = names.pick_random()
+	var previous: String = GlobalVariable.userSkinPath
+	GlobalVariable.userSkinPath = "user://skin/%s/" % pick
+	spawnExpie() # скин берётся из userSkinPath прямо при создании
+	GlobalVariable.userSkinPath = previous
+	Console.print("Появился: [color=CYAN]%s[/color]" % PlayerManager.displayNameFor(pick))
 
 func resize(nx, ny, isForce = "no") -> String:
 	var ex = str(nx).to_float()
@@ -186,7 +212,7 @@ func resize(nx, ny, isForce = "no") -> String:
 		or (ex > float(GlobalVariable.screenWidth) / 2 or ey > GlobalVariable.screenHeight)
 		) and isForce == "no":
 		Console.warning("Изменение размера консоли до такого значения не рекомендуется!")
-		Console.print("Введи '[url=resizeConsole {0} {1} force]resizeConsole {0} {1} force[/url]', если уверен(а)".format([nx, ny]))
+		Console.print("Введи '[url=resize_console {0} {1} force]resize_console {0} {1} force[/url]', если уверен(а)".format([nx, ny]))
 		return "[color=gray]ПРИМЕЧАНИЕ: размер консоли НЕ сохранится, если задан принудительно![/color]"
 	# if it goes through, call a resize
 	var _target_size = Vector2(ex, ey)
@@ -219,31 +245,32 @@ func _ready():
 	runInitialCommands.connect(_do_i_cmds)
 
 	# register commands
-	Console.create_command("log", _log, "вывести строку в консоль.")
-	Console.create_command("toggleAI", _cmd_visionToggle, "вкл/выкл ВСЕХ реакций ИИ (без аргументов = переключить)")
-	Console.create_command("toggleProfanity", _cmd_toggleProfanity, "разрешает/запрещает мат в сгенерированных ИИ фразах (без аргументов = переключить)")
-	Console.create_command("toggleFlirt", _cmd_toggleFlirt, "разрешает/запрещает лёгкий флирт при очень хорошем настроении (без аргументов = переключить)")
-	Console.create_command("toggleDebugTags", _cmd_toggleDebugTags, "добавляет к фразам ИИ префикс источника: [screen]/[state]/[pet]/[grab]/итд (без аргументов = переключить)")
-	Console.create_command("toggleAiLog", _cmd_toggleAiLog, "записывает каждую сгенерированную фразу (принятую или отклонённую + причину) в user://ai_debug_log.txt (без аргументов = переключить)")
-	Console.create_command("aiStatus", _cmd_aiStatus, "показывает текущее состояние всех настроек ИИ")
-	Console.create_command("aiCreativity", _cmd_aiCreativity, "0.0-1.5, выше = более дикие/случайные ответы, ниже = безопаснее/предсказуемее")
-	Console.create_command("aiRepetitionGuard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова")
-	Console.create_command("aiModel", _cmd_aiModel, "переключает модель Ollama, которую использует ИИ (сама скачает её через Ollama, если ещё не скачана)")
-	Console.create_command("banwords", _cmd_banwords, "список слов/фраз, которые ИИ никогда не должен использовать: после списка вводи номер (удалить), слово (добавить) или 0 (выход)")
-	Console.create_command("reloadLore", LLMManager.reloadLore, "перезагружает user://LORE.txt")
-	Console.create_command("resizeConsole", resize, "изменить размер консоли")
+	# 054.96: имена команд через "_" (было toggleAI, despawnPet...); "log"
+	# (вывести строку - нужна была только для отладки) убрана из списка
+	Console.create_command("toggle_ai", _cmd_visionToggle, "вкл/выкл ВСЕХ реакций ИИ (без аргументов = переключить)")
+	Console.create_command("toggle_profanity", _cmd_toggleProfanity, "разрешает/запрещает мат в сгенерированных ИИ фразах (без аргументов = переключить)")
+	Console.create_command("toggle_flirt", _cmd_toggleFlirt, "разрешает/запрещает лёгкий флирт при очень хорошем настроении (без аргументов = переключить)")
+	Console.create_command("toggle_debug_tags", _cmd_toggleDebugTags, "добавляет к фразам ИИ префикс источника: [screen]/[state]/[pet]/[grab]/итд (без аргументов = переключить)")
+	Console.create_command("toggle_ai_log", _cmd_toggleAiLog, "записывает каждую сгенерированную фразу (принятую или отклонённую + причину) в user://ai_debug_log.txt (без аргументов = переключить)")
+	Console.create_command("ai_status", _cmd_aiStatus, "показывает текущее состояние всех настроек ИИ")
+	Console.create_command("ai_creativity", _cmd_aiCreativity, "0.0-1.5, выше = более дикие/случайные ответы, ниже = безопаснее/предсказуемее (стандартно 0.7 для qwen3-vl:8b-instruct)")
+	Console.create_command("ai_repetition_guard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова (стандартно 1.2 для qwen3-vl:8b-instruct)")
+	Console.create_command("ai_model", _cmd_aiModel, "переключает модель Ollama, которую использует ИИ (сама скачает её через Ollama, если ещё не скачана)")
+	Console.create_command("ban_words", _cmd_banwords, "список слов/фраз, которые ИИ никогда не должен использовать: после списка вводи номер (удалить), слово (добавить) или 0 (выход)")
+	Console.create_command("reload_lore", LLMManager.reloadLore, "перечитывает лор и паспорта всех персонажей (lore.txt, character.json) без перезапуска - наборы фраз создадутся заново")
+	Console.create_command("resize_console", resize, "размер окна консоли: resize_console <ширина> <высота> (проще растянуть уголок справа снизу)")
 	#dont use this it breaks alot of shit Console.create_command("reload", reload, "reload everything")
-	Console.create_command("setMonitor", setmonitor, "временная команда")
+	Console.create_command("set_monitor", setmonitor, "на каком мониторе живут персонажи: set_monitor <номер> (0 - основной, 1 - второй...), запоминается")
 	##Console.create_command("killExpie", killExpie, "Yeha")
 	#Console.create_command("setMood", _setmood, "debugging tool that doesnt work because i disabled mood stuff for this build")
-	Console.create_command("spawn", _additem, "")
-	Console.create_command("clearItems", clearObj, "очищает по 'entity', 'object' или конкретному имени предмета/скина")
-	Console.create_command("despawnPet", _cmd_despawnPet, "показывает список питомцев на экране и удаляет одного по номеру (всех разом - clearItems entity)")
-	Console.create_command("spawnExpie", spawnExpie, "создаёт Савианина на основе твоего скина по умолчанию")
+	Console.create_command("spawn", _additem, "создаёт предмет у курсора: spawn <имя> (bread, bandage, syringe, medkit...). Проще - вкладка Items")
+	Console.create_command("clear_items", clearObj, "убирает с экрана: clear_items - все предметы, clear_items entity - всех персонажей, clear_items <имя> - конкретный предмет")
+	Console.create_command("despawn_pet", _cmd_despawnPet, "показывает список питомцев на экране и удаляет одного по номеру (всех разом - clear_items entity)")
+	Console.create_command("random_sawian", _cmd_randomSawian, "создаёт случайного персонажа из твоих скинов (конкретного - во вкладке Skins)")
 	Console.create_command("change_player_mode", _cmd_changePlayerMode, "меняет клавиши входа/выхода из управления игроком (сейчас: Ctrl+Alt+P). Клавиши пишутся ВРУЧНУЮ через + без пробелов, например: change_player_mode Ctrl+Shift+K. Можно: Ctrl, Alt, Shift, Win + одна обычная клавиша (A-Z, 0-9, F1-F24, Space, Tab, Home, End, Insert, Delete, PageUp, PageDown, стрелки Left/Right/Up/Down)")
-	Console.create_command("petSize", _cmd_petSize, "меняет размер персонажа (по умолчанию 4.0) - действует на новых заспавненных, не на уже существующих")
+	Console.create_command("pet_size", _cmd_petSize, "меняет размер персонажа (по умолчанию 4.0) - действует на новых заспавненных, не на уже существующих")
 	#Console.create_command("openSkinFolder", openskinfold, "opens the skin folder")
-	Console.create_command("nukeData", nukesettings, "сбрасывает ВСЁ. Файл сохранения, настройки и т.д. Используй на свой страх и риск.")
+	Console.create_command("nuke_data", nukesettings, "сбрасывает ВСЁ. Файл сохранения, настройки и т.д. Используй на свой страх и риск.")
 	#Console.create_command("expieID", toggleExpieDebugIDs, "toggles debug IDs for expies")
 	#Console.create_command("deathLoop", deathLoop, "please dont crash")
 	
@@ -253,9 +280,9 @@ func _do_i_cmds():
 	has_run_commands = true
 
 	# i thought this had to be run from the console node itself but turns out its reflected on all consoles! hooray!
-	Console.execute("setMonitor {0}".format([int(gbData.settings.get("defaultMonitor", 0))]))
+	Console.execute("set_monitor {0}".format([int(gbData.settings.get("defaultMonitor", 0))]))
 	Console.execute("help")
-	Console.print("[color=PURPLE]You can reopen this console any time by Ctrl + Right Clicking on any Desksawian![/color]")
+	Console.print("[color=PURPLE]Консоль можно открыть снова в любой момент: Ctrl + правый клик по любому персонажу![/color]")
 	Console.print("ЭКСПИ ИЛИ ЛЮБЫЕ ДРУГИЕ ПЕРСОНАЖИ, КОТОРЫЕ МОГУТ ЗДЕСЬ ПРИСУТСТВОВАТЬ, МНЕ НЕ ПРИНАДЛЕЖАТ. ЭТО ФАНАТСКИЙ ПРОЕКТ")
 	Console.print("ЕСЛИ ТЫ ЗАПЛАТИЛ(А) ЗА ЭТО ИЛИ СКАЧАЛ(А) НЕ С GITHUB — ТЫ СДЕЛАЛ(А) ЭТО НЕПРАВИЛЬНО!")
 	
@@ -274,27 +301,27 @@ func _resolveToggle(current: bool, state: String) -> bool:
 func _cmd_visionToggle(state: String = "toggle") -> void:
 	var newVal := _resolveToggle(gbData.settings.get("llmVisionEnabled", true), state)
 	LLMManager.setEnabled(newVal)
-	_print_toggle_state("AI (toggleAI)", newVal)
+	_print_toggle_state("AI (toggle_ai)", newVal)
 
 func _cmd_toggleProfanity(state: String = "toggle") -> void:
 	var newVal := _resolveToggle(gbData.settings.get("llmAllowProfanity", false), state)
 	LLMManager.setProfanityAllowed(newVal)
-	_print_toggle_state("Profanity (toggleProfanity)", newVal)
+	_print_toggle_state("Profanity (toggle_profanity)", newVal)
 
 func _cmd_toggleFlirt(state: String = "toggle") -> void:
 	var newVal := _resolveToggle(gbData.settings.get("llmFlirtEnabled", false), state)
 	LLMManager.setFlirtEnabled(newVal)
-	_print_toggle_state("Flirt (toggleFlirt)", newVal)
+	_print_toggle_state("Flirt (toggle_flirt)", newVal)
 
 func _cmd_toggleDebugTags(state: String = "toggle") -> void:
 	var newVal := _resolveToggle(LLMManager.debugTags, state)
 	LLMManager.setDebugTags(newVal)
-	_print_toggle_state("Debug tags (toggleDebugTags)", newVal)
+	_print_toggle_state("Debug tags (toggle_debug_tags)", newVal)
 
 func _cmd_toggleAiLog(state: String = "toggle") -> void:
 	var newVal := _resolveToggle(gbData.settings.get("logAiLines", false), state)
 	LLMManager.setLogAiLines(newVal)
-	_print_toggle_state("AI line log -> user://ai_debug_log.txt (toggleAiLog)", newVal)
+	_print_toggle_state("AI line log -> user://ai_debug_log.txt (toggle_ai_log)", newVal)
 
 func _print_toggle_state(label: String, on: bool) -> void:
 	if on:
@@ -303,17 +330,17 @@ func _print_toggle_state(label: String, on: bool) -> void:
 		Console.print(label + ": [color=RED]ВЫКЛ[/color] (запусти команду ещё раз, чтобы включить)")
 
 func _cmd_aiStatus() -> void:
-	_print_toggle_state("AI (toggleAI)", gbData.settings.get("llmVisionEnabled", true))
-	_print_toggle_state("Profanity (toggleProfanity)", gbData.settings.get("llmAllowProfanity", false))
-	_print_toggle_state("Flirt (toggleFlirt)", gbData.settings.get("llmFlirtEnabled", false))
-	_print_toggle_state("Debug tags (toggleDebugTags)", LLMManager.debugTags)
-	_print_toggle_state("AI line log (toggleAiLog)", gbData.settings.get("logAiLines", false))
+	_print_toggle_state("AI (toggle_ai)", gbData.settings.get("llmVisionEnabled", true))
+	_print_toggle_state("Profanity (toggle_profanity)", gbData.settings.get("llmAllowProfanity", false))
+	_print_toggle_state("Flirt (toggle_flirt)", gbData.settings.get("llmFlirtEnabled", false))
+	_print_toggle_state("Debug tags (toggle_debug_tags)", LLMManager.debugTags)
+	_print_toggle_state("AI line log (toggle_ai_log)", gbData.settings.get("logAiLines", false))
 	Console.print("Интервал реакций на экран: [color=CYAN]%s-%s сек[/color]" % [LLMManager.minScreenInterval, LLMManager.maxScreenInterval])
 	var talkRange: Vector2 = preload("res://Scripts/impo/behavior.gd").petTalkRange()
 	Console.print("Интервал разговоров ИИ-персов: [color=CYAN]%s-%s сек[/color]" % [talkRange.x, talkRange.y])
 	Console.print("Модель: [color=CYAN]%s[/color]" % LLMManager.modelName)
-	Console.print("Creativity (aiCreativity): [color=CYAN]%s[/color] (0=предсказуемо, 1.5=дико)" % LLMManager.creativity)
-	Console.print("Repetition guard (aiRepetitionGuard): [color=CYAN]%s[/color] (1=может повторяться, 2=почти не повторяется)" % LLMManager.repetitionGuard)
+	Console.print("Creativity (ai_creativity): [color=CYAN]%s[/color] (0=предсказуемо, 1.5=дико)" % LLMManager.creativity)
+	Console.print("Repetition guard (ai_repetition_guard): [color=CYAN]%s[/color] (1=может повторяться, 2=почти не повторяется)" % LLMManager.repetitionGuard)
 	LLMManager.listAvailableModels()
 
 func _cmd_aiCreativity(value: float) -> void:
@@ -350,7 +377,7 @@ func _cmd_banwords(w1: String = "", w2: String = "", w3: String = "", w4: String
 		else:
 			Console.print("[color=RED]Нет слова под таким номером.[/color]")
 	elif w1.is_valid_int() and w2 == "":
-		Console.print("[color=YELLOW]Введи номер ЕЩЁ РАЗ через пробел, чтобы подтвердить удаление (например: banwords %s %s).[/color]" % [w1, w1])
+		Console.print("[color=YELLOW]Введи номер ЕЩЁ РАЗ через пробел, чтобы подтвердить удаление (например: ban_words %s %s).[/color]" % [w1, w1])
 		_printBanwordsMenu(words)
 		Console.pending_input = _banwordsAnswer
 		return
@@ -381,9 +408,9 @@ func _printBanwordsMenu(words: Array) -> void:
 
 
 ## 054.96: banwords работает как despawnPet - после списка просто вводишь
-## ответ, без "banwords" впереди. Список ждёт ответов, пока не введёшь 0.
+## ответ, без "ban_words" впереди. Список ждёт ответов, пока не введёшь 0.
 ## Если введена другая команда консоли - выходим из списка и выполняем её
-## (иначе "toggleAI" стал бы запрещённым словом).
+## (иначе "toggle_ai" стал бы запрещённым словом).
 func _banwordsAnswer(answer: String) -> void:
 	var words: Array = gbData.settings.get("llmBanWords", [])
 	if answer == "0":
