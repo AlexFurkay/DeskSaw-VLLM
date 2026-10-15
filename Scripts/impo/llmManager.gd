@@ -312,13 +312,21 @@ func _cutToFirstSentence(s: String) -> String:
 func _looksLikeGarbage(text: String) -> bool:
 	var latinCount := 0
 	var cyrillicCount := 0
+	var upperCyr := 0
 	for c in text:
 		var code := c.unicode_at(0)
 		if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
 			latinCount += 1
 		elif code >= 0x0400 and code <= 0x04FF:
 			cyrillicCount += 1
-	return latinCount > 10 and latinCount > cyrillicCount
+			if (code >= 0x0410 and code <= 0x042F) or code == 0x0401:
+				upperCyr += 1
+	if latinCount > 10 and latinCount > cyrillicCount:
+		return true
+	# Длинная фраза целиком ЗАГЛАВНЫМИ - у 8B это почти всегда бессвязная каша
+	# ("НЕ БЕГУ ОБРАЩАЮСЬ К ТЕБЕ — СТАНЬ ПОМОЩНИКОМ!"). Короткий крик
+	# ("ЧТО ЭТО БЫЛО?") оставляем.
+	return text.split(" ", false).size() >= 5 and upperCyr * 10 > cyrillicCount * 7
 
 
 ## Catches the model breaking character to comment on the TASK itself
@@ -329,14 +337,27 @@ func _looksLikeGarbage(text: String) -> bool:
 const _META_MARKERS := [
 	"примечание", "дополнительно", "note:", "p.s.", "как и просили",
 	"согласно заданию", "в задании", "фраз.", "фраз,", "строк.", "строк,",
-	"вот %d" ,"вот несколько фраз", "как и указано", "требовалось",
+	"вот несколько фраз", "как и указано", "требовалось",
 	"пользователь", "альтернативный вариант", "конкретное количество",
+	# 054.94: в пул Voyager попали "Вот 15 строк:", "Проверь: 15 строк?",
+	# "Итого: 15 фраз...", у Milky "— исправленный вариант:", у Dune
+	# "Дополнительная строка"
+	" строк", "строки:", "фразы", " фраз ", "итого", "проверь:", "персонажк",
+	"исправленный", "вариант:", "дополнительная строка", "по стилю", "в духе твое",
+	"от лица самой", "от лица самого",
 ]
+## Число + "строк"/"фраз" ("15 строк", "10 фраз") - отчёт модели о задании.
+var _metaCountRegex := RegEx.create_from_string("\\d+\\s*(строк|фраз|реплик)")
 func _looksLikeMetaCommentary(text: String) -> bool:
 	var lower := text.to_lower().strip_edges()
 	for marker in _META_MARKERS:
 		if lower.contains(marker):
 			return true
+	if _metaCountRegex.search(lower) != null:
+		return true
+	# заголовок перед списком ("Вот что ты можешь сказать о себе:")
+	if lower.ends_with(":"):
+		return true
 	# A single bare word with no ending punctuation and no lowercase letters
 	# after the first one (like a stray header "Дополнительно") - real lines
 	# almost always end in ./!/?/… or are at least a short phrase.
@@ -665,7 +686,7 @@ const SCREEN_ANGLES := [
 	"выскажи личное мнение - нравится тебе это или нет.",
 	"зацепись за одну мелкую деталь на экране.",
 	"отреагируй эмоцией - скукой, азартом, удивлением или раздражением.",
-	"оцени, как человек справляется, в духе 'неплохо... для тебя'.",
+	"оцени, как человек справляется - похвали или поворчи своими словами.",
 	"пошути над увиденным в своём стиле.",
 ]
 var _lastScreenAngle := -1
@@ -807,6 +828,12 @@ func aboutCharacter(skinName: String, withGender: bool = true) -> String:
 					bits.append("вид " + String(data["race"]))
 				if withGender:
 					bits.append("женского рода" if String(data.get("gender", "")) == "female" else "мужского рода")
+				# что о нём знают остальные (раньше персы ничего не знали,
+				# например, о том, что Дюну все боятся)
+				var desc := String(data.get("description", "")).strip_edges().trim_suffix(".")
+				if desc != "":
+					var about := "о ней" if String(data.get("gender", "")) == "female" else "о нём"
+					return "%s (%s). Что ты %s знаешь: %s" % [shown, ", ".join(bits), about, desc]
 				return "%s (%s)" % [shown, ", ".join(bits)]
 	return shown
 
@@ -946,6 +973,13 @@ func _stripDisplayTags(line: String) -> String:
 			break
 		s = s.substr(closeIdx + 1).strip_edges()
 	return s
+
+
+## Мелкие привычки модели, которые проще поправить, чем выбрасывать фразу:
+## английское "Hey" она пишет как "Гей" ("Гей? Дюна тут...").
+var _heyRegex := RegEx.create_from_string("^(Гей|Хей)(?=[\\s,!?.—-])")
+func _fixOutputQuirks(text: String) -> String:
+	return _heyRegex.sub(text, "Эй")
 
 
 func _containsProfanity(text: String) -> bool:
@@ -1226,10 +1260,19 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 	var pool: Array = _prefetchPools.get(category, [])
 	var startSize := pool.size()
 	var lines: PackedStringArray = rawText.split("\n")
+	# После служебной строки модель обычно пишет второй заход списка или
+	# описание персонажа со стороны ("Ты маленькая и..."), поэтому всё, что
+	# идёт ниже неё в этом пакете, тоже выбрасываем.
+	var metaSeen := false
 	for i in lines.size():
 		var raw: String = lines[i]
 		var cleaned: String = lines[i].strip_edges().replace("*", "")
 		cleaned = cleaned.lstrip("0123456789.-) ").strip_edges()
+
+		if metaSeen:
+			if cleaned != "":
+				_logDebugLine(category, "REJECTED:META_TAIL", raw)
+			continue
 
 		if cleaned.begins_with("("):
 			_logDebugLine(category, "REJECTED:META_PAREN", raw)
@@ -1243,7 +1286,15 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 				_logDebugLine(category, "REJECTED:TOO_SHORT", raw)
 			continue
 
-		cleaned = _cutToFirstSentence(cleaned)
+		# служебную строку проверяем ДО обрезки по первому предложению:
+		# "Нет — эти фразы не подходят... Вот строго по правилам:" иначе
+		# теряет хвост с двоеточием
+		if _looksLikeMetaCommentary(cleaned):
+			_logDebugLine(category, "REJECTED:META_COMMENTARY", raw)
+			metaSeen = true
+			continue
+
+		cleaned = _fixOutputQuirks(_cutToFirstSentence(cleaned))
 
 		if _looksLikeGarbage(cleaned):
 			_logDebugLine(category, "REJECTED:GARBAGE", raw)
@@ -1251,6 +1302,16 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 
 		if _looksLikeMetaCommentary(cleaned):
 			_logDebugLine(category, "REJECTED:META_COMMENTARY", raw)
+			metaSeen = true
+			continue
+
+		# обрывок вроде "Я сидел ровно," - модель не дописала строку
+		if cleaned.ends_with(",") or cleaned.ends_with("—") or cleaned.ends_with("-"):
+			_logDebugLine(category, "REJECTED:TOO_FRAGMENTARY", raw)
+			continue
+
+		if not gbData.settings.get("llmAllowProfanity", false) and _containsProfanity(cleaned):
+			_logDebugLine(category, "REJECTED:PROFANITY", raw)
 			continue
 
 		if _looksLikeRoleInversion(category, cleaned):
@@ -1546,6 +1607,15 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 			rejectReason = "BANWORD"
 			text = ""
 
+		# раньше мат отсекался только в примерах, а не в ответе модели
+		# (у Velvet в чате проскочило "Бля...")
+		if text != "" and not gbData.settings.get("llmAllowProfanity", false) and _containsProfanity(text):
+			rejectReason = "PROFANITY"
+			text = ""
+
+		if text != "":
+			text = _fixOutputQuirks(text)
+
 		_logDebugLine(_currentTag, "OK" if text != "" else "REJECTED:" + rejectReason, text if text != "" else rawReply)
 
 		if debugTags and _currentTag != "":
@@ -1616,7 +1686,7 @@ func setFlirtEnabled(enabled: bool) -> void:
 	print("LLMManager: flirt ", "enabled" if enabled else "disabled")
 
 
-## Console command: visionInterval <min> <max>  (seconds) - screen reactions only.
+## Интервал реакций на экран (сек). Консольной команды больше нет - поля в Settings.
 func setInterval(minSeconds: float, maxSeconds: float) -> void:
 	minScreenInterval = max(1.0, minSeconds)
 	maxScreenInterval = max(minScreenInterval, maxSeconds)

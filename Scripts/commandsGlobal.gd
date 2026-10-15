@@ -187,8 +187,6 @@ func _ready():
 	Console.create_command("aiRepetitionGuard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова")
 	Console.create_command("aiModel", _cmd_aiModel, "переключает модель Ollama, которую использует ИИ (сама скачает её через Ollama, если ещё не скачана)")
 	Console.create_command("banwords", _cmd_banwords, "управление словами/фразами, которые ИИ никогда не должен использовать")
-	Console.create_command("visionInterval", _cmd_visionInterval, "мин/макс секунд между реакциями ИИ на экран (то же самое - поля во вкладке Settings)")
-	Console.create_command("petTalkInterval", _cmd_petTalkInterval, "мин/макс секунд между разговорами ИИ-персов друг с другом, по умолчанию 180 360 (то же самое - поля во вкладке Settings)")
 	Console.create_command("reloadLore", LLMManager.reloadLore, "перезагружает user://LORE.txt")
 	Console.create_command("resizeConsole", resize, "изменить размер консоли")
 	#dont use this it breaks alot of shit Console.create_command("reload", reload, "reload everything")
@@ -206,18 +204,6 @@ func _ready():
 	#Console.create_command("expieID", toggleExpieDebugIDs, "toggles debug IDs for expies")
 	#Console.create_command("deathLoop", deathLoop, "please dont crash")
 	
-func _cmd_petTalkInterval(minSeconds: float, maxSeconds: float) -> void:
-	minSeconds = maxf(20.0, minSeconds)
-	maxSeconds = maxf(minSeconds, maxSeconds)
-	gbData.settings["petTalkMin"] = str(minSeconds)
-	gbData.settings["petTalkMax"] = str(maxSeconds)
-	gbData.savetodisk("user://CONFIG.json", gbData.settings)
-	Console.print("Интервал разговоров между ИИ-персами: [color=CYAN]%s-%s сек[/color]" % [minSeconds, maxSeconds])
-
-func _cmd_visionInterval(minSeconds: float, maxSeconds: float) -> void:
-	LLMManager.setInterval(minSeconds, maxSeconds)
-	Console.print("Интервал реакций ИИ на экран: [color=CYAN]%s-%s сек[/color]" % [minSeconds, maxSeconds])
-
 func _do_i_cmds():
 	if has_run_commands:
 		return

@@ -30,6 +30,11 @@ func _update_state() -> void:
 		# if the key doesn't exist, create it!
 		_init_variable(false)
 		_textEdit.text = defaultValue
+	elif init_v is int or init_v is float:
+		# старые версии сохраняли интервалы числом - поле оставалось пустым
+		var num: float = float(init_v)
+		_textEdit.text = str(int(num)) if is_equal_approx(num, roundf(num)) else str(num)
+		gbData.settings.set(key, _textEdit.text)
 	elif !(init_v is String):
 		# if the key is not text, fuss about it!
 		push_error("Key '%s' is not a string! input widgets are not made for these!" % [key])

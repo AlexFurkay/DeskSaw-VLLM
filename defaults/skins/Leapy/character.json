@@ -1,11 +1,12 @@
 {
 	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
 	"version": 1,
-	"textVersion": 4,
+	"textVersion": 5,
 	"name": "Leapy",
 	"gender": "male",
 	"race": "Leapy",
 	"saw": "Saw-04",
+	"description": "Зелёный полупёс-полурастение с хвостами-листьями. Самый быстрый и прыгучий, дерзкий шутник, но очень хрупкий.",
 	"relations": {
 		"Expie": "дружески подкалывает",
 		"VoyagerAlt": "дразнит её высокомерие",

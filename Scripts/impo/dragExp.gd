@@ -43,7 +43,7 @@ func _ready() -> void:
 
 			child.input_pickable = true
 			child.mouse_entered.connect(_on_body_part_entered.bind(child))
-			child.mouse_exited.connect(_on_body_part_exited.bind(child))
+			child.mouse_exited.connect(_on_body_part_mouse_exited.bind(child))
 			child.input_event.connect(_on_body_part_input.bind(child))
 
 func _process(_delta: float) -> void:
@@ -170,23 +170,35 @@ func _exit_tree() -> void:
 		GlobalVariable.clickZoneSum -= 1
 		TransparentWindow.SetClickThrough(GlobalVariable.clickZoneSum <= 0)
 
-##Function that checks if the mouse is currently hovering over rigidbodies.
-func _isMouseOver() -> void:
+## 054.94: курсор ловится с запасом вокруг частей тела. Окно пропускает
+## клики насквозь, пока курсор не над персом, и проверка идёт раз в кадр;
+## когда видеокарта занята ИИ, кадры запаздывают, и клик по тонкой ноге
+## стоящего перса успевал уйти на рабочий стол. С запасом окно становится
+## кликабельным чуть раньше, чем курсор дошёл до самого перса.
+const HOVER_MARGIN := 6.0
+var _hoverCircle := CircleShape2D.new()
+
+## Части ЭТОГО перса под курсором или в пределах HOVER_MARGIN от него.
+func _bodiesNearMouse() -> Array:
 	var space_state := rigid_bodies_container.get_world_2d().direct_space_state
-	var query := PhysicsPointQueryParameters2D.new()
-	query.position = rigid_bodies_container.get_global_mouse_position()
+	_hoverCircle.radius = HOVER_MARGIN
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = _hoverCircle
+	query.transform = Transform2D(0.0, rigid_bodies_container.get_global_mouse_position())
 	query.collide_with_bodies = true
 	query.collide_with_areas = false
-	
-	var results := space_state.intersect_point(query)
-	
-	#basically the same as mouseOver from the original script, but we have to loop through
-	#all available limbs. BUT we only pick the first limb we find, hence the break statement
-	for res in results:
+	var found: Array = []
+	for res in space_state.intersect_shape(query, 32):
 		var collider: Object = res["collider"]
-		if collider is RigidBody2D and collider.get_parent() == rigid_bodies_container:
-			_on_body_part_entered(collider as RigidBody2D)
-			break
+		if collider is RigidBody2D and collider.get_parent() == rigid_bodies_container and not found.has(collider):
+			found.append(collider)
+	return found
+
+##Function that checks if the mouse is currently hovering over rigidbodies.
+func _isMouseOver() -> void:
+	var near := _bodiesNearMouse()
+	if not near.is_empty():
+		_on_body_part_entered(near[0] as RigidBody2D)
 
 #reused code, bleehh. it works at least
 ##Validates the currently hovered bodies to prevent the click-through from getting stuck.
@@ -194,27 +206,47 @@ func _validateHoverState() -> void:
 	if _hovered_bodies.is_empty():
 		return
 
-	var space_state := rigid_bodies_container.get_world_2d().direct_space_state
-	var query := PhysicsPointQueryParameters2D.new()
-	query.position = rigid_bodies_container.get_global_mouse_position()
-	query.collide_with_bodies = true
-	query.collide_with_areas = false
-
-	var results := space_state.intersect_point(query)
-
-	#store every detected collider in an array
-	var current_colliders: Array = []
-	for res in results:
-		current_colliders.append(res["collider"])
+	var current_colliders := _bodiesNearMouse()
 
 	#loop backwards through the array and delete delements if need be
 	for i in range(_hovered_bodies.size() - 1, -1, -1):
 		var body: RigidBody2D = _hovered_bodies[i]
-			
+
 		#if the expie somehow disappeared, or we are actually not hovering
 		#over a limb anymore, forcefully exit
 		if not is_instance_valid(body) or not current_colliders.has(body):
 			_on_body_part_exited(body)
+
+## Godot сообщает "курсор ушёл", как только тот сошёл с самой фигуры, -
+## а он ещё в зоне запаса. Тогда не отпускаем: это сделает
+## _validateHoverState, когда курсор уйдёт совсем.
+func _on_body_part_mouse_exited(body: RigidBody2D) -> void:
+	if is_instance_valid(body) and _bodiesNearMouse().has(body):
+		return
+	_on_body_part_exited(body)
+
+## Клик в зоне запаса не попадает ни в одну фигуру, и Godot его никому не
+## отдаёт - засчитываем его ближайшей части тела. Ждём два физических кадра:
+## точное попадание приходит через _on_body_part_input именно там.
+var _lastBodyClickMsec := 0
+static var _marginClickMsec := 0
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton) or not event.pressed or _dragging or _hovered_bodies.is_empty():
+		return
+	if event.button_index != MOUSE_BUTTON_LEFT and event.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	var pressedAt := Time.get_ticks_msec()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	if _lastBodyClickMsec >= pressedAt or _marginClickMsec >= pressedAt or _dragging or _hovered_bodies.is_empty():
+		return
+	var body: RigidBody2D = _hovered_bodies.back()
+	if not is_instance_valid(body):
+		return
+	if event.button_index == MOUSE_BUTTON_RIGHT and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		return # кнопку уже отпустили - тащить нечего
+	_marginClickMsec = Time.get_ticks_msec() # один клик - одному персу
+	_handleBodyClick(event, body)
 
 func _on_body_part_entered(body: RigidBody2D) -> void:
 	if _hovered_bodies.has(body):
@@ -238,16 +270,21 @@ func _on_body_part_input(_viewport: Node, event: InputEvent, _shape_idx: int, bo
 		return
 		
 	if event.pressed and not _hovered_bodies.is_empty() and _hovered_bodies.back() == body and not _dragging:
-		#dragging
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			if Input.is_action_pressed("ctrl"):
-				GlobalVariable.TerminalOpenPressed.emit(false)
-				return
-			var mouse_pos := rigid_bodies_container.get_global_mouse_position()
-			_startDrag(body, mouse_pos)
-		#pet limb
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			behaviornode.petLimb(body)
+		_lastBodyClickMsec = Time.get_ticks_msec()
+		_handleBodyClick(event, body)
+
+
+func _handleBodyClick(event: InputEventMouseButton, body: RigidBody2D) -> void:
+	#dragging
+	if event.button_index == MOUSE_BUTTON_RIGHT:
+		if Input.is_action_pressed("ctrl"):
+			GlobalVariable.TerminalOpenPressed.emit(false)
+			return
+		var mouse_pos := rigid_bodies_container.get_global_mouse_position()
+		_startDrag(body, mouse_pos)
+	#pet limb
+	if event.button_index == MOUSE_BUTTON_LEFT:
+		behaviornode.petLimb(body)
 
 
 func _updateHoverState() -> void:
@@ -291,7 +328,7 @@ func _startDrag(body: RigidBody2D, mouse_pos: Vector2) -> void:
 
 	if behaviornode:
 		behaviornode.beingDragged = true
-		if not behaviornode.isSleeping and not behaviornode.isUnconscious:
+		if not behaviornode.isSleeping and not behaviornode.isUnconscious and not behaviornode.isPlayer:
 			var examples: Array = behaviornode._pickExamples(behaviornode.dialogueSys.data.beingDragged.duplicate(), 8)
 			LLMManager.requestPooledReaction(behaviornode._skinTag() + ":grab", examples, behaviornode._on_drag_reaction, "", behaviornode.CATEGORY_SITUATION.get("grab", ""))
 			AudioManager.playVoiceWeighted(behaviornode.voiceSet, 0.56, 0.28) # было 50%/25%/25%, теперь звук в 1.5x чаще (~84% против 25% тишины)

@@ -1,11 +1,12 @@
 {
 	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
 	"version": 1,
-	"textVersion": 4,
+	"textVersion": 5,
 	"name": "Milky",
 	"gender": "male",
 	"race": "Milky",
 	"saw": "Saw-03",
+	"description": "Небольшой белый пёс с морской ДНК и светящимися голубыми зрачками. Умный строгий тактик, любит порядок и говорит со всеми как командир.",
 	"relations": {
 		"Expie": "снисходительно",
 		"VoyagerAlt": "холодное соперничество",

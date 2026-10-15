@@ -940,7 +940,7 @@ func _guessChatAction(request: String, reply: String) -> String:
 
 ## Случайный разговор двух ИИ-персонажей, стоящих рядом: один заговаривает,
 ## второй отвечает. Интервал между разговорами (общий на всех) - настройки
-## petTalkMin/petTalkMax в секундах: вкладка Settings или команда petTalkInterval.
+## petTalkMin/petTalkMax в секундах: вкладка Settings.
 const PET_TALK_DISTANCE := 900.0 # пикс экрана при petSize 4
 const PET_REPLY_PAUSE_MIN := 3.6 # пауза после того, как первый договорил, сек
 const PET_REPLY_PAUSE_MAX := 6.3
@@ -1178,13 +1178,15 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 					# doesn't have this key yet - fully backward compatible,
 					# these categories ran with zero examples before this.
 					var examples: Array = _pickExamples(dialogueSys.data.get(key, []).duplicate(), 8)
-					LLMManager.requestPooledEvent(_skinTag() + ":" + key, DRAG_STAGE_DESCRIPTIONS[idx], _on_drag_reaction, examples)
+					if not isPlayer:
+						LLMManager.requestPooledEvent(_skinTag() + ":" + key, DRAG_STAGE_DESCRIPTIONS[idx], _on_drag_reaction, examples)
 					# больше шипения (bark), чем дальше затягивается захват
 					AudioManager.playVoiceWeighted(voiceSet, minf(0.95, 0.75 + 0.2 * idx), 0.3)
 				else:
 					AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
-					dialogueSys.pool = dialogueSys.data.get("beingDragged", [])
-					dialogueSys.send(10, false)
+					if not isPlayer:
+						dialogueSys.pool = dialogueSys.data.get("beingDragged", [])
+						dialogueSys.send(10, false)
 			#fix the weird ghost collision during ragdoll
 			continue
 		if moveSys.rigidtorso.linear_velocity.length() > 10.0:
@@ -1230,7 +1232,7 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		# it respects "something is already typing" like everything else -
 		# dialogueSys.send()'s default args skip that check entirely, and
 		# start can otherwise land mid-launch alongside passivetalk() etc.
-		if dialogueSys.data.get("start", []).size() > 0:
+		if dialogueSys.data.get("start", []).size() > 0 and not isPlayer:
 			_queueMessage(dialogueSys.data.get("start", []).pick_random(), dialogueSys.speedMod)
 	else:
 		_say(_upCategory)
@@ -1405,13 +1407,13 @@ func passivetalk() -> void:
 			await get_tree().create_timer(5.0).timeout
 			
 func _on_drag_reaction(text: String) -> void:
-	if isSleeping:
+	if isSleeping or isPlayer:
 		return
 	_queueMessage(text, 1.0, true)
 
 
 func _on_state_reaction(text: String) -> void:
-	if beingDragged or isSleeping or shocked:
+	if isPlayer or beingDragged or isSleeping or shocked:
 		return
 	_queueMessage(text)
 
@@ -1424,6 +1426,8 @@ func _on_state_reaction(text: String) -> void:
 ## Categories that should sound louder/more physical - a bit of emphasis
 ## (occasional CAPS on a word, sharper tone) fits the moment better than the
 ## usual calm delivery.
+## Какие фразы может сказать сам персонаж-игрок (только голод и боль).
+const PLAYER_FILE_CATEGORIES := ["hungry", "LightDamage", "MediumDamage", "HardDamage", "lastmoments"]
 const LOUD_CATEGORIES := ["getUp", "getUpPet", "fell", "screamBIG", "LightDamage", "MediumDamage", "HardDamage"]
 
 ## Maps a spawned item's "itemName" meta to a human description for the AI.
@@ -1666,7 +1670,14 @@ func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true, 
 	if isUnconscious:
 		return # 0 хп - персонаж без сознания, молчит до перезапуска приложения
 	if isPlayer:
-		return # игрок говорит только то, что напишет человек (звуки при этом играют отдельно)
+		# Игрок говорит то, что напишет человек. Из своих фраз - только голод
+		# и боль, и сразу из файла персонажа: ИИ-пулов у игрока нет, а ждать
+		# генерации ради одной строки - видеокарту зря грузить.
+		if category in PLAYER_FILE_CATEGORIES:
+			var own: Array = dialogueSys.data.get(CATEGORY_EXAMPLES_FROM.get(category, category), [])
+			if not own.is_empty():
+				_queueMessage(String(own.pick_random()), dialogueSys.speedMod, category in URGENT_CATEGORIES)
+		return
 	if not ignoreCooldown and cooldown > 0.0:
 		var now := Time.get_ticks_msec()
 		var last: int = _lastSayTime.get(category, -999999999)

@@ -37,6 +37,28 @@ func _ready() -> void:
 	spawnButton.get_parent().move_child(playerButton, spawnButton.get_index() + 1)
 	playerButton.pressed.connect(_on_spawn_player_press)
 
+	# Описание персонажа из паспорта - под превью, под кнопками Spawn
+	_descLabel = RichTextLabel.new()
+	_descLabel.bbcode_enabled = true
+	_descLabel.fit_content = true
+	_descLabel.scroll_active = false
+	_descLabel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_descLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_descLabel.add_theme_font_size_override("normal_font_size", 14)
+	var displayBox: Node = spawnButton.get_parent().get_parent()
+	displayBox.add_child(_descLabel)
+
+var _descLabel: RichTextLabel
+
+## "description" из character.json скина (папка игрока, потом встроенная).
+func _skinDescription(skinName: String) -> String:
+	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+		if FileAccess.file_exists(path):
+			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if data is Dictionary:
+				return String(data.get("description", ""))
+	return ""
+
 ## Стандартный Experiment и скин Expie - один и тот же персонаж ("Expie" -
 ## ласковое сокращение). Полная версия (раны, фразы, род, паспорт) живёт в
 ## папке скина Expie - кнопка "Experiment (Default)" спавнит именно её, а
@@ -58,6 +80,9 @@ func _update() -> void:
 		else selectedSkin.path
 	)
 	expieDisplayWidget.ApplyTextures(GlobalVariable.userSkinPath)
+	if _descLabel:
+		var desc := _skinDescription(EXPIE_SKIN if selectedSkin == null else selectedSkin.name)
+		_descLabel.text = desc if desc != "" else "[i]Описания нет - его можно добавить полем \"description\" в character.json скина.[/i]"
 
 func get_skin_name() -> String:
 	return "Experiment" if selectedSkin == null else selectedSkin.name

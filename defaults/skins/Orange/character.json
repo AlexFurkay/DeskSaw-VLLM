@@ -1,11 +1,12 @@
 {
 	"_comment": "Паспорт персонажа. gender: female/male. relations: КЛЮЧ = название папки скина, '*' = ко всем остальным; к своей расе всегда good. version - версия текстур, textVersion - версия фраз и лора.",
 	"version": 1,
-	"textVersion": 4,
+	"textVersion": 6,
 	"name": "Orange",
 	"gender": "male",
 	"race": "Orange",
 	"saw": "Saw-02",
+	"description": "Огромный пушистый оранжевый пёс, выведен из Experiment. Сильный, живучий, простоватый и очень добрый, со всеми хочет дружить.",
 	"relations": {
 		"Expie": "тепло, как к младшему брату",
 		"VoyagerAlt": "дружелюбно, её колкостей не замечает",
