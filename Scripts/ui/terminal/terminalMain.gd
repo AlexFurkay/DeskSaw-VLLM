@@ -60,6 +60,10 @@ func _scaleFont(c: Control) -> void:
 		return
 	c.set_meta("fontScaled", true)
 	var k := textScale()
+	# вместе с текстом растут и заданные минимальные размеры (карточки во
+	# вкладке Items были 180x40 - крупный текст переносился и давал ползунки)
+	if c.custom_minimum_size != Vector2.ZERO:
+		c.custom_minimum_size = (c.custom_minimum_size * k).round()
 	if c is Button or c is Label or c is LineEdit or c is TextEdit:
 		c.add_theme_font_size_override("font_size", maxi(6, int(round(c.get_theme_font_size("font_size") * k))))
 	elif c is RichTextLabel:

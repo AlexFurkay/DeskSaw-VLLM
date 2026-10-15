@@ -1854,11 +1854,11 @@ func _pickWalkTarget() -> float:
 		var mx: float = moveSys.rigid.get_global_mouse_position().x
 		if mx > margin and mx < w - margin:
 			return mx - signf(mx - x) * 120.0
-	# любопытство - к интересному предмету
+	# любопытство - к интересному предмету (но не к пиле)
 	if randf() < 0.2:
-		var thing := _nearestBody(func(body, key): return ITEM_DESCRIPTIONS.has(key))
+		var thing := _nearestBody(func(body, key): return ITEM_DESCRIPTIONS.has(key) and not DANGER_ITEMS.has(key))
 		if thing:
-			return thing.global_position.x + randf_range(-60.0, 60.0)
+			return _stopBeforeDanger(x, thing.global_position.x + randf_range(-60.0, 60.0))
 	# случайная точка: от 150 до 700 пикс, у края - разворот к центру
 	var dist := randf_range(150.0, 700.0)
 	var dir := -1.0 if randf() < 0.5 else 1.0
@@ -1866,7 +1866,54 @@ func _pickWalkTarget() -> float:
 		dir = 1.0
 	elif x > w * 0.75:
 		dir = -1.0
-	return clampf(x + dir * dist, margin, w - margin)
+	return _stopBeforeDanger(x, clampf(x + dir * dist, margin, w - margin))
+
+
+## 054.97: опасные предметы. Раньше персы шли прямо на пилу (в том числе
+## из любопытства), пытались её перепрыгнуть, спотыкались и кричали.
+const DANGER_ITEMS := ["sawblade"]
+const DANGER_KEEP_DISTANCE := 110.0 # при petScale 4; масштабируется с размером
+
+func _dangerKeepDistance() -> float:
+	return DANGER_KEEP_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
+
+
+## Опасные предметы на сцене (примерно на высоте персонажа).
+func _dangersNearMyLevel() -> Array:
+	var found: Array = []
+	var y: float = moveSys.rigid.global_position.y
+	for child in get_tree().current_scene.get_children():
+		if child is Node2D and child.has_meta("itemName") and DANGER_ITEMS.has(String(child.get_meta("itemName"))):
+			if absf(child.global_position.y - y) < 200.0:
+				found.append(child)
+	return found
+
+
+## Если между x и targetX лежит пила - цель обрезается перед ней.
+func _stopBeforeDanger(x: float, targetX: float) -> float:
+	var dir := signf(targetX - x)
+	var keep := _dangerKeepDistance()
+	for saw in _dangersNearMyLevel():
+		var sx: float = saw.global_position.x
+		if signf(sx - x) == dir and absf(sx - x) < absf(targetX - x) + keep:
+			var stopAt := sx - dir * keep
+			if signf(stopAt - x) != dir:
+				return x # пила уже вплотную в эту сторону - стоим
+			if absf(stopAt - x) < absf(targetX - x):
+				targetX = stopAt
+	return targetX
+
+
+## Пила прямо по курсу ближе безопасного расстояния.
+func _dangerAhead(dir: float) -> bool:
+	if dir == 0.0:
+		return false
+	var x: float = moveSys.rigid.global_position.x
+	for saw in _dangersNearMyLevel():
+		var dx: float = saw.global_position.x - x
+		if signf(dx) == dir and absf(dx) < _dangerKeepDistance():
+			return true
+	return false
 
 
 func _nearestBody(filter: Callable) -> Node2D:
@@ -1916,6 +1963,9 @@ func _walkTo(targetX: float, isCommand: bool = false) -> void:
 		if absf(dx) < 25.0:
 			break
 		moveSys.dir = signf(dx)
+		# пилу могли подкинуть уже по ходу прогулки - останавливаемся перед ней
+		if _dangerAhead(moveSys.dir):
+			break
 		# под фентанилом - заплетающиеся ноги: внезапные остановки
 		if high and randf() < 0.08:
 			moveSys.dir = 0
