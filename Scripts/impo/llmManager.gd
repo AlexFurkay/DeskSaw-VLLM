@@ -51,6 +51,11 @@ var busy := false
 var _prefetchPools: Dictionary = {}   # category -> Array[String] ready-made lines
 var _prefetchPending: Dictionary = {} # category -> bool, true while a refill is in flight
 const PREFETCH_TARGET := 7
+## Окно контекста модели. 4096 стало впритык: правила (~970 токенов) + лор
+## (630-1040) + скриншот (~1080) или история чата. 6144 у qwen3-vl:8b ещё
+## целиком помещается в 8 ГБ видеопамяти (5.67 ГБ против 5.51 при 4096),
+## 8192 уже вылезает в обычную память и тормозит (замер 2026-10-15, GTX 1070 Ti).
+const NUM_CTX := 6144
 const PREFETCH_REFILL_AT := 3
 
 ## Категории, которые игрок трогает чаще всего - генерируем для них батч
@@ -785,8 +790,6 @@ func aboutCharacter(skinName: String) -> String:
 				var bits: Array = []
 				if String(data.get("race", "")) != "":
 					bits.append("вид " + String(data["race"]))
-				if String(data.get("saw", "")) != "":
-					bits.append(String(data["saw"]))
 				bits.append("женского рода" if String(data.get("gender", "")) == "female" else "мужского рода")
 				return "%s (%s)" % [shown, ", ".join(bits)]
 	return shown
@@ -1333,7 +1336,7 @@ func _processQueue() -> void:
 			"repeat_penalty": repetitionGuard,
 			"temperature": float(job.get("temperature", creativity)), # повтор ответа в чате идёт чуть "смелее"
 			"num_predict": predictBudget,
-			"num_ctx": 4096
+			"num_ctx": NUM_CTX
 		}
 	}
 	# Ollama's own multimodal models are picky about an empty "images" key -
@@ -1380,6 +1383,10 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 	# log), so only touch endings when we KNOW it was actually truncated,
 	# rather than guessing from punctuation alone.
 	_lastResponseWasTruncated = String(parsed.get("done_reason", "stop")) == "length"
+	# Сколько токенов занял промпт: если он упрётся в NUM_CTX, Ollama молча
+	# отрежет НАЧАЛО (правила и лор) - в логе это видно как CONTEXT_FULL.
+	var promptTokens: int = int(parsed.get("prompt_eval_count", 0))
+	_logDebugLine(_currentTag, "TOKENS", "prompt=%d answer=%d of %d%s" % [promptTokens, int(parsed.get("eval_count", 0)), NUM_CTX, "  CONTEXT_FULL" if promptTokens >= NUM_CTX - 300 else ""])
 
 	var text: String = ""
 	if parsed.has("response") and String(parsed["response"]).strip_edges() != "":
