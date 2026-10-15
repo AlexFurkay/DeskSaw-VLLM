@@ -317,15 +317,39 @@ key = "mutePassive"
 
 [node name="MinDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227112 instance=ExtResource("12_qw8t2")]
 layout_mode = 2
-label = "Минимальное время между всеми цитатами, кроме экранных"
+label = "Минимальное время между фразами о состоянии (сек)"
 key = "minDialogueTime"
-defaultValue = "30.0"
+defaultValue = "60.0"
 
 [node name="MaxDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=628375292 instance=ExtResource("12_qw8t2")]
 layout_mode = 2
-label = "Максимальное время между всеми цитатами, кроме экранных"
+label = "Максимальное время между фразами о состоянии (сек)"
 key = "maxDialogueTime"
-defaultValue = "65.0"
+defaultValue = "120.0"
+
+[node name="MinVision" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227115 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Минимальное время между реакциями ИИ на экран (сек)"
+key = "llmMinInterval"
+defaultValue = "60"
+
+[node name="MaxVision" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227116 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Максимальное время между реакциями ИИ на экран (сек)"
+key = "llmMaxInterval"
+defaultValue = "120"
+
+[node name="MinPetTalk" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227113 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Минимальное время между разговорами ИИ-персов (сек)"
+key = "petTalkMin"
+defaultValue = "180"
+
+[node name="MaxPetTalk" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227114 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Максимальное время между разговорами ИИ-персов (сек)"
+key = "petTalkMax"
+defaultValue = "360"
 
 [node name="AudioPanel" type="Panel" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer" unique_id=68479689]
 visible = false

@@ -884,6 +884,10 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 		moodSys.mood + moodSys.drugOffset, healthHandler.health, hungerHandler.hungry]
 	if not _worn.is_empty():
 		stats += ", на тебе надето: " + _wornDescription()
+	var playerState := ""
+	if PlayerManager.hasPlayer():
+		var php: float = PlayerManager.player.healthHandler.health
+		playerState = "здоровье %.0f из 100%s" % [php, ", тяжёлые раны" if php <= 30.0 else (", есть раны" if php <= 60.0 else "")]
 	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), _recentSpoken(), func(text: String):
 		var action := ""
 		if text.begins_with("<act:"):
@@ -898,7 +902,7 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 		AudioManager.play_random(voiceSet["bark" if moodSys.mood < -20.0 else "whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 		onReply.call(text)
 		if action != "":
-			_doChatAction(action))
+			_doChatAction(action), "", PlayerManager.playerSkin, playerState)
 
 
 ## Запасной вариант, если в ответе нет метки действия: в реплике игрока есть
@@ -935,33 +939,42 @@ func _guessChatAction(request: String, reply: String) -> String:
 
 
 ## Случайный разговор двух ИИ-персонажей, стоящих рядом: один заговаривает,
-## второй отвечает. Редко - не чаще раза в PET_TALK_COOLDOWN_MS на всех.
+## второй отвечает. Интервал между разговорами (общий на всех) - настройки
+## petTalkMin/petTalkMax в секундах: вкладка Settings или команда petTalkInterval.
 const PET_TALK_DISTANCE := 900.0 # пикс экрана при petSize 4
-const PET_TALK_COOLDOWN_MS := 180000
 const PET_REPLY_PAUSE_MIN := 3.6 # пауза после того, как первый договорил, сек
 const PET_REPLY_PAUSE_MAX := 6.3
-static var _lastPetTalkMsec := -PET_TALK_COOLDOWN_MS
+static var _nextPetTalkMsec := -1
+
+static func petTalkRange() -> Vector2:
+	var lo: float = maxf(20.0, float(GlobalVariable.getNumFromString(str(gbData.settings.get("petTalkMin", "180")))))
+	var hi: float = maxf(lo, float(GlobalVariable.getNumFromString(str(gbData.settings.get("petTalkMax", "360")))))
+	return Vector2(lo, hi)
+
 
 func petTalkLoop() -> void:
+	if _nextPetTalkMsec < 0: # первый разговор - не раньше минимума после запуска
+		_nextPetTalkMsec = Time.get_ticks_msec() + int(petTalkRange().x * 1000.0)
 	while get_tree():
-		await get_tree().create_timer(randf_range(60.0, 120.0)).timeout
+		await get_tree().create_timer(randf_range(15.0, 30.0)).timeout
 		if isPlayer or isUnconscious or isSleeping or beingDragged or ragdolled or shocked:
 			continue
 		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
 			continue
-		if Time.get_ticks_msec() - _lastPetTalkMsec < PET_TALK_COOLDOWN_MS or randf() < 0.4:
+		if Time.get_ticks_msec() < _nextPetTalkMsec:
 			continue
 		var other = _nearestTalkPartner()
 		if other == null:
 			continue
-		_lastPetTalkMsec = Time.get_ticks_msec()
+		var talkRange := petTalkRange()
+		_nextPetTalkMsec = Time.get_ticks_msec() + int(randf_range(talkRange.x, talkRange.y) * 1000.0)
 		var otherSkin: String = other._skinTag()
 		LLMManager.requestPetOpener(_skinTag(), otherSkin, _petStats() + _aiStateHint(), func(line: String):
 			_queueMessage(line, 1.0, true)
 			AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 			notePetLine(other, PlayerManager.displayNameFor(_skinTag()), line)
 			if is_instance_valid(other):
-				other.replyToPet(self, line), _petTalkWith(other))
+				other.replyToPet(self, line), _petTalkWith(other), other._petStats())
 
 
 ## Память разговоров с другими ИИ-персами: у каждого перса своя, по каждому
@@ -996,7 +1009,9 @@ func _nearestTalkPartner() -> Node:
 
 
 func _petStats() -> String:
-	return "настроение %.0f из 100, здоровье %.0f из 100" % [moodSys.mood + moodSys.drugOffset, healthHandler.health]
+	var hp: float = healthHandler.health
+	var wound := ", тяжёлые раны" if hp <= 30.0 else (", есть раны" if hp <= 60.0 else "")
+	return "настроение %.0f из 100, здоровье %.0f из 100%s" % [moodSys.mood + moodSys.drugOffset, hp, wound]
 
 
 ## Ответ другому ИИ-персонажу (вызывает его petTalkLoop).
@@ -1025,7 +1040,7 @@ func replyToPet(speaker: Node, line: String) -> void:
 		notePetLine(speaker, myName, text)
 		if is_instance_valid(speaker):
 			speaker.notePetLine(self, myName, text) # собеседник тоже запоминает ответ
-	LLMManager.requestChatReply(_skinTag(), speakerName, talk, _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin)
+	LLMManager.requestChatReply(_skinTag(), speakerName, talk, _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin, "", speaker._petStats())
 
 
 ## Действие, на которое ИИ-персонаж сам согласился в разговоре с игроком.

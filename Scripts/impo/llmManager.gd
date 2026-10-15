@@ -124,8 +124,7 @@ func _loadSavedSettings() -> void:
 	modelName = String(gbData.settings.get("llmModelName", modelName)).strip_edges()
 	creativity = gbData.settings.get("llmCreativity", creativity)
 	repetitionGuard = gbData.settings.get("llmRepetitionGuard", repetitionGuard)
-	minScreenInterval = gbData.settings.get("llmMinInterval", minScreenInterval)
-	maxScreenInterval = gbData.settings.get("llmMaxInterval", maxScreenInterval)
+	_refreshScreenInterval()
 	banWords = gbData.settings.get("llmBanWords", [])
 
 
@@ -133,10 +132,18 @@ func _scheduleScreenTick(overrideSeconds: float = -1.0) -> void:
 	var wait := overrideSeconds
 	if wait < 0.0:
 		if gbData.settings.get("llmVisionEnabled", true):
+			_refreshScreenInterval()
 			wait = randf_range(minScreenInterval, maxScreenInterval)
 		else:
 			wait = 5.0
 	screenTimer.start(wait)
+
+
+## Интервал экрана читается из настроек при каждом срабатывании: поля во
+## вкладке Settings хранят строки ("60"), а команда visionInterval - числа.
+func _refreshScreenInterval() -> void:
+	minScreenInterval = maxf(1.0, float(GlobalVariable.getNumFromString(str(gbData.settings.get("llmMinInterval", minScreenInterval)))))
+	maxScreenInterval = maxf(minScreenInterval, float(GlobalVariable.getNumFromString(str(gbData.settings.get("llmMaxInterval", maxScreenInterval)))))
 
 
 const OLD_LORE_PATH := "user://LORE.txt" # kept forever - never deleted, only read once for migration
@@ -789,7 +796,7 @@ func relationTo(skinName: String, otherSkin: String) -> String:
 
 
 ## Кто это: имя + вид, номер Saw и род из паспорта ("Voyager (вид Voyager, Saw-07, женского рода)").
-func aboutCharacter(skinName: String) -> String:
+func aboutCharacter(skinName: String, withGender: bool = true) -> String:
 	var shown: String = PlayerManager.displayNameFor(skinName)
 	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
 		if FileAccess.file_exists(path):
@@ -798,7 +805,8 @@ func aboutCharacter(skinName: String) -> String:
 				var bits: Array = []
 				if String(data.get("race", "")) != "":
 					bits.append("вид " + String(data["race"]))
-				bits.append("женского рода" if String(data.get("gender", "")) == "female" else "мужского рода")
+				if withGender:
+					bits.append("женского рода" if String(data.get("gender", "")) == "female" else "мужского рода")
 				return "%s (%s)" % [shown, ", ".join(bits)]
 	return shown
 
@@ -821,7 +829,7 @@ const PET_TOPICS := [
 
 
 ## Один ИИ-персонаж сам заговаривает с другим, стоящим рядом.
-func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable, history: Array = []) -> void:
+func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable, history: Array = [], otherState: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":pettalk"
@@ -840,24 +848,39 @@ func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, cal
 		prompt += "\nМожешь вернуться к этому разговору или начать новую тему, но не повторяй уже сказанное."
 	# конкретный повод - без него реплики были гладкими, но ни о чём
 	prompt += "\nПовод заговорить: " + PET_TOPICS[randi() % PET_TOPICS.size()]
-	prompt += "\nТвоё состояние: " + stateText.strip_edges() + "\nТвоя реплика (только сама реплика):"
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	if otherState != "":
+		prompt += "\nСостояние собеседника: " + otherState.strip_edges() + "."
+	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого, а не с беззаботной болтовни."
+	prompt += "\nТвоя реплика (только сама реплика):"
 	_enqueue(prompt, [], callback, tag)
 
 
-func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "") -> void:
+## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
+## playerSkin - скин перса-игрока; speakerState - здоровье/настроение собеседника.
+func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
 	if speakerSkin == "":
-		prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Это живой разговор: отвечай по смыслу его слов, живо и в своём характере, можно одной-двумя фразами." % speaker
+		prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Это живой разговор: отвечай по смыслу его слов, живо и в своём характере, можно одной-двумя фразами." % (aboutCharacter(playerSkin, false) if playerSkin != "" else speaker)
+		# Вид перса-игрока: отношение к виду - из паспорта, но внутри него человек,
+		# и отношение к человеку (из лора) важнее. Не нравится вид - можно
+		# подколоть внешность, но к самому человеку - как всегда.
+		var playerRel := relationTo(skinTag, playerSkin) if playerSkin != "" else ""
+		if playerRel != "" and playerRel != "своя" and playerRel != "свой":
+			prompt += " К его виду ты обычно относишься так: " + playerRel + ". Но внутри него - твой человек, и к нему ты относишься так, как сказано о человеке выше: это важнее. Вид можешь подколоть, человека - нет."
 	else:
 		# ответ другому ИИ-персонажу (behavior.petTalkLoop)
 		prompt += "\nС тобой заговорил %s - другой персонаж, который живёт рядом на рабочем столе. Ответь ему коротко, по смыслу его слов и в своём характере." % aboutCharacter(speakerSkin)
 		var rel := relationTo(skinTag, speakerSkin)
 		if rel != "":
 			prompt += " Твоё отношение к нему: " + rel + "."
+	if speakerState != "":
+		prompt += "\nСостояние собеседника: " + speakerState.strip_edges() + "."
+	prompt += "\nЕсли кто-то из вас ранен или ему плохо - это должно чувствоваться в ответе: не болтай беззаботно, когда здоровье на исходе."
 	prompt += "\nКаждый ответ строй ПО-НОВОМУ: не копируй начало, концовку или шаблон своих прошлых ответов из разговора ниже. Не начинай ответ с повтора слов собеседника."
 	var worn := _wornOutPhrases(tag)
 	if worn.size() > 0:
@@ -1597,8 +1620,8 @@ func setFlirtEnabled(enabled: bool) -> void:
 func setInterval(minSeconds: float, maxSeconds: float) -> void:
 	minScreenInterval = max(1.0, minSeconds)
 	maxScreenInterval = max(minScreenInterval, maxSeconds)
-	gbData.settings["llmMinInterval"] = minScreenInterval
-	gbData.settings["llmMaxInterval"] = maxScreenInterval
+	gbData.settings["llmMinInterval"] = str(minScreenInterval)
+	gbData.settings["llmMaxInterval"] = str(maxScreenInterval)
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
 	print("LLMManager: screen-reaction interval set to ", minScreenInterval, "-", maxScreenInterval, " seconds")
 

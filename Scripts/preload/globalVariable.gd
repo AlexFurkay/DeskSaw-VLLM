@@ -96,15 +96,20 @@ func _apply_renderer_and_restart(use_vulkan: bool) -> void:
 var userSkinPath = "user://skin/Body/"
 
 
+## Оставляет из строки только число. Раньше выбрасывалась и точка, и "60.0"
+## превращалось в 600 (интервалы по умолчанию в 10 раз длиннее задуманного).
+## Запятая тоже считается разделителем; пустая строка -> "0".
 func getNumFromString(inputString: String):
 	var number_string = ""
-	
+	var hasDot := false
 	for i in range(inputString.length()):
 		var character = inputString[i]
 		if character.is_valid_int():
 			number_string += character
-			
-	return number_string
+		elif (character == "." or character == ",") and not hasDot and number_string != "":
+			number_string += "."
+			hasDot = true
+	return number_string if number_string != "" else "0"
 
 
 func checkpositive(num):
