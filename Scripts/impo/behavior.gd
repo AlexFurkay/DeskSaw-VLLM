@@ -82,6 +82,8 @@ var isPlayer := false
 var playerControlled := false
 var _playerDir := 0.0
 var _playerJump := false
+var _playerSit := false
+var _playerSitPrev := false
 var _forcedSleep := false # сон автопилота: не просыпается сам, только по включению управления
 var _autopilotSleepAt := 0 # когда автопилот уложит игрока спать (3-5 мин без управления)
 const PLAYER_MOOD := 50.0 # у игрока настроение не считается
@@ -570,6 +572,16 @@ func checker():
 func _physics_process(_delta: float) -> void:
 	# игрок под управлением: направление и прыжок - с клавиатуры (PlayerManager)
 	if isPlayer and playerControlled and not ragdolled and not isSleeping and not isUnconscious:
+		# S - сесть, ещё раз S или движение/прыжок - встать
+		var resting: bool = moveSys.currstate == moveSys.states.resting
+		var sitPressed := _playerSit and not _playerSitPrev
+		_playerSitPrev = _playerSit
+		if resting and (sitPressed or _playerDir != 0.0 or _playerJump):
+			moveSys.initswithc(moveSys.states.idle)
+		elif sitPressed and (moveSys.currstate == moveSys.states.idle or moveSys.currstate == moveSys.states.moving):
+			moveSys.dir = 0
+			moveSys.forcedRestPose = 1
+			moveSys.initswithc(moveSys.states.resting)
 		moveSys.dir = _playerDir
 		if _playerJump:
 			moveSys.jump()
@@ -857,14 +869,16 @@ func setPlayerControlled(on: bool) -> void:
 	else:
 		_playerDir = 0.0
 		_playerJump = false
+		_playerSit = false
 		moveSys.dir = 0
 		moveSys.jumpCoolDown = 4.0
 		_autopilotSleepAt = Time.get_ticks_msec() + randi_range(180000, 300000)
 
 
-func playerInput(dir: float, jump: bool) -> void:
+func playerInput(dir: float, jump: bool, sit: bool = false) -> void:
 	_playerDir = dir
 	_playerJump = jump
+	_playerSit = sit
 
 
 ## Реплика, которую написал человек. Звук - обычный голос скина (whine).

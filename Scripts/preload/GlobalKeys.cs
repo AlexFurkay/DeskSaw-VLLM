@@ -66,7 +66,7 @@ public partial class GlobalKeys : Node
     private static readonly uint[] ShiftKeys = { 0xA0, 0xA1, 0x10 };
     private static readonly uint[] WinKeys = { 0x5B, 0x5C };
     // A, D, W, пробел, стрелки - забираются в режиме управления
-    private static readonly HashSet<uint> MovementKeys = new() { 0x41, 0x44, 0x57, 0x20, 0x25, 0x26, 0x27, 0x28 };
+    private static readonly HashSet<uint> MovementKeys = new() { 0x41, 0x44, 0x57, 0x53, 0x20, 0x25, 0x26, 0x27, 0x28 }; // +S (0x53) - сесть
 
     private LowLevelKeyboardProc _proc; // ссылка обязательна - иначе сборщик мусора удалит делегат, и хук упадёт
     private IntPtr _hook = IntPtr.Zero;

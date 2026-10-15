@@ -519,10 +519,67 @@ func _sameOpener(tag: String, text: String) -> bool:
 
 ## Блок промпта про навязчивые темы (пусто, если их нет).
 func _obsessionHint(tag: String) -> String:
+	var hint := ""
 	var motifs := _obsessiveWords(tag)
-	if motifs.is_empty():
-		return ""
-	return _g(_skinFromTag(tag), "\nТы уже {зациклилась|зациклился} на этих темах - в этой фразе их НЕ упоминай совсем, скажи о чём-то другом: ") + ", ".join(motifs.values()) + "."
+	if not motifs.is_empty():
+		hint = _g(_skinFromTag(tag), "\nТы уже {зациклилась|зациклился} на этих темах - в этой фразе их НЕ упоминай совсем, скажи о чём-то другом: ") + ", ".join(motifs.values()) + "."
+	var worn := _skinOverusedWords(_skinFromTag(tag))
+	if not worn.is_empty():
+		hint += "\nЭти слова ты в последнее время повторяешь почти в каждой фразе, из-за них ты звучишь однообразно. Сейчас обойдись без них, найди другие слова и другие темы: " + ", ".join(worn.values()) + "."
+	return hint
+
+
+## 054.95, авто-адаптация. _obsessiveWords смотрит только внутрь одной
+## ситуации и слова от 5 букв, а повторы из лога 054.94 были другого рода:
+## "Дюна" в 41% всех фраз Dune, хвост у Roza, прыжки у Leapy, кровь и паутина
+## у Velvet - понемногу в КАЖДОЙ ситуации. Здесь считаем по всем недавним
+## фразам скина сразу, по основе из 4 букв (кровь/крови/кровью, хвост/хвостик).
+const _SKIN_STOP := ["тебя", "меня", "тебе", "себя", "хочу", "могу", "нужно", "надо", "спасибо", "хорошо",
+	"очень", "только", "просто", "сейчас", "снова", "опять", "когда", "потом", "может", "даже", "всегда",
+	"теперь", "здесь", "ничего", "немного", "хоть", "чуть", "будет", "было", "была", "были", "этот", "этого",
+	"такой", "тоже", "почти", "больше", "пока", "если", "чтобы", "твой", "твоя", "твои", "твоё", "твою", "твоей",
+	"твоих", "твоим", "свой", "своей", "свою", "нравится", "хочется", "давай", "пожалуйста", "знаешь",
+	"сегодня", "вообще", "равно", "готов", "готова", "рядом", "чувствую", "стало", "стала", "стал", "есть",
+	"всех", "весь", "вся", "лучше", "пусть", "мной", "тобой", "него", "неё", "этой", "этом", "так", "раз"]
+const SKIN_WORN_WINDOW := 15 # последних фраз каждой ситуации скина
+const SKIN_WORN_SHARE := 0.10 # слово в 10%+ этих фраз - перебор
+func _contentStems(text: String) -> Dictionary:
+	var stems := {}
+	for w in _normWords(text):
+		if w.length() < 4 or not _isCyrillicWord(w) or _SKIN_STOP.has(w):
+			continue
+		var st := w.substr(0, 4)
+		if not stems.has(st):
+			stems[st] = w
+	return stems
+
+
+## {основа: слово} - что этот скин в последнее время говорит слишком часто.
+func _skinOverusedWords(skin: String) -> Dictionary:
+	if skin == "":
+		return {}
+	var lines: Array = []
+	for key in _recentLinesByCategory.keys():
+		if String(key).begins_with(skin + ":"):
+			var list: Array = _recentLinesByCategory[key]
+			lines.append_array(list.slice(maxi(0, list.size() - SKIN_WORN_WINDOW)))
+	if lines.size() < 30:
+		return {} # мало данных - любое слово покажется частым
+	var counts := {}
+	var forms := {}
+	for line in lines:
+		var stems := _contentStems(String(line))
+		for st in stems.keys():
+			counts[st] = int(counts.get(st, 0)) + 1
+			forms[st] = stems[st]
+	var ranked: Array = counts.keys()
+	ranked.sort_custom(func(a, b): return counts[a] > counts[b])
+	var result := {}
+	for st in ranked:
+		if float(counts[st]) / lines.size() < SKIN_WORN_SHARE or result.size() >= 6:
+			break
+		result[st] = forms[st]
+	return result
 
 
 ## Убирает из ответа куски (между " — ", " - ", ", "), где сидит затёртый
@@ -1264,6 +1321,12 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 	# описание персонажа со стороны ("Ты маленькая и..."), поэтому всё, что
 	# идёт ниже неё в этом пакете, тоже выбрасываем.
 	var metaSeen := false
+	# Повторы внутри одной пачки: одно слово (по основе) - не больше чем в
+	# каждой пятой фразе, а слово, которое скин и так затёр, - один раз
+	# (в 054.94 в пачке pet у Roza "хвостик" стоял через строку).
+	var batchStems := {}
+	var maxPerStem := maxi(2, ceili(lines.size() * 0.2))
+	var skinWorn := _skinOverusedWords(_skinFromTag(category))
 	for i in lines.size():
 		var raw: String = lines[i]
 		var cleaned: String = lines[i].strip_edges().replace("*", "")
@@ -1347,6 +1410,19 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 				else:
 					_logDebugLine(category, "REJECTED:TOO_FRAGMENTARY", raw)
 					continue # too fragmentary to salvage - drop this line entirely
+
+		var lineStems := _contentStems(cleaned)
+		var overused := ""
+		for st in lineStems.keys():
+			var used := int(batchStems.get(st, 0))
+			if used >= maxPerStem or (skinWorn.has(st) and used >= 1):
+				overused = lineStems[st]
+				break
+		if overused != "":
+			_logDebugLine(category, "REJECTED:OVERUSED(" + overused + ")", raw)
+			continue
+		for st in lineStems.keys():
+			batchStems[st] = int(batchStems.get(st, 0)) + 1
 
 		_logDebugLine(category, "OK", cleaned)
 		pool.append(cleaned)

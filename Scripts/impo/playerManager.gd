@@ -19,6 +19,7 @@ const DEFAULT_KEYS := "Ctrl+Alt+P"
 const LEFT_KEYS := [0x41, 0x25]       # A, стрелка влево
 const RIGHT_KEYS := [0x44, 0x27]      # D, стрелка вправо
 const JUMP_KEYS := [0x57, 0x26, 0x20] # W, стрелка вверх, пробел
+const SIT_KEYS := [0x53, 0x28]        # S, стрелка вниз - сесть / встать
 const CHAT_MEMORY := 32 # реплик в памяти разговора с КАЖДЫМ ИИ-персом (~16 обменов)
 const CHAT_MAX_LENGTH := 200
 const CHAT_REPLY_DISTANCE := 1600.0 # пикс экрана при petSize 4 - кто "рядом" и ответит
@@ -116,7 +117,7 @@ func spawnPlayer(skinPath: String, skinName: String) -> void:
 	player = beh
 	controlled = false
 	_applyCapture()
-	Console.print("Игрок: [color=CYAN]%s[/color]. Управление - [color=CYAN]%s[/color] (A/D - ходьба, W/пробел - прыжок, Enter - сказать)." % [playerName, currentKeys()])
+	Console.print("Игрок: [color=CYAN]%s[/color]. Управление - [color=CYAN]%s[/color] (A/D - ходьба, W/пробел - прыжок, S - сесть/встать, Enter - сказать)." % [playerName, currentKeys()])
 
 
 ## Персонаж, восстановленный из сейва с пометкой player (expiePersistence).
@@ -154,7 +155,7 @@ func toggleControl() -> void:
 	player.setPlayerControlled(controlled)
 	_applyCapture()
 	if controlled:
-		_showStatus("Управление: ВКЛ  (A/D, W/пробел, Enter - сказать)")
+		_showStatus("Управление: ВКЛ  (A/D, W/пробел, S - сесть, Enter - сказать)")
 	else:
 		_showStatus("Управление: ВЫКЛ (автопилот)")
 
@@ -177,9 +178,9 @@ func _process(_delta: float) -> void:
 			dir += 1.0
 		if _anyDown(LEFT_KEYS):
 			dir -= 1.0
-		player.playerInput(dir, _anyDown(JUMP_KEYS))
+		player.playerInput(dir, _anyDown(JUMP_KEYS), _anyDown(SIT_KEYS))
 	elif controlled:
-		player.playerInput(0.0, false)
+		player.playerInput(0.0, false, false)
 
 	if chatOpen and hasPlayer():
 		_placeAbovePlayer(_chatLabel, 150.0)
