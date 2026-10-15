@@ -367,8 +367,8 @@ func _applyStupid(text: String) -> Array:
 ## Общая память разговора: что персонаж сам сказал вслух (экран, состояние,
 ## предметы...) за последнее время. Её видит чат с персом-игроком - можно
 ## спросить "почему ты так сказала?" про экранную реплику пятиминутной давности.
-const SPOKEN_LOG_SIZE := 12
-const SPOKEN_LOG_MAX_AGE_MS := 1800000 # 30 минут
+const SPOKEN_LOG_SIZE := 20
+const SPOKEN_LOG_MAX_AGE_MS := 2700000 # 45 минут
 var _spokenLog: Array = [] # [{"t": msec, "text": реплика}]
 
 func _recordSpoken(text: String) -> void:
@@ -560,8 +560,6 @@ func checker():
 			if not isUnconscious:
 				faceSys.setEmotion(emotionz.keys()[currentEmotion])
 		statUpd.stat.mood = moodN
-		LLMManager.lastKnownMood = moodN
-		LLMManager.lastKnownDrugLevel = _drugLevel() # для экранных реакций
 		statUpd.stat.hunger = hungerHandler.hungry
 		statUpd.stat.health = healthHandler.health
 		statUpd.stat.sleep = snapped(sleepN, 0.1) # ???? why was it like that before?
@@ -961,8 +959,30 @@ func petTalkLoop() -> void:
 		LLMManager.requestPetOpener(_skinTag(), otherSkin, _petStats() + _aiStateHint(), func(line: String):
 			_queueMessage(line, 1.0, true)
 			AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+			notePetLine(other, PlayerManager.displayNameFor(_skinTag()), line)
 			if is_instance_valid(other):
-				other.replyToPet(_skinTag(), line))
+				other.replyToPet(self, line), _petTalkWith(other))
+
+
+## Память разговоров с другими ИИ-персами: у каждого перса своя, по каждому
+## собеседнику отдельно (ключ - petId собеседника). Раньше ответ видел только
+## одну последнюю реплику, и каждый разговор начинался с нуля.
+const PET_TALK_MEMORY := 10
+var _petTalkHistory: Dictionary = {}
+
+func _petTalkWith(other: Node) -> Array:
+	return (_petTalkHistory.get(String(other.petId), []) as Array).duplicate()
+
+
+func notePetLine(other: Node, who: String, text: String) -> void:
+	if not is_instance_valid(other):
+		return
+	var key := String(other.petId)
+	var h: Array = _petTalkHistory.get(key, [])
+	h.append({"who": who, "text": text})
+	while h.size() > PET_TALK_MEMORY:
+		h.pop_front()
+	_petTalkHistory[key] = h
 
 
 func _nearestTalkPartner() -> Node:
@@ -980,10 +1000,14 @@ func _petStats() -> String:
 
 
 ## Ответ другому ИИ-персонажу (вызывает его petTalkLoop).
-func replyToPet(speakerSkin: String, line: String) -> void:
-	if isPlayer or isUnconscious or isSleeping:
+func replyToPet(speaker: Node, line: String) -> void:
+	if isPlayer or isUnconscious or isSleeping or not is_instance_valid(speaker):
 		return
+	var speakerSkin: String = speaker._skinTag()
 	var speakerName: String = PlayerManager.displayNameFor(speakerSkin)
+	var myName: String = PlayerManager.displayNameFor(_skinTag())
+	notePetLine(speaker, speakerName, line)
+	var talk: Array = _petTalkWith(speaker)
 	# Ответ генерируется сразу, но показывается не раньше, чем собеседник
 	# допечатает свою фразу (~0.04 с на букву, x8 на знаках препинания) + пауза -
 	# иначе реплики шли почти впритык.
@@ -998,7 +1022,10 @@ func replyToPet(speakerSkin: String, line: String) -> void:
 			return
 		_queueMessage(text, 1.0, true)
 		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
-	LLMManager.requestChatReply(_skinTag(), speakerName, [{"who": speakerName, "text": line}], _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin)
+		notePetLine(speaker, myName, text)
+		if is_instance_valid(speaker):
+			speaker.notePetLine(self, myName, text) # собеседник тоже запоминает ответ
+	LLMManager.requestChatReply(_skinTag(), speakerName, talk, _petStats() + _aiStateHint(), _recentSpoken(), onReply, speakerSkin)
 
 
 ## Действие, на которое ИИ-персонаж сам согласился в разговоре с игроком.

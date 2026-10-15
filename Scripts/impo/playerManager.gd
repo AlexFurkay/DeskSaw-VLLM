@@ -19,7 +19,7 @@ const DEFAULT_KEYS := "Ctrl+Alt+P"
 const LEFT_KEYS := [0x41, 0x25]       # A, стрелка влево
 const RIGHT_KEYS := [0x44, 0x27]      # D, стрелка вправо
 const JUMP_KEYS := [0x57, 0x26, 0x20] # W, стрелка вверх, пробел
-const CHAT_MEMORY := 24 # реплик в памяти разговора (~12 обменов)
+const CHAT_MEMORY := 32 # реплик в памяти разговора с КАЖДЫМ ИИ-персом (~16 обменов)
 const CHAT_MAX_LENGTH := 200
 const CHAT_REPLY_DISTANCE := 1600.0 # пикс экрана при petSize 4 - кто "рядом" и ответит
 
@@ -31,7 +31,7 @@ var chatOpen := false
 var chatText := ""
 ## Память разговора: [{"who": имя, "text": реплика}]. Сбрасывается, только
 ## если новый игрок другого скина.
-var history: Array = []
+var histories: Dictionary = {} # petId ИИ-перса -> его разговор с игроком (у каждого своя память)
 
 var _keys: Node = null
 var _chatLayer: CanvasLayer
@@ -87,7 +87,7 @@ func spawnPlayer(skinPath: String, skinName: String) -> void:
 	if hasPlayer():
 		_removePlayer()
 	if skinName != playerSkin:
-		history.clear() # другой персонаж - другой разговор
+		histories.clear() # другой персонаж - другой разговор
 	playerSkin = skinName
 	playerName = displayNameFor(skinName)
 
@@ -242,19 +242,24 @@ func _submitChat() -> void:
 	if text == "" or not hasPlayer():
 		return
 	player.playerSay(text)
-	_remember(playerName, text)
 
 	var listener = _nearestListener()
 	if listener == null:
 		return
+	# Своя память разговора у каждого ИИ-перса: раньше история была одна на
+	# всех, и Voyager "помнила" то, что игрок говорил Expie.
+	var key: String = String(listener.petId)
+	_remember(key, playerName, text)
 	var listenerName := displayNameFor(listener._skinTag())
-	listener.replyToPlayer(playerName, history.duplicate(), func(reply: String): _remember(listenerName, reply))
+	listener.replyToPlayer(playerName, (histories[key] as Array).duplicate(), func(reply: String): _remember(key, listenerName, reply))
 
 
-func _remember(who: String, text: String) -> void:
-	history.append({"who": who, "text": text})
-	while history.size() > CHAT_MEMORY:
-		history.pop_front()
+func _remember(key: String, who: String, text: String) -> void:
+	var h: Array = histories.get(key, [])
+	h.append({"who": who, "text": text})
+	while h.size() > CHAT_MEMORY:
+		h.pop_front()
+	histories[key] = h
 
 
 ## Ближайший ИИ-персонаж, который может ответить.

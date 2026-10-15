@@ -22,7 +22,6 @@ func loadFromSave(id: String) -> void:
 	# мёртвым и не мог встать, пока ХП не отрастёт выше 20.
 	health = maxhealth
 	pet.health = health
-	LLMManager.lastKnownHealth = health
 	_regenLoop()
 
 
@@ -39,7 +38,6 @@ func _regenLoop() -> void:
 		if health < maxhealth:
 			health = clamp(health + 0.6, minhealth, maxhealth)
 			pet.health = health
-			LLMManager.lastKnownHealth = health
 			get_parent()._applyInjuryLook()
 
 
@@ -79,7 +77,6 @@ func _onItemEnter(body: Node2D) -> void:
 		AudioManager.play_sfx(AudioManager.heal)
 		health = clamp(health + healAmount, minhealth, maxhealth)
 		pet.health = health
-		LLMManager.lastKnownHealth = health
 		gbData.savetodisk("user://SAVE.json", gbData.data)
 		get_parent()._applyInjuryLook()
 		get_parent()._say("healed")
@@ -96,7 +93,6 @@ func applyDamage(amount: float) -> void:
 	var wasAlive: bool = health > 0.0
 	health = clamp(health - amount, minhealth, maxhealth)
 	pet.health = health
-	LLMManager.lastKnownHealth = health
 	gbData.savetodisk("user://SAVE.json", gbData.data)
 	get_parent()._applyInjuryLook()
 

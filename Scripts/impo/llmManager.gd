@@ -35,9 +35,6 @@ var creativity := 0.7    # was "temperature" - higher = more random/wild answers
 ## has no direct line to a pet's mood/health. behavior.gd/health_handler.gd
 ## keep these updated whenever their own values change - screen reactions
 ## read them to let bad mood/low health quietly colour the tone.
-var lastKnownMood: float = 50.0
-var lastKnownHealth: float = 100.0
-var lastKnownDrugLevel: int = 0 # 0 - трезвая, 1 - лёгкий приход, 2 - сильный, -1 - ломка (см. behavior._drugLevel)
 var repetitionGuard := 1.2 # was "repeat_penalty" - higher = less likely to repeat the same words/phrases
 var minScreenInterval := 60.0
 var maxScreenInterval := 120.0
@@ -50,7 +47,7 @@ var screenTimer: Timer
 var busy := false
 var _prefetchPools: Dictionary = {}   # category -> Array[String] ready-made lines
 var _prefetchPending: Dictionary = {} # category -> bool, true while a refill is in flight
-const PREFETCH_TARGET := 7
+const PREFETCH_TARGET := 10
 ## Окно контекста модели. 4096 стало впритык: правила (~970 токенов) + лор
 ## (630-1040) + скриншот (~1080) или история чата. 6144 у qwen3-vl:8b ещё
 ## целиком помещается в 8 ГБ видеопамяти (5.67 ГБ против 5.51 при 4096),
@@ -62,15 +59,28 @@ const PREFETCH_REFILL_AT := 3
 ## побольше, чтобы разнообразия хватало дольше и повторы в начале сессии
 ## случались реже.
 const PREFETCH_TARGET_OVERRIDES := {
-	"pet": 20,
+	"pet": 25,
+	"petReject": 12,
+	"getUp": 12,
+	"getUpPet": 12,
+	"beingDragged": 12,
+	"screamBIG": 12,
 	"drag_level0": 15,
 	"drag_level1": 15,
 	"drag_level2": 15,
 	"fell": 15,
 }
 
+## Ключ пула - "Скин:категория" (например "Expie:pet"); настройки выше заданы
+## по одной категории. Раньше искался весь ключ, и пакет на 20 для pet
+## никогда не срабатывал - генерировалось по 7.
 func _prefetchTargetFor(category: String) -> int:
-	return PREFETCH_TARGET_OVERRIDES.get(category, PREFETCH_TARGET)
+	return PREFETCH_TARGET_OVERRIDES.get(category.get_slice(":", category.get_slice_count(":") - 1), PREFETCH_TARGET)
+
+
+## Пополнять пул, когда в нём осталась треть (у больших пулов раньше, чем при 3).
+func _refillThresholdFor(category: String) -> int:
+	return maxi(PREFETCH_REFILL_AT, _prefetchTargetFor(category) / 3)
 
 var debugTags := false
 var _queue: Array = []           # foreground/interactive requests - always drained first
@@ -549,6 +559,10 @@ func _looksLikeRepeat(category: String, text: String) -> bool:
 ## Console command: reloadLore
 func reloadLore() -> void:
 	_loadLore()
+	# лор и род каждого скина кэшируются при первом запросе - без сброса
+	# правка lore.txt/character.json не применялась до перезапуска игры
+	_loreBySkin.clear()
+	_genderBySkin.clear()
 	_clearPrefetchPools() # old cached lines were written under the old lore
 	print("LLMManager: lore reloaded (", lore.length(), " chars)")
 	poolsCleared.emit()
@@ -656,12 +670,6 @@ func _pickScreenAngle() -> String:
 	_lastScreenAngle = idx
 	return SCREEN_ANGLES[idx]
 
-
-## Постепенная примесь состояния в screen-реакции - чем хуже здоровье и/или
-## настроение, тем сильнее это должно просачиваться в тон, не перекрывая
-## собой саму реакцию на экран. Пороги - грубая прикидка, баланс потом.
-func _screenMoodHealthHint() -> String:
-	return stateHint(lastKnownMood, lastKnownHealth, lastKnownDrugLevel)
 
 
 ## Общая подсказка состояния для динамических реакций (экран, предметы):
@@ -813,15 +821,23 @@ const PET_TOPICS := [
 
 
 ## Один ИИ-персонаж сам заговаривает с другим, стоящим рядом.
-func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable) -> void:
+func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable, history: Array = []) -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":pettalk"
+	var myName: String = PlayerManager.displayNameFor(skinTag)
 	var prompt := _buildBasePrompt(tag)
 	prompt += "\nРядом с тобой на рабочем столе стоит другой персонаж - %s. Заговори с ним коротко и в своём характере." % aboutCharacter(otherSkin)
 	var rel := relationTo(skinTag, otherSkin)
 	if rel != "":
 		prompt += "\nТвоё отношение к нему: " + rel + "."
+	if history.size() > 0:
+		var lines: Array = []
+		for e in history:
+			var who := String(e.get("who", ""))
+			lines.append(("Ты" if who == myName else who) + ": " + String(e.get("text", "")))
+		prompt += "\nВы уже разговаривали раньше (внизу - самое недавнее):\n" + "\n".join(lines)
+		prompt += "\nМожешь вернуться к этому разговору или начать новую тему, но не повторяй уже сказанное."
 	# конкретный повод - без него реплики были гладкими, но ни о чём
 	prompt += "\nПовод заговорить: " + PET_TOPICS[randi() % PET_TOPICS.size()]
 	prompt += "\nТвоё состояние: " + stateText.strip_edges() + "\nТвоя реплика (только сама реплика):"
@@ -994,7 +1010,7 @@ func requestPooledReaction(category: String, exampleLines: Array, callback: Call
 		if debugTags:
 			text = "[%s] %s" % [category, text]
 		callback.call(text)
-		if pool.size() <= PREFETCH_REFILL_AT:
+		if pool.size() <= _refillThresholdFor(category):
 			_refillPool(category, exampleLines, styleHint, situationDescription)
 	else:
 		requestQuickReaction(exampleLines, callback, category, styleHint, situationDescription)
@@ -1042,7 +1058,7 @@ func requestPooledEvent(poolKey: String, eventDescription: String, callback: Cal
 		if debugTags:
 			text = "[%s] %s" % [poolKey, text]
 		callback.call(text)
-		if pool.size() <= PREFETCH_REFILL_AT:
+		if pool.size() <= _refillThresholdFor(poolKey):
 			_refillEventPool(poolKey, eventDescription, exampleLines)
 	else:
 		reactToEvent(eventDescription, callback, poolKey)
@@ -1325,7 +1341,8 @@ func _processQueue() -> void:
 	# response, so they need a much bigger token budget than a single line.
 	var predictBudget: int = 220
 	if _currentTag.begins_with("prefetch:"):
-		predictBudget = 220 * _prefetchTargetFor(_currentTag.trim_prefix("prefetch:"))
+		# ~20-40 токенов на строку; потолок, чтобы промпт + ответ всегда влезали в NUM_CTX
+		predictBudget = mini(80 * _prefetchTargetFor(_currentTag.trim_prefix("prefetch:")), 2400)
 
 	var payload := {
 		"model": modelName,
