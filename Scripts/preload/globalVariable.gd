@@ -3,7 +3,7 @@ extends Node
 #i probably shouldve put these here earlier but better late than never
 
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
-const BUILD := "054.996Pru"
+const BUILD := "054.997Pru"
 
 ## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
 ## видеть, что персонажи говорили, - фраза над головой быстро исчезает).
@@ -25,6 +25,13 @@ const PHRASE_COLORS := {
 	"VoyagerAlt": Color(0.6, 0.0, 1.0),  # фиолетовый (с белым - розоватый)
 }
 const PHRASE_PLAYER_COLOR := Color(0.72, 0.72, 0.72) # белый, но темнее Milky
+
+## 054.997: цвет фразы над персонажем - на 15% насыщеннее, чем во вкладке
+## «Фразы» (смесь с белым 0.575 вместо 0.5).
+func phraseColor(skin: String, isPlayer: bool, strength: float = 0.5) -> Color:
+	if isPlayer:
+		return PHRASE_PLAYER_COLOR
+	return Color.WHITE.lerp(PHRASE_COLORS.get(skin, Color(0.6, 0.85, 1.0)), strength)
 
 func _phraseColorHex(skin: String, isPlayer: bool) -> String:
 	if isPlayer:

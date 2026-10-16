@@ -470,6 +470,10 @@ func _wornOutPhrases(tag: String) -> Array:
 ## пропускается - это имена (Expie, Voyager), к ним обращаться можно.
 ## Возвращает {основа: слово в последней форме}.
 const _MOTIF_STOP := ["просто", "сейчас", "только", "очень", "снова", "опять", "когда", "потому", "может", "хочешь", "хочется", "сегодня", "всегда", "теперь", "здесь", "почему", "ничего", "немного"]
+## 054.997: короткие слова тоже бывают навязчивыми (Voyager восемь ответов
+## подряд "топила лёд" - а слова короче 5 букв раньше не считались). Служебные
+## короткие слова исключаем.
+const _MOTIF_SHORT_STOP := ["что", "как", "это", "мне", "меня", "тебе", "тебя", "ты", "мы", "вы", "они", "она", "оно", "его", "её", "ещё", "уже", "вот", "так", "там", "тут", "где", "кто", "для", "без", "над", "под", "при", "про", "или", "нет", "даже", "всё", "все", "был", "была", "было", "если", "чем", "тоже", "свой", "твой", "мой", "моя", "твоя", "себя", "себе", "тем", "этот", "эта", "эти", "раз", "ведь", "лишь", "будто", "пока", "надо", "могу", "хочу", "есть", "буду", "иди", "давай", "знаю", "вижу", "хоть", "чуть", "ну", "да", "же", "ли", "бы", "не", "ни", "но", "а", "и"]
 func _obsessiveWords(tag: String) -> Dictionary:
 	var recent: Array = _recentLinesByCategory.get(tag, [])
 	recent = recent.slice(maxi(0, recent.size() - 6))
@@ -483,7 +487,7 @@ func _obsessiveWords(tag: String) -> Dictionary:
 	for line in recent:
 		var seen := {}
 		for w in _normWords(String(line)):
-			if w.length() < 5 or not _isCyrillicWord(w):
+			if w.length() < 3 or not _isCyrillicWord(w) or (w.length() < 5 and _MOTIF_SHORT_STOP.has(w)):
 				continue
 			var stem := w.substr(0, 5)
 			if _MOTIF_STOP.has(w) or seen.has(stem):
@@ -508,7 +512,7 @@ func _hitsObsession(tag: String, text: String) -> bool:
 	if motifs.is_empty():
 		return false
 	for w in _normWords(text):
-		if w.length() >= 5 and motifs.has(w.substr(0, 5)):
+		if w.length() >= 3 and motifs.has(w.substr(0, 5)):
 			return true
 	return false
 

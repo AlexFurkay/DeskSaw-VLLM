@@ -278,6 +278,7 @@ func _do_i_cmds():
 	if has_run_commands:
 		return
 	has_run_commands = true
+	_ensureModelInstalled()
 
 	# i thought this had to be run from the console node itself but turns out its reflected on all consoles! hooray!
 	Console.execute("set_monitor {0}".format([int(gbData.settings.get("defaultMonitor", 0))]))
@@ -534,3 +535,19 @@ func _saveBanwords(words: Array) -> void:
 	gbData.settings["llmBanWords"] = words
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
 	LLMManager.setBanWords(words)
+
+
+## 054.997: в настройках может остаться модель, которой нет в Ollama (опечатка
+## при скачивании в 054.995 переключала на неё). При запуске - на подходящую
+## скачанную: сначала из рекомендованных, иначе первую.
+func _ensureModelInstalled() -> void:
+	LLMManager.fetchModels(func(names: Array, ok: bool):
+		if not ok or names.is_empty() or names.has(LLMManager.modelName):
+			return
+		var pick: String = String(names[0])
+		for m in RECOMMENDED_MODELS:
+			if names.has(m):
+				pick = m
+				break
+		Console.print("[color=ORANGE]Модели %s нет в Ollama - переключаюсь на %s.[/color]" % [LLMManager.modelName, pick])
+		_switchModel(pick, false))
