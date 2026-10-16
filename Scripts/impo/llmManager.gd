@@ -1613,6 +1613,7 @@ func _processQueue() -> void:
 		return
 	busy = true
 	_watchdogTimer.start()
+	TransparentWindow.call("SetAiBusy", true) # 054.993: FPS простоя 30, пока модель думает
 
 	var job: Dictionary
 	_sinceBackgroundJob += 1
@@ -1659,6 +1660,7 @@ func _processQueue() -> void:
 	if err != OK:
 		print("LLMManager: failed to start request: ", err)
 		busy = false
+		TransparentWindow.call("SetAiBusy", false)
 		_processQueue()
 
 
@@ -1680,6 +1682,7 @@ func _noteFailure(code: int) -> void:
 func _on_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_watchdogTimer.stop()
 	busy = false
+	TransparentWindow.call("SetAiBusy", false)
 	var cb := _currentCallback
 
 	if response_code != 200:
@@ -1876,6 +1879,7 @@ func _onWatchdogTimeout() -> void:
 	print("LLMManager: watchdog - a request seems stuck, resetting the queue")
 	_noteFailure(-1)
 	busy = false
+	TransparentWindow.call("SetAiBusy", false)
 	_clearPendingIfPrefetch()
 	_processQueue()
 

@@ -9,7 +9,7 @@
 	},
 	"expieDialogueSize": 7.0,
 	"logAiLines": true,
-	"maxFPSIdle": 30.0,
+	"maxFPSIdle": 60.0,
 	"maxFPSInteract": 60.0,
 	"minDialogueTime": "60.0",
 	"maxDialogueTime": "120.0",

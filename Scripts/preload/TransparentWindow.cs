@@ -66,6 +66,21 @@ public partial class TransparentWindow : Node
 	private nuint _xWindow;
 
 	private bool _lastClickthroughState;
+	// 054.993: пока Ollama генерирует ответ, FPS простоя не выше 30 - видеокарта
+	// нужна модели (замер со стримом Discord: игра + dwm брали до 30-90% GPU).
+	// Ответ длится секунды, потом снова полный FPS. При взаимодействии не трогаем.
+	private bool _aiBusy;
+	private const int AiBusyIdleFps = 30;
+	private int IdleFps() => _aiBusy ? Math.Min(_maxFPSIdle, AiBusyIdleFps) : _maxFPSIdle;
+
+	public void SetAiBusy(bool busy)
+	{
+		if (_aiBusy == busy)
+			return;
+		_aiBusy = busy;
+		if (_lastClickthroughState)
+			Engine.MaxFps = IdleFps();
+	}
 
 	private Node gbData;
 
@@ -85,7 +100,7 @@ public partial class TransparentWindow : Node
 
 		_lastClickthroughState = false;
 
-		_maxFPSIdle = 30; // 054.992: 30 - окно на весь экран, 60 в простое грузило видеокарту (игра + dwm ~110%)
+		_maxFPSIdle = 60; // 054.993: снова 60, а на время ответа ИИ - 30 (SetAiBusy)
 		_maxFPSInteract = 60;
 
 		// can't directly call "gbData" from a cs script.
@@ -120,12 +135,12 @@ public partial class TransparentWindow : Node
 		if (_isX11)
 		{
 			InitX11InputRegions();
-			Engine.MaxFps = _maxFPSIdle;
+			Engine.MaxFps = IdleFps();
 			return;
 		}
 
 		GetWindow().MousePassthrough = true;
-		Engine.MaxFps = _maxFPSIdle;
+		Engine.MaxFps = IdleFps();
 	}
 
 	public override void _Process(double _delta)
@@ -196,10 +211,10 @@ public partial class TransparentWindow : Node
 		{ // shouldnt be able to reach this, but just in case.
 			return;
 		}
-		_maxFPSIdle = (int)gbData.Call("GetSetting", "maxFPSIdle", 30);
+		_maxFPSIdle = (int)gbData.Call("GetSetting", "maxFPSIdle", 60);
 		_maxFPSInteract = (int)gbData.Call("GetSetting", "maxFPSInteract", 60);
 		// GD.Print($"{_maxFPSIdle} : {_maxFPSInteract}");
-		Engine.MaxFps = _lastClickthroughState ? _maxFPSIdle : _maxFPSInteract;
+		Engine.MaxFps = _lastClickthroughState ? IdleFps() : _maxFPSInteract;
 	}
 
 	public void SetInputRect(long id, Rect2 rect, bool enabled)
@@ -317,7 +332,7 @@ public partial class TransparentWindow : Node
 		{
 			GetWindow().MousePassthrough = clickthrough;
 		}
-		Engine.MaxFps = clickthrough ? _maxFPSIdle : _maxFPSInteract;
+		Engine.MaxFps = clickthrough ? IdleFps() : _maxFPSInteract;
 	}
 
 	/* What is a layered window? 
