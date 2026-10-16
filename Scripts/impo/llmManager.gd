@@ -757,8 +757,11 @@ func _on_screen_tick() -> void:
 		return
 	var tag: String = speaker._skinTag() + ":screen"
 
-	var png_bytes: PackedByteArray = ScreenCapture.GetScreenshotPng()
-	if png_bytes.is_empty():
+	# 054.992: снимок в фоновом потоке - главный поток игры не замирает
+	if not ScreenCapture.CaptureAsync():
+		return # прошлый снимок ещё делается - пропускаем этот тик
+	var png_bytes: PackedByteArray = await ScreenCapture.ScreenshotReady
+	if png_bytes.is_empty() or not is_instance_valid(speaker):
 		return
 
 	var images: Array = [Marshalls.raw_to_base64(png_bytes)]
@@ -1561,7 +1564,7 @@ const MAX_QUEUED_PER_TAG := 2
 
 func _enqueue(prompt: String, images: Array, callback: Callable, tag: String = "") -> void:
 	prompt = _g(_skinFromTag(tag), prompt) # {женский|мужской} -> по роду скина
-	var job := {"prompt": prompt, "images": images, "callback": callback, "tag": tag}
+	var job := {"prompt": prompt, "images": images, "callback": callback, "tag": tag, "t": Time.get_ticks_msec()}
 	if tag.begins_with("prefetch:"):
 		_backgroundQueue.append(job)
 	else:
@@ -1581,9 +1584,31 @@ func _enqueue(prompt: String, images: Array, callback: Callable, tag: String = "
 	_processQueue()
 
 
+## 054.992: запросы, которые слишком долго ждали очереди, выбрасываем. Когда
+## модель тормозила (видеокарту заняли голосовой Discord и стрим), реакции на
+## экран и фразы о состоянии копились, а потом приходили все разом - уже
+## не к месту. Фоновые наборы фраз не устаревают.
+const STALE_MS := {"screen": 45000, "state": 60000, "pettalk": 60000, "item": 30000, "chat": 120000}
+const STALE_DEFAULT_MS := 30000 # мгновенные реакции (погладили, подняли)
+
+func _dropStaleJobs() -> void:
+	var now := Time.get_ticks_msec()
+	var kept: Array = []
+	for job in _queue:
+		var tag := String(job.get("tag", ""))
+		var kind := tag.get_slice(":", tag.get_slice_count(":") - 1)
+		var limit: int = STALE_MS.get(kind, STALE_DEFAULT_MS)
+		if now - int(job.get("t", now)) > limit:
+			_logDebugLine(tag, "DROPPED:STALE", "ждал %d с" % ((now - int(job.get("t", now))) / 1000))
+			continue
+		kept.append(job)
+	_queue = kept
+
+
 func _processQueue() -> void:
 	if busy:
 		return
+	_dropStaleJobs()
 	if _queue.is_empty() and _backgroundQueue.is_empty():
 		return
 	busy = true
@@ -1643,6 +1668,15 @@ func _clearPendingIfPrefetch() -> void:
 		_prefetchPending[category] = false
 
 
+## 054.992: три неудачи подряд - подсказка в консоли (раньше игра просто молчала).
+var _failStreak := 0
+func _noteFailure(code: int) -> void:
+	_failStreak += 1
+	_logDebugLine(_currentTag, "OLLAMA_FAIL", "код %d, подряд %d" % [code, _failStreak])
+	if _failStreak == 3:
+		Console.print("[color=ORANGE]Ollama не успевает отвечать (3 раза подряд). Скорее всего, видеокарта перегружена: голосовой Discord, стрим, игра. В Discord помогает выключить аппаратное ускорение (Настройки - Расширенные).[/color]")
+
+
 func _on_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_watchdogTimer.stop()
 	busy = false
@@ -1650,10 +1684,12 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 
 	if response_code != 200:
 		print("LLMManager: Ollama returned code ", response_code, " - is `ollama serve` running with the model pulled?")
+		_noteFailure(response_code)
 		_clearPendingIfPrefetch()
 		_processQueue()
 		return
 
+	_failStreak = 0
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not (parsed is Dictionary):
 		print("LLMManager: JSON parse failed")
@@ -1838,6 +1874,7 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 ## which left `busy` stuck and silenced the whole queue for 5+ minutes.
 func _onWatchdogTimeout() -> void:
 	print("LLMManager: watchdog - a request seems stuck, resetting the queue")
+	_noteFailure(-1)
 	busy = false
 	_clearPendingIfPrefetch()
 	_processQueue()

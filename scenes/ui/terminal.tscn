@@ -440,9 +440,9 @@ theme_override_constants/separation = 0
 
 [node name="FPSIdle" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer/HBoxContainer" unique_id=1765739864 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Макс. FPS в простое"
+label = "Макс. FPS в простое (по умолчанию 30)"
 key = "maxFPSIdle"
-defaultValue = 60.0
+defaultValue = 30.0
 sliderMinimum = 30.0
 sliderMaximum = 144.0
 sliderStep = 1.0

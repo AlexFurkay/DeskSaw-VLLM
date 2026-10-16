@@ -55,9 +55,39 @@ public partial class ScreenCapture : Node // Autoloaded
         public uint bmiColors; // unused at 32bpp, kept for struct layout
     }
 
+    // 054.992: снимок в фоновом потоке. Копирование экрана 4K (33 МБ),
+    // уменьшение и PNG шли в главном потоке игры; когда видеокарта занята
+    // (Ollama + прозрачное окно на весь экран + голосовой Discord), копирование
+    // экрана у Windows ждёт видеокарту секундами - и игра "Не отвечает".
+    // GDScript: ScreenCapture.CaptureAsync(); var png = await ScreenCapture.ScreenshotReady
+    [Signal] public delegate void ScreenshotReadyEventHandler(byte[] png);
+    private bool _capturing = false;
+
+    public bool CaptureAsync()
+    {
+        if (_capturing)
+            return false; // прошлый снимок ещё не готов
+        _capturing = true;
+        Vector2I size = DisplayServer.ScreenGetSize(0); // DisplayServer - только из главного потока
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            byte[] png = Array.Empty<byte>();
+            try { png = CaptureAt(size.X, size.Y); }
+            catch (Exception e) { GD.PrintErr("ScreenCapture async failed: ", e.Message); }
+            Callable.From(() => { _capturing = false; EmitSignal(SignalName.ScreenshotReady, png); }).CallDeferred();
+        });
+        return true;
+    }
+
     // Callable from GDScript as: ScreenCapture.GetScreenshotPng()
     // Returns an empty array on failure (e.g. not running on Windows).
     public byte[] GetScreenshotPng()
+    {
+        Vector2I size = DisplayServer.ScreenGetSize(0);
+        return CaptureAt(size.X, size.Y);
+    }
+
+    private byte[] CaptureAt(int width, int height)
     {
         if (OS.GetName() != "Windows")
         {
@@ -71,9 +101,6 @@ public partial class ScreenCapture : Node // Autoloaded
 
         try
         {
-            Vector2I size = DisplayServer.ScreenGetSize(0);
-            int width = size.X;
-            int height = size.Y;
             if (width <= 0 || height <= 0)
                 return Array.Empty<byte>();
 
