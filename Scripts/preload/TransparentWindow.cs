@@ -70,8 +70,9 @@ public partial class TransparentWindow : Node
 	// нужна модели (замер со стримом Discord: игра + dwm брали до 30-90% GPU).
 	// Ответ длится секунды, потом снова полный FPS. При взаимодействии не трогаем.
 	private bool _aiBusy;
-	private const int AiBusyIdleFps = 30;
-	private int IdleFps() => _aiBusy ? Math.Min(_maxFPSIdle, AiBusyIdleFps) : _maxFPSIdle;
+	private const int AiBusyIdleFps = 25; // 054.994: 25 - "чтобы наверняка"
+	private bool _aiFpsSave = true; // настройка aiFpsSave (галочка в Настройки - Общее)
+	private int IdleFps() => (_aiBusy && _aiFpsSave) ? Math.Min(_maxFPSIdle, AiBusyIdleFps) : _maxFPSIdle;
 
 	public void SetAiBusy(bool busy)
 	{
@@ -213,6 +214,7 @@ public partial class TransparentWindow : Node
 		}
 		_maxFPSIdle = (int)gbData.Call("GetSetting", "maxFPSIdle", 60);
 		_maxFPSInteract = (int)gbData.Call("GetSetting", "maxFPSInteract", 60);
+		_aiFpsSave = (bool)gbData.Call("GetSetting", "aiFpsSave", true);
 		// GD.Print($"{_maxFPSIdle} : {_maxFPSInteract}");
 		Engine.MaxFps = _lastClickthroughState ? IdleFps() : _maxFPSInteract;
 	}

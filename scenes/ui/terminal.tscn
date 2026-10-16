@@ -440,7 +440,7 @@ theme_override_constants/separation = 0
 
 [node name="FPSIdle" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer/HBoxContainer" unique_id=1765739864 instance=ExtResource("9_r80vr")]
 layout_mode = 2
-label = "Макс. FPS в простое (по умолчанию 60, пока ИИ отвечает - не выше 30)"
+label = "Макс. FPS в простое (по умолчанию 60)"
 key = "maxFPSIdle"
 defaultValue = 60.0
 sliderMinimum = 30.0
@@ -462,6 +462,12 @@ valueType = "int"
 layout_mode = 2
 label = "Сохранять персонажей между запусками"
 key = "expiePersistence"
+defaultValue = true
+
+[node name="AiFpsSave" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967699 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Снижать FPS до 25, пока ИИ отвечает (помогает при стримах и играх)"
+key = "aiFpsSave"
 defaultValue = true
 
 [node name="UpdateNotif" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967685 instance=ExtResource("5_hils5")]

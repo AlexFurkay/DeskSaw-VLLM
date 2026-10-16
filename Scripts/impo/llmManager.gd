@@ -941,6 +941,10 @@ func aboutCharacter(skinName: String, withGender: bool = true) -> String:
 	return shown
 
 
+## 054.994: Рыжик "вспомнил", как человек учил его есть из чашки, и потом
+## сам цеплялся за эту выдумку в следующих ответах.
+const NO_FAKE_MEMORIES := "\nНе придумывай общих воспоминаний и событий, которых нет в разговоре выше и в описании тебя."
+
 ## Поводы для разговора двух персонажей (один выбирается случайно).
 const PET_TOPICS := [
 	"то, чем сейчас занят человек за компьютером - пожалуйся, похвали или пошути об этом.",
@@ -982,6 +986,7 @@ func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, cal
 	if otherState != "":
 		prompt += "\nСостояние собеседника: " + otherState.strip_edges() + "."
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого, а не с беззаботной болтовни."
+	prompt += NO_FAKE_MEMORIES
 	prompt += "\nТвоя реплика (только сама реплика):"
 	_enqueue(prompt, [], callback, tag)
 
@@ -1013,6 +1018,7 @@ func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String,
 	if playerState != "":
 		prompt += "\nСостояние его персонажа: " + playerState.strip_edges() + "."
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого."
+	prompt += NO_FAKE_MEMORIES
 	prompt += "\nТвоя реплика (только сама реплика):"
 	_enqueue(prompt, [], callback, tag)
 
@@ -1077,6 +1083,7 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 		prompt += "\nРазговор (последние реплики, внизу - самая новая):\n" + "\n".join(lines)
 		var last: Dictionary = chatHistory[chatHistory.size() - 1]
 		prompt += "\nТолько что %s сказал тебе: \"%s\". Ответь ИМЕННО на это - на его вопрос или слова, а не на что-то своё." % [speaker, String(last.get("text", ""))]
+	prompt += NO_FAKE_MEMORIES
 	prompt += "\nТвой ответ (только сама реплика):"
 
 	# в разговоре чуть "смелее" обычного - живее и разнообразнее
