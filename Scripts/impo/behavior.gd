@@ -133,11 +133,39 @@ var _saidReallySleepy := false
 ## молчит (см. guard в _say()) и держит закрытые глаза, пока пользователь
 ## сам не перезапустит игру. Это НЕ откатывается автоматическим
 ## восстановлением здоровья - решение однозначно постоянное на сессию.
-func goUnconscious() -> void:
+## 054.991: последние слова (0 здоровья, передозировка) - сразу на экран,
+## мимо очереди и без ожидания ИИ. Тестер не слышал фразы при передозировке:
+## путь через очередь и ИИ-пул зависел от того, успел ли пул создаться и
+## что в этот момент печаталось. Сначала готовая ИИ-фраза из пула, иначе - из
+## файла (lastmoments, у передозировки своих фраз в файле нет).
+func _sayFinal(category: String) -> void:
+	if isPlayer:
+		category = "lastmoments"
+	var line := ""
+	var poolKey := _skinTag() + ":" + category
+	var pool: Array = LLMManager._prefetchPools.get(poolKey, [])
+	if not isPlayer and not pool.is_empty():
+		line = String(pool.pop_front())
+		LLMManager._prefetchPools[poolKey] = pool
+	if line == "":
+		var fromFile: Array = dialogueSys.data.get(CATEGORY_EXAMPLES_FROM.get(category, category), [])
+		if fromFile.is_empty():
+			return
+		line = String(fromFile.pick_random())
+	_messageQueue.clear()
+	_urgentInQueue = 0
+	var processed := _applyStupid(line)
+	_recordSpoken(processed[0])
+	dialogueSys.setDia(processed[0], dialogueSys.speedMod + processed[1], 2.0, true)
+
+
+## waitFinalLine - ждать ли ещё одну последнюю фразу от ИИ (если она уже
+## показана через _sayFinal - не ждём, иначе после неё проскочила бы ещё одна).
+func goUnconscious(waitFinalLine: bool = true) -> void:
 	if isUnconscious:
 		return
 	isUnconscious = true
-	_finalLinePending = true
+	_finalLinePending = waitFinalLine
 	faceSys.setEmotion("sleep") # уже готовое состояние с закрытыми глазами, ничего рисовать не нужно
 	if not ragdolled:
 		# При 0 ХП от удара персонаж и так уже лежит, а при передозировке он
@@ -832,8 +860,8 @@ func takeFentanyl() -> void:
 
 	if _dosesInRow >= OVERDOSE_DOSES:
 		dialogueSys.speedMod = 0.8
-		_say("overdose")
-		goUnconscious()
+		_sayFinal("overdose")
+		goUnconscious(false)
 		return
 
 	# чем сильнее зависимость, тем слабее эффект (толерантность)
@@ -1528,8 +1556,8 @@ func _woundTier(hp: float) -> int:
 const WOUND_FOCUS := [
 	"",
 	"У тебя лёгкие ушибы и царапины - можешь мимоходом упомянуть, что немного побаливает.",
-	"Ты {ранена|ранен}, тебе больно и плохо - скажи о своём самочувствии.",
-	"У тебя тяжёлые раны, ты лежишь и не можешь встать, тебе очень плохо и страшно - скажи именно об этом, коротко и тяжело.",
+	"Ты {ранена|ранен}, тебе больно и плохо - скажи о своём самочувствии или попроси человека помочь (бинт, аптечка), в своём характере.",
+	"У тебя тяжёлые раны, ты лежишь и не можешь встать, сама по себе рана не заживёт - тебе очень плохо и страшно. Скажи об этом коротко и тяжело: пожалуйся, или попроси человека помочь, или прямо скажи, что без его помощи не встанешь.",
 ]
 
 
@@ -1619,7 +1647,6 @@ const CATEGORY_SITUATION := {
 	"LightDamage": "Тебе только что было немного больно - лёгкий удар или падение, не критично, но неприятно.",
 	"MediumDamage": "Тебе только что было по-настоящему больно - серьёзный удар или падение.",
 	"HardDamage": "Тебе только что было ОЧЕНЬ больно - тяжёлый удар, здоровье на исходе, это серьёзно и страшно.",
-	"lastmoments": "Твоё здоровье равно нулю. Это твоя последняя короткая фраза, драматичная или слегка пафосная, перед тем как ты навсегда потеряешь сознание.",
 	"healed": "Тебе только что помогли вылечиться, тебе физически стало лучше, но ты всё ещё в невесёлом настроении.",
 	"fentanyl": "Тебе только что вкололи фентанил. Накрывает тёплой волной - боль и тревога уходят, всё плывёт, тебе слишком хорошо.",
 	"withdrawal": "У тебя ломка - давно не было фентанила. Тебя знобит, всё ломит, ты {раздражена|раздражён} и тебе очень плохо, ты хочешь ещё дозу и просишь человека дать её тебе.",

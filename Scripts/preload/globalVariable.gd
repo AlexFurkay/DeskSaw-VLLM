@@ -3,7 +3,7 @@ extends Node
 #i probably shouldve put these here earlier but better late than never
 
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
-const BUILD := "054.99Pru"
+const BUILD := "054.991Pru"
 
 var pop = preload("res://scenes/ui/popup.tscn")
 #ill fix the scripts that redefine these when it bothers me enough

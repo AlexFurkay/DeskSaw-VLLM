@@ -28,6 +28,21 @@ func loadFromSave(id: String) -> void:
 ## Health slowly regenerates on its own - placeholder rate, balance TBD.
 ## Light injuries (below HURT_THRESHOLD damage) heal back over time this way
 ## without needing an item.
+## 054.991: тяжело раненый сам не выздоравливает - ноет и просит помощи,
+## пока человек его не подлечит. Раньше +0.6 каждые 10 с при любом здоровье:
+## персонаж ниже 20 вставал сам через минуту-три, и раны почти не ощущались.
+const REGEN_BASE := 0.6          # было за 10 с
+const REGEN_OFF_BELOW := 15.0     # ниже - не восстанавливается совсем
+const REGEN_SLOW_BELOW := 30.0    # 15-30 - в 2 раза медленнее, выше 30 - в 1.5 раза
+
+func _regenPerTick(hp: float) -> float:
+	if hp < REGEN_OFF_BELOW:
+		return 0.0
+	if hp < REGEN_SLOW_BELOW:
+		return REGEN_BASE / 2.0
+	return REGEN_BASE / 1.5
+
+
 func _regenLoop() -> void:
 	while true:
 		await get_tree().create_timer(10.0).timeout
@@ -36,7 +51,10 @@ func _regenLoop() -> void:
 		if get_parent().isUnconscious:
 			continue # без сознания (0 ХП или передозировка) - само не лечится, это до перезапуска
 		if health < maxhealth:
-			health = clamp(health + 0.6, minhealth, maxhealth)
+			var gain := _regenPerTick(health)
+			if gain <= 0.0:
+				continue
+			health = clamp(health + gain, minhealth, maxhealth)
 			pet.health = health
 			get_parent()._applyInjuryLook()
 
@@ -102,8 +120,8 @@ func applyDamage(amount: float) -> void:
 		# проверка isUnconscious идёт только один раз, в самом начале), так
 		# что этот конкретный запрос успевает уйти и потом отобразиться,
 		# а вот все последующие вызовы _say уже блокируются.
-		get_parent()._say("lastmoments")
-		get_parent().goUnconscious()
+		get_parent()._sayFinal("lastmoments") # 054.991: сразу на экран, мимо очереди
+		get_parent().goUnconscious(false)
 		return
 
 	if amount >= HARD_DAMAGE_THRESHOLD:
