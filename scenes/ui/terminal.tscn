@@ -306,7 +306,7 @@ key = "mute"
 
 [node name="SilenceSoft" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1248303193 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Отключить фоновую речь (говорит только в ответ на действия)"
+label = "Отключить фоновую речь (фразы о состоянии, разговоры персов, комментарии к предметам)"
 key = "mutePassive"
 
 [node name="MinDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227112 instance=ExtResource("12_qw8t2")]

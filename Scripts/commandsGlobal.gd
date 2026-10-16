@@ -358,31 +358,46 @@ const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "ministral-3:14b"]
 
 func _cmd_aiModel(name: String = "") -> void:
 	if name != "":
-		_switchModel(name)
+		_downloadAndSwitch(name)
 		return
 	Console.print("Спрашиваю у Ollama список моделей...")
 	LLMManager.fetchModels(_showModelMenu)
 
 
+## 054.996: у каждой модели спрашиваем у Ollama, подходит ли она (зрение и
+## без режима размышлений - обязательные условия), и только потом показываем меню.
 func _showModelMenu(names: Array, ok: bool) -> void:
 	if not ok:
 		Console.print("[color=RED]Ollama не ответила - проверь, что она запущена (значок в трее).[/color]")
 		return
+	var problems := {}
+	for n in names:
+		problems[n] = await _checkModelAsync(String(n))
 	Console.print("[color=ORANGE]Чтобы выбрать модель, введи её цифру и нажми Enter[/color]")
 	Console.print("[color=ORANGE]Чтобы скачать новую модель, напиши её имя и нажми Enter[/color]")
+	Console.print("[color=ORANGE]Игре подходят только модели со зрением (vision) и без режима размышлений (thinking)[/color]")
 	Console.print("Скачанные модели (сейчас: [color=CYAN]%s[/color]):" % LLMManager.modelName)
 	Console.print("0. выход")
 	for i in names.size():
-		Console.print("%d. %s%s" % [i + 1, names[i], "  <- сейчас" if names[i] == LLMManager.modelName else ""])
+		var p: String = problems[names[i]]
+		Console.print("%d. %s%s%s" % [i + 1, names[i], "  <- сейчас" if names[i] == LLMManager.modelName else "", ("  [color=RED](не подходит: %s)[/color]" % p) if p != "" else ""])
 	if names.is_empty():
 		Console.print("(пока ни одной)")
 	var missing: Array = RECOMMENDED_MODELS.filter(func(m): return not names.has(m))
 	if not missing.is_empty():
 		Console.print("Можно скачать (подходят игре): [color=CYAN]%s[/color]" % ", ".join(missing))
-	Console.pending_input = _modelMenuAnswer.bind(names)
+	Console.pending_input = _modelMenuAnswer.bind(names, problems)
 
 
-func _modelMenuAnswer(answer: String, names: Array) -> void:
+func _checkModelAsync(name: String) -> String:
+	var result := [null]
+	LLMManager.checkModel(name, func(p: String): result[0] = p)
+	while result[0] == null:
+		await get_tree().process_frame
+	return result[0]
+
+
+func _modelMenuAnswer(answer: String, names: Array, problems: Dictionary) -> void:
 	if answer == "0":
 		Console.print("Выход из выбора модели.")
 		return
@@ -391,17 +406,35 @@ func _modelMenuAnswer(answer: String, names: Array) -> void:
 		if i < 0 or i >= names.size():
 			Console.print("[color=ORANGE]Нет модели под номером %s - введи ai_model ещё раз.[/color]" % answer)
 			return
-		_switchModel(String(names[i]))
+		var p: String = problems.get(names[i], "")
+		if p != "":
+			Console.print("[color=RED]%s не подойдёт: %s. Игре нужна модель со зрением и без режима размышлений.[/color]" % [names[i], p])
+			return
+		_switchModel(String(names[i]), false) # уже скачана
 		return
 	if Console.has_command(answer.split(" ", false)[0]):
 		Console.print("Выход из выбора модели.")
 		Console.execute(answer)
 		return
-	_switchModel(answer) # имя новой модели - скачается, если её ещё нет
+	_downloadAndSwitch(answer)
 
 
-func _switchModel(name: String) -> void:
-	LLMManager.setModel(name)
+## Новая модель по имени: скачать -> проверить -> переключиться, только если
+## подходит (раньше игра переключалась сразу, даже на неподходящую).
+func _downloadAndSwitch(name: String) -> void:
+	Console.print("[color=ORANGE]Напоминание: модель должна уметь видеть картинки (vision) и быть без режима размышлений (thinking).[/color]")
+	LLMManager.pullModel(name, func(downloaded: bool):
+		if not downloaded:
+			return # pullModel уже написал, что не так
+		LLMManager.checkModel(name, func(p: String):
+			if p != "":
+				Console.print("[color=RED]%s скачана, но не подойдёт: %s. Модель не переключена (сейчас: %s).[/color]" % [name, p, LLMManager.modelName])
+			else:
+				_switchModel(name, false)))
+
+
+func _switchModel(name: String, pull: bool = true) -> void:
+	LLMManager.setModel(name, pull)
 	Console.print("Модель переключена на: [color=CYAN]%s[/color]" % name)
 
 func _cmd_banwords(w1: String = "", w2: String = "", w3: String = "", w4: String = "") -> void:

@@ -3,7 +3,7 @@ extends Node
 #i probably shouldve put these here earlier but better late than never
 
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
-const BUILD := "054.995Pru"
+const BUILD := "054.996Pru"
 
 ## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
 ## видеть, что персонажи говорили, - фраза над головой быстро исчезает).
@@ -11,8 +11,30 @@ signal phraseLogged(line: String)
 const PHRASE_LOG_MAX := 200
 var phraseLog: Array[String] = []
 
-func logPhrase(who: String, text: String) -> void:
-	var line := "[color=gray]%s[/color]  [color=cyan]%s[/color]: %s" % [Time.get_time_string_from_system().substr(0, 5), who, text]
+## Цвет строки во вкладке «Фразы»: цвет персонажа наполовину смешан с белым
+## (054.996, по просьбе пользователя) - текст остаётся читаемым. Только в
+## консоли, над головой фразы по-прежнему белые.
+const PHRASE_COLORS := {
+	"Dune": Color(1.0, 0.85, 0.0),       # жёлтый
+	"Expie": Color(0.85, 0.4, 0.0),      # тёмно-оранжевый
+	"Leapy": Color(0.1, 0.8, 0.1),       # зелёный
+	"Milky": Color(1.0, 1.0, 1.0),       # белый
+	"Orange": Color(1.0, 0.6, 0.0),      # оранжевый
+	"Roza": Color(0.3, 0.75, 1.0),       # голубой
+	"Velvet": Color(1.0, 0.1, 0.1),      # красный
+	"VoyagerAlt": Color(0.6, 0.0, 1.0),  # фиолетовый (с белым - розоватый)
+}
+const PHRASE_PLAYER_COLOR := Color(0.72, 0.72, 0.72) # белый, но темнее Milky
+
+func _phraseColorHex(skin: String, isPlayer: bool) -> String:
+	if isPlayer:
+		return PHRASE_PLAYER_COLOR.to_html(false)
+	var base: Color = PHRASE_COLORS.get(skin, Color(0.6, 0.85, 1.0))
+	return Color.WHITE.lerp(base, 0.5).to_html(false)
+
+func logPhrase(who: String, text: String, skin: String = "", isPlayer: bool = false) -> void:
+	var col := _phraseColorHex(skin, isPlayer)
+	var line := "[color=gray]%s[/color]  [color=#%s]%s: %s[/color]" % [Time.get_time_string_from_system().substr(0, 5), col, who, text]
 	phraseLog.append(line)
 	while phraseLog.size() > PHRASE_LOG_MAX:
 		phraseLog.pop_front()

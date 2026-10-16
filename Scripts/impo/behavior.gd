@@ -427,7 +427,7 @@ func _recordSpoken(text: String) -> void:
 	if clean == "":
 		return
 	# во вкладку «Фразы» - все, включая реплики перса-игрока
-	GlobalVariable.logPhrase(PlayerManager.displayNameFor(_skinTag()) + (" (ты)" if isPlayer else ""), clean)
+	GlobalVariable.logPhrase(PlayerManager.displayNameFor(_skinTag()) + (" (ты)" if isPlayer else ""), clean, _skinTag(), isPlayer)
 	if isPlayer:
 		return
 	_spokenLog.append({"t": Time.get_ticks_msec(), "text": clean})

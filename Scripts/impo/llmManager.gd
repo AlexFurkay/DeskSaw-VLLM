@@ -1972,6 +1972,33 @@ func setRepetitionGuard(value: float) -> void:
 ## pulled locally via Ollama's own /api/tags - separate small HTTPRequest so
 ## it doesn't interfere with the main dialogue queue. Prints asynchronously,
 ## so this line can land slightly after the rest of aiStatus's output.
+## 054.996: подходит ли модель игре. Обязательно (проверено пользователем
+## многократно): зрение (vision - реакции на экран) и без режима размышлений
+## (thinking - модель "думает вслух", ответы медленные и ломают фразы).
+## callback(problem: String) - пустая строка, если подходит; иначе - почему нет.
+func checkModel(name: String, callback: Callable) -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.timeout = 15.0
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		http.queue_free()
+		if response_code != 200:
+			callback.call("Ollama не знает такую модель (код %d)" % response_code)
+			return
+		var parsed = JSON.parse_string(body.get_string_from_utf8())
+		var caps: Array = parsed.get("capabilities", []) if parsed is Dictionary else []
+		var problems: Array = []
+		if not caps.has("vision"):
+			problems.append("не умеет видеть картинки (нет vision)")
+		if caps.has("thinking"):
+			problems.append("с режимом размышлений (thinking)")
+		callback.call(", ".join(problems))
+	)
+	if http.request("http://127.0.0.1:11434/api/show", ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"model": name})) != OK:
+		http.queue_free()
+		callback.call("не удалось спросить Ollama")
+
+
 ## 054.995: список скачанных моделей для меню ai_model.
 ## callback(names: Array, ok: bool) - ok=false, если Ollama не ответила.
 func fetchModels(callback: Callable) -> void:
@@ -2029,7 +2056,7 @@ const MODEL_PRESETS := {
 	"ministral-3:14b": [0.5, 1.1], # 054.99: было 0.6 - тест: 0.6 путала род, 0.45-0.5 точнее отвечает на вопрос
 }
 
-func setModel(name: String) -> void:
+func setModel(name: String, pull: bool = true) -> void:
 	name = name.strip_edges() # в конфиге уже находили "ministral-3:14b\n"
 	modelName = name
 	gbData.settings["llmModelName"] = modelName
@@ -2045,7 +2072,8 @@ func setModel(name: String) -> void:
 	# на другую (например для более живых screen-реакций) и НЕ терять уже
 	# прогретое - остальные пулы просто будут тихо дозаполняться новой
 	# моделью по мере естественного расхода, без принудительного сброса.
-	pullModel(name)
+	if pull:
+		pullModel(name)
 
 
 ## Console command: aiModel triggers this automatically. Calls Ollama's own
@@ -2054,7 +2082,7 @@ func setModel(name: String) -> void:
 ## connection open until the whole model is downloaded, then replies once.
 ## For a large model this can take a long time; there's no progress bar,
 ## just a final success/failure line in the console.
-func pullModel(name: String) -> void:
+func pullModel(name: String, onDone: Callable = Callable()) -> void:
 	var pullHttp := HTTPRequest.new()
 	Engine.get_main_loop().root.add_child(pullHttp)
 	Console.print("Скачиваю модель [color=CYAN]%s[/color] через Ollama, если её ещё нет - подожди, для больших моделей это может занять долго..." % name)
@@ -2068,6 +2096,8 @@ func pullModel(name: String) -> void:
 		else:
 			Console.print("Не получилось скачать модель [color=CYAN]%s[/color] (код ответа %d) - проверь, запущена ли Ollama, и правильно ли написано имя модели." % [name, response_code])
 		pullHttp.queue_free()
+		if onDone.is_valid():
+			onDone.call(response_code == 200)
 	)
 	var payload := {"name": name, "stream": false}
 	var headers := ["Content-Type: application/json"]
