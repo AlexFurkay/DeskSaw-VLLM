@@ -17,7 +17,7 @@ func loadFromSave(id: String) -> void:
 func sleepCheck():
 		if gbData.settings.get("sleepEnabled", true):
 			#await get_tree().create_timer(5).timeout
-			print(str(tiredness) + " tiredness")
+			pass # print(tiredness) - отладка, убрано (054.99)
 			tiredness = snappedf(tiredness, 0.01)
 			tiredness = clamp(tiredness, mintired, maxtired)
 			pet.tired = tiredness

@@ -136,6 +136,12 @@ public partial class TransparentWindow : Node
 		}
 	}
 
+	/// 054.99: память процесса в МБ для diagnostics.txt (OS.get_static_memory_usage в релизе всегда 0)
+	public long GetProcessMemoryMB()
+	{
+		return System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / 1048576;
+	}
+
 	public bool UsesInputRegions()
 	{
 		return _isX11 && _xShapeAvailable;

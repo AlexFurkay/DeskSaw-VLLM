@@ -53,6 +53,16 @@ const PREFETCH_TARGET := 8 # 054.96: -20% (было 10), генерация шл
 ## целиком помещается в 8 ГБ видеопамяти (5.67 ГБ против 5.51 при 4096),
 ## 8192 уже вылезает в обычную память и тормозит (замер 2026-10-15, GTX 1070 Ti).
 const NUM_CTX := 6144
+## 054.99: окно под модель. ministral-3 тратит на русский текст в ~1.5 раза
+## больше токенов (лор Voyager: 1455 против 951 у qwen) - с окном 6144 чат и
+## экран переполнялись, Ollama отрезала начало промпта (правила и лор), и
+## модель "дуркала". Неизвестным моделям - 8192 с запасом.
+const NUM_CTX_BY_MODEL := {
+	"qwen3-vl:8b-instruct": 6144,
+	"ministral-3:14b": 9216,
+}
+func numCtx() -> int:
+	return int(NUM_CTX_BY_MODEL.get(modelName, 8192))
 const PREFETCH_REFILL_AT := 3
 
 ## Категории, которые игрок трогает чаще всего - генерируем для них батч
@@ -973,6 +983,37 @@ func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, cal
 	_enqueue(prompt, [], callback, tag)
 
 
+## 054.99: ИИ-персонаж сам заговаривает с персом-игроком (человеком в теле
+## персонажа). Реплика идёт в его память разговора с игроком - на неё можно
+## ответить через Enter.
+func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var tag := skinTag + ":chat"
+	var myName: String = PlayerManager.displayNameFor(skinTag)
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\nРядом с тобой стоит %s - персонаж, которым управляет твой человек. Заговори с ним первым, коротко и в своём характере." % aboutCharacter(playerSkin, false)
+	var rel := relationTo(skinTag, playerSkin)
+	if rel != "" and rel != "своя" and rel != "свой":
+		prompt += " К его виду ты обычно относишься так: " + rel + ", но внутри - твой человек, и к нему ты относишься так, как сказано о человеке выше."
+	if isFemale(playerSkin):
+		prompt += " Он сейчас в женском облике - обращайся в женском роде; изредка можешь по-доброму обыграть, что внутри твой человек-парень."
+	if history.size() > 0:
+		var lines: Array = []
+		for e in history:
+			var who := String(e.get("who", ""))
+			lines.append(("Ты" if who == myName else who) + ": " + String(e.get("text", "")))
+		prompt += "\nВаш прошлый разговор (внизу - самое недавнее):\n" + "\n".join(lines)
+		prompt += "\nМожешь вернуться к нему или начать новую тему, но не повторяй уже сказанное."
+	prompt += "\nПовод заговорить: " + PET_TOPICS[randi() % PET_TOPICS.size()]
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	if playerState != "":
+		prompt += "\nСостояние его персонажа: " + playerState.strip_edges() + "."
+	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого."
+	prompt += "\nТвоя реплика (только сама реплика):"
+	_enqueue(prompt, [], callback, tag)
+
+
 ## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
 ## playerSkin - скин перса-игрока; speakerState - здоровье/настроение собеседника.
 func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> void:
@@ -1103,7 +1144,25 @@ func _filterExamplesForProfanity(lines: Array) -> Array:
 	return filtered
 
 
-func requestStateReaction(statLine: String, exampleLines: Array, callback: Callable, tag: String = "state") -> void:
+## 054.99: о чём фоновая фраза на этот раз. Без темы модель раз за разом
+## говорила про экран ("Этот экран - как...", "свет режет глаза").
+const STATE_TOPICS := [
+	"как ты себя чувствуешь телом прямо сейчас.",
+	"еда - чего хочется или что вспоминается.",
+	"сон и усталость.",
+	"человек за компьютером - что ты о нём думаешь или чего от него хочешь.",
+	"что-то из твоего прошлого, о чём говорится в описании тебя.",
+	"чем бы тебе сейчас хотелось заняться.",
+	"твоё настроение - честно, одной мыслью.",
+	"какая-то мелочь вокруг тебя на рабочем столе (не экран целиком).",
+	"твой вид и твоя внешность.",
+	"скука или, наоборот, что тебе сейчас нравится.",
+]
+var _lastStateTopic := -1
+
+## woundFocus - если ранен, просьба говорить о самочувствии (behavior решает,
+## насколько часто, по здоровью); тогда тема не выбирается.
+func requestStateReaction(statLine: String, exampleLines: Array, callback: Callable, tag: String = "state", woundFocus: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 
@@ -1111,6 +1170,14 @@ func requestStateReaction(statLine: String, exampleLines: Array, callback: Calla
 
 	var prompt := _buildBasePrompt(tag)
 	prompt += "\nТвоё текущее состояние: " + statLine + "."
+	if woundFocus != "":
+		prompt += "\n" + woundFocus
+	else:
+		var idx := randi() % STATE_TOPICS.size()
+		if idx == _lastStateTopic:
+			idx = (idx + 1) % STATE_TOPICS.size()
+		_lastStateTopic = idx
+		prompt += "\nО чём сказать на этот раз: " + STATE_TOPICS[idx] + " Не говори про экран, свет или окна, если тема не про них."
 	if exampleLines.size() > 0:
 		prompt += "\nПримеры того, как ты обычно говоришь в таком состоянии (не копируй дословно, ориентируйся только на стиль и настроение):\n- " + "\n- ".join(exampleLines)
 	prompt += "\nПридумай одну НОВУЮ короткую фразу в этом же духе. Сохраняй характер и примерную длину примеров."
@@ -1554,7 +1621,7 @@ func _processQueue() -> void:
 			"repeat_penalty": repetitionGuard,
 			"temperature": float(job.get("temperature", creativity)), # повтор ответа в чате идёт чуть "смелее"
 			"num_predict": predictBudget,
-			"num_ctx": NUM_CTX
+			"num_ctx": numCtx()
 		}
 	}
 	# Ollama's own multimodal models are picky about an empty "images" key -
@@ -1604,7 +1671,7 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 	# Сколько токенов занял промпт: если он упрётся в NUM_CTX, Ollama молча
 	# отрежет НАЧАЛО (правила и лор) - в логе это видно как CONTEXT_FULL.
 	var promptTokens: int = int(parsed.get("prompt_eval_count", 0))
-	_logDebugLine(_currentTag, "TOKENS", "prompt=%d answer=%d of %d%s" % [promptTokens, int(parsed.get("eval_count", 0)), NUM_CTX, "  CONTEXT_FULL" if promptTokens >= NUM_CTX - 300 else ""])
+	_logDebugLine(_currentTag, "TOKENS", "prompt=%d answer=%d of %d%s" % [promptTokens, int(parsed.get("eval_count", 0)), numCtx(), "  CONTEXT_FULL" if promptTokens >= numCtx() - 300 else ""])
 
 	var text: String = ""
 	if parsed.has("response") and String(parsed["response"]).strip_edges() != "":
@@ -1880,7 +1947,7 @@ func listAvailableModels() -> void:
 ## Для модели не из списка текущие значения не трогаем.
 const MODEL_PRESETS := {
 	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
-	"ministral-3:14b": [0.6, 1.1],
+	"ministral-3:14b": [0.5, 1.1], # 054.99: было 0.6 - тест: 0.6 путала род, 0.45-0.5 точнее отвечает на вопрос
 }
 
 func setModel(name: String) -> void:

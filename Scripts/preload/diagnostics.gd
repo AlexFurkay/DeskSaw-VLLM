@@ -88,7 +88,7 @@ func _appendStatus() -> void:
 		pets.append("%s%s hp%d" % [p._skinTag(), "(игрок)" if p.isPlayer else "", int(p.healthHandler.health)])
 	f.store_line("[%s] %d мин | FPS %d | память %d МБ | узлов %d | очередь ИИ %d+%d | фраз в пулах %d | %s" % [
 		Time.get_time_string_from_system(), (Time.get_ticks_msec() - _startMsec) / 60000,
-		Performance.get_monitor(Performance.TIME_FPS), OS.get_static_memory_usage() / 1048576,
+		Performance.get_monitor(Performance.TIME_FPS), int(TransparentWindow.call("GetProcessMemoryMB")),
 		Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
 		LLMManager._queue.size(), LLMManager._backgroundQueue.size(), _poolLines(), ", ".join(pets)])
 	f.close()

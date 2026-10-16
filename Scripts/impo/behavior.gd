@@ -92,6 +92,8 @@ var _forcedSleep := false # сон автопилота: не просыпает
 var _autopilotSleepAt := 0 # когда автопилот уложит игрока спать (3-5 мин без управления)
 const PLAYER_MOOD := 50.0 # у игрока настроение не считается
 const CRITICAL_HEALTH_THRESHOLD := 20.0 # ниже этого - не может встать, но остаётся в сознании и говорит
+const LANDING_GRACE_MS := 1200 # после вставания приземление тела не считается ударом
+var _landingGraceUntil := 0
 
 ## Сила удара = насколько резко изменилась скорость тела за один кадр
 ## физики (пикс/сек). Меряется в момент столкновения, а не в момент
@@ -372,8 +374,8 @@ func _applyStupid(text: String) -> Array:
 ## Общая память разговора: что персонаж сам сказал вслух (экран, состояние,
 ## предметы...) за последнее время. Её видит чат с персом-игроком - можно
 ## спросить "почему ты так сказала?" про экранную реплику пятиминутной давности.
-const SPOKEN_LOG_SIZE := 20
-const SPOKEN_LOG_MAX_AGE_MS := 2700000 # 45 минут
+const SPOKEN_LOG_SIZE := 30 # 054.99: было 20
+const SPOKEN_LOG_MAX_AGE_MS := 3600000 # 60 минут (было 45)
 var _spokenLog: Array = [] # [{"t": msec, "text": реплика}]
 
 func _recordSpoken(text: String) -> void:
@@ -608,7 +610,7 @@ func _physics_process(_delta: float) -> void:
 			var hit := (_prevBodyVel - bodyVel).length()
 			# рывок вверх от собственного прыжка (прыжок срабатывает в момент
 			# касания пола, скорость "вниз" сразу становится "вверх") - не удар
-			if Time.get_ticks_msec() - moveSys.lastJumpMsec < 150:
+			if Time.get_ticks_msec() - moveSys.lastJumpMsec < 150 or Time.get_ticks_msec() < _landingGraceUntil:
 				hit = 0.0
 			if hit >= IMPACT_LIGHT:
 				_bodyPrevValid = false
@@ -985,6 +987,13 @@ func petTalkLoop() -> void:
 		if Time.get_ticks_msec() < _nextPetTalkMsec:
 			continue
 		var other = _nearestTalkPartner()
+		# 054.99: перс-игрок рядом - иногда заговариваем с ним (тот же интервал)
+		var playerNear: Node = _playerNearForTalk()
+		if playerNear != null and (other == null or randf() < 0.5):
+			var playerTalkRange := petTalkRange()
+			_nextPetTalkMsec = Time.get_ticks_msec() + int(randf_range(playerTalkRange.x, playerTalkRange.y) * 1000.0)
+			_talkToPlayer(playerNear)
+			continue
 		if other == null:
 			continue
 		var talkRange := petTalkRange()
@@ -1029,6 +1038,34 @@ func _nearestTalkPartner() -> Node:
 		if moveSys.rigidtorso.global_position.distance_to(pet.moveSys.rigidtorso.global_position) < maxDist:
 			return pet
 	return null
+
+
+## Перс-игрок рядом и может слушать (не спит, не без сознания).
+func _playerNearForTalk() -> Node:
+	if not PlayerManager.hasPlayer():
+		return null
+	var p: Node = PlayerManager.player
+	if p == self or p.isUnconscious or p.isSleeping:
+		return null
+	var maxDist: float = PET_TALK_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
+	if moveSys.rigidtorso.global_position.distance_to(p.moveSys.rigidtorso.global_position) < maxDist:
+		return p
+	return null
+
+
+func _talkToPlayer(p: Node) -> void:
+	var key := String(petId)
+	var myName: String = PlayerManager.displayNameFor(_skinTag())
+	var history: Array = (PlayerManager.histories.get(key, []) as Array).duplicate()
+	var playerState: String = p._petStats() if is_instance_valid(p) else ""
+	LLMManager.requestPlayerOpener(_skinTag(), PlayerManager.playerSkin, _petStats() + _aiStateHint(), history, playerState, func(line: String):
+		if line.begins_with("<act:"):
+			line = line.substr(line.find(">") + 1)
+		if isUnconscious or isSleeping or not is_inside_tree():
+			return
+		_queueMessage(line, 1.0, true)
+		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+		PlayerManager._remember(key, myName, line)) # ответ через Enter увидит, с чего начали
 
 
 ## Стоит ли этот собеседник всё ещё рядом (для продолжения разговора).
@@ -1237,6 +1274,11 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 						dialogueSys.send(10, false)
 			#fix the weird ghost collision during ragdoll
 			continue
+		# 054.99: ниже CRITICAL_HEALTH_THRESHOLD - лежит в сознании, пока не
+		# подлечится. Раньше вставал и тут же оседал, а подъём тела засчитывался
+		# как удар: "упал" каждые 10-15 с и новый урон, здоровье не росло.
+		if not isUnconscious and healthHandler.health > 0.0 and healthHandler.health < CRITICAL_HEALTH_THRESHOLD:
+			continue
 		if moveSys.rigidtorso.linear_velocity.length() > 10.0:
 			continue
 		break
@@ -1255,6 +1297,9 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 	moveSys.rigid.global_position.x = moveSys.rigidtorso.global_position.x
 	moveSys.rigid.global_position.y = moveSys.rigidtorso.global_position.y
 	moveSys.ragdoll(true)
+	# тело только что поставили на высоту туловища - его опускание на пол не удар
+	_landingGraceUntil = Time.get_ticks_msec() + LANDING_GRACE_MS
+	_bodyPrevValid = false
 
 	ragdolled = false
 	await get_tree().create_timer(getUpTimerMsg).timeout
@@ -1416,9 +1461,11 @@ func passivetalk() -> void:
 
 			var diaTimerMaximum = float(GlobalVariable.getNumFromString(str(gbData.settings["maxDialogueTime"])))
 
-			print(diaTimerMinimum, "min")
-			print(diaTimerMaximum, "max")
-			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum))).timeout
+			# 054.99: чем сильнее ранен, тем чаще говорит (и чаще - о самочувствии)
+			var hp: float = healthHandler.health
+			var woundTier := _woundTier(hp)
+			var pace: float = [1.0, 0.8, 0.55, 0.35][woundTier]
+			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum)) * pace).timeout
 			if not beingDragged and not isSleeping and not shocked:
 				dialogueSys.pool = dialogueSys.data.get("Passive", [])
 				match currentEmotion:
@@ -1447,8 +1494,16 @@ func passivetalk() -> void:
 						statLine += ", у тебя ломка - тебе плохо без фентанила"
 					if not _worn.is_empty():
 						statLine += ", на тебе надето: " + _wornDescription()
+					# при ранах - чаще о самочувствии (а примеры - из грустных фраз)
+					var woundFocus := ""
+					woundTier = _woundTier(healthHandler.health)
+					if woundTier > 0 and randf() < [0.0, 0.35, 0.6, 0.85][woundTier]:
+						woundFocus = WOUND_FOCUS[woundTier]
+						var sadPool: Array = dialogueSys.data.get("VeryLowPassive" if woundTier == 3 else "LowPassive", [])
+						if not sadPool.is_empty():
+							dialogueSys.pool = sadPool
 					var examples: Array = _pickExamples(dialogueSys.pool.duplicate(), 10)
-					LLMManager.requestStateReaction(statLine, examples, _on_state_reaction, _skinTag() + ":state")
+					LLMManager.requestStateReaction(statLine, examples, _on_state_reaction, _skinTag() + ":state", woundFocus)
 				else:
 					dialogueSys.send()
 		else:
@@ -1458,6 +1513,24 @@ func _on_drag_reaction(text: String) -> void:
 	if isSleeping or isPlayer:
 		return
 	_queueMessage(text, 1.0, true)
+
+
+## 0 - цел (70+), 1 - лёгкие ушибы (45-70), 2 - ранен (20-45), 3 - тяжело (<20)
+func _woundTier(hp: float) -> int:
+	if hp < CRITICAL_HEALTH_THRESHOLD:
+		return 3
+	if hp < 45.0:
+		return 2
+	if hp < 70.0:
+		return 1
+	return 0
+
+const WOUND_FOCUS := [
+	"",
+	"У тебя лёгкие ушибы и царапины - можешь мимоходом упомянуть, что немного побаливает.",
+	"Ты {ранена|ранен}, тебе больно и плохо - скажи о своём самочувствии.",
+	"У тебя тяжёлые раны, ты лежишь и не можешь встать, тебе очень плохо и страшно - скажи именно об этом, коротко и тяжело.",
+]
 
 
 func _on_state_reaction(text: String) -> void:

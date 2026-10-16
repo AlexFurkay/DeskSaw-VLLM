@@ -107,7 +107,7 @@ func calcmood(total: float):
 	total -= clamp(((1.0 - (pet["hunger"] * 0.01)) * 1), 0.0, 1)
 	#trust
 	total -= clamp(((1.0 - (pet["tired"] * 0.01)) * 1), 0.0, 1)
-	print(str(clamp(((1.0 - (pet["tired"] * 0.01)) * 1), 0.0, 1)) + " 123123")
+	pass # print(str(clamp(((1.0 - (pet["tired"] * 0.01)) * 1), 0.0, 1)) + " 123123")
 	if pet["hunger"] >= 85.0:
 		total += 0.25
 	#clamp to user settings

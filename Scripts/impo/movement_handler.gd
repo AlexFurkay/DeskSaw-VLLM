@@ -134,7 +134,7 @@ func initswithc(state: states):
 			self.get_parent().wander = true
 			animplay.speed_scale = 1
 			animplay.play("idleagain")
-			print("idle")
+			pass # отладочный вывод убран (054.99)
 			pass
 		states.jumping:
 			switch_hitbox(1)
@@ -145,16 +145,16 @@ func initswithc(state: states):
 		states.falling:
 			switch_hitbox(1)
 			self.get_parent().wander = true
-			print("Falling")
+			pass # отладочный вывод убран (054.99)
 			animplay.speed_scale = 1
 			animplay.play("fall")
 		states.moving:
 			switch_hitbox(1)
 			self.get_parent().wander = true
-			print("moving")
+			pass # отладочный вывод убран (054.99)
 
 		states.resting:
-			print("resting")
+			pass # отладочный вывод убран (054.99)
 			self.get_parent().wander = false
 			var r = randi_range(1, 2)
 			if forcedRestPose != 0: # просьба игрока "сядь"/"ляг" (behavior._doChatAction)
