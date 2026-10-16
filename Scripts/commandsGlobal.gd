@@ -255,7 +255,7 @@ func _ready():
 	Console.create_command("ai_status", _cmd_aiStatus, "показывает текущее состояние всех настроек ИИ")
 	Console.create_command("ai_creativity", _cmd_aiCreativity, "0.0-1.5, выше = более дикие/случайные ответы, ниже = безопаснее/предсказуемее (стандартно 0.7 для qwen3-vl:8b-instruct)")
 	Console.create_command("ai_repetition_guard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова (стандартно 1.2 для qwen3-vl:8b-instruct)")
-	Console.create_command("ai_model", _cmd_aiModel, "переключает модель Ollama, которую использует ИИ (сама скачает её через Ollama, если ещё не скачана)")
+	Console.create_command("ai_model", _cmd_aiModel, "выбор модели Ollama: список скачанных моделей, дальше вводи цифру (выбрать) или имя (скачать новую), 0 - выход")
 	Console.create_command("ban_words", _cmd_banwords, "список слов/фраз, которые ИИ никогда не должен использовать: после списка вводи номер (удалить), слово (добавить) или 0 (выход)")
 	Console.create_command("reload_lore", LLMManager.reloadLore, "перечитывает лор и паспорта всех персонажей (lore.txt, character.json) без перезапуска - наборы фраз создадутся заново")
 	Console.create_command("resize_console", resize, "размер окна консоли: resize_console <ширина> <высота> (проще растянуть уголок справа снизу)")
@@ -351,7 +351,56 @@ func _cmd_aiRepetitionGuard(value: float) -> void:
 	LLMManager.setRepetitionGuard(value)
 	Console.print("Защита от повторов: [color=CYAN]%s[/color]" % LLMManager.repetitionGuard)
 
-func _cmd_aiModel(name: String) -> void:
+## 054.995: ai_model без имени - список скачанных моделей, выбор цифрой
+## (как despawn_pet). Раньше нужно было смотреть имя в ai_status и вводить
+## его целиком. ai_model <имя> по-прежнему работает сразу.
+const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "ministral-3:14b"]
+
+func _cmd_aiModel(name: String = "") -> void:
+	if name != "":
+		_switchModel(name)
+		return
+	Console.print("Спрашиваю у Ollama список моделей...")
+	LLMManager.fetchModels(_showModelMenu)
+
+
+func _showModelMenu(names: Array, ok: bool) -> void:
+	if not ok:
+		Console.print("[color=RED]Ollama не ответила - проверь, что она запущена (значок в трее).[/color]")
+		return
+	Console.print("[color=ORANGE]Чтобы выбрать модель, введи её цифру и нажми Enter[/color]")
+	Console.print("[color=ORANGE]Чтобы скачать новую модель, напиши её имя и нажми Enter[/color]")
+	Console.print("Скачанные модели (сейчас: [color=CYAN]%s[/color]):" % LLMManager.modelName)
+	Console.print("0. выход")
+	for i in names.size():
+		Console.print("%d. %s%s" % [i + 1, names[i], "  <- сейчас" if names[i] == LLMManager.modelName else ""])
+	if names.is_empty():
+		Console.print("(пока ни одной)")
+	var missing: Array = RECOMMENDED_MODELS.filter(func(m): return not names.has(m))
+	if not missing.is_empty():
+		Console.print("Можно скачать (подходят игре): [color=CYAN]%s[/color]" % ", ".join(missing))
+	Console.pending_input = _modelMenuAnswer.bind(names)
+
+
+func _modelMenuAnswer(answer: String, names: Array) -> void:
+	if answer == "0":
+		Console.print("Выход из выбора модели.")
+		return
+	if answer.is_valid_int():
+		var i := int(answer) - 1
+		if i < 0 or i >= names.size():
+			Console.print("[color=ORANGE]Нет модели под номером %s - введи ai_model ещё раз.[/color]" % answer)
+			return
+		_switchModel(String(names[i]))
+		return
+	if Console.has_command(answer.split(" ", false)[0]):
+		Console.print("Выход из выбора модели.")
+		Console.execute(answer)
+		return
+	_switchModel(answer) # имя новой модели - скачается, если её ещё нет
+
+
+func _switchModel(name: String) -> void:
 	LLMManager.setModel(name)
 	Console.print("Модель переключена на: [color=CYAN]%s[/color]" % name)
 

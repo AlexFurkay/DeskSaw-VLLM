@@ -3,7 +3,20 @@ extends Node
 #i probably shouldve put these here earlier but better late than never
 
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
-const BUILD := "054.994Pru"
+const BUILD := "054.995Pru"
+
+## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
+## видеть, что персонажи говорили, - фраза над головой быстро исчезает).
+signal phraseLogged(line: String)
+const PHRASE_LOG_MAX := 200
+var phraseLog: Array[String] = []
+
+func logPhrase(who: String, text: String) -> void:
+	var line := "[color=gray]%s[/color]  [color=cyan]%s[/color]: %s" % [Time.get_time_string_from_system().substr(0, 5), who, text]
+	phraseLog.append(line)
+	while phraseLog.size() > PHRASE_LOG_MAX:
+		phraseLog.pop_front()
+	phraseLogged.emit(line)
 
 var pop = preload("res://scenes/ui/popup.tscn")
 #ill fix the scripts that redefine these when it bothers me enough

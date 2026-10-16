@@ -1972,6 +1972,29 @@ func setRepetitionGuard(value: float) -> void:
 ## pulled locally via Ollama's own /api/tags - separate small HTTPRequest so
 ## it doesn't interfere with the main dialogue queue. Prints asynchronously,
 ## so this line can land slightly after the rest of aiStatus's output.
+## 054.995: список скачанных моделей для меню ai_model.
+## callback(names: Array, ok: bool) - ok=false, если Ollama не ответила.
+func fetchModels(callback: Callable) -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.timeout = 10.0
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		var names: Array = []
+		var ok := false
+		if response_code == 200:
+			var parsed = JSON.parse_string(body.get_string_from_utf8())
+			if parsed is Dictionary and parsed.has("models"):
+				ok = true
+				for m in parsed["models"]:
+					names.append(String(m.get("name", "?")))
+		http.queue_free()
+		callback.call(names, ok)
+	)
+	if http.request("http://127.0.0.1:11434/api/tags") != OK:
+		http.queue_free()
+		callback.call([], false)
+
+
 func listAvailableModels() -> void:
 	var http := HTTPRequest.new()
 	Engine.get_main_loop().root.add_child(http)

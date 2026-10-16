@@ -76,6 +76,10 @@ func _ready():
 	# прочитан, и молча получает "Default" вместо того, что реально задано.
 	if FileAccess.file_exists(conPath):
 		settings = loadjson(conPath)
+		# 054.995: галочку «Неуязвимость» убрали из настроек - сбрасываем, чтобы
+		# включённая раньше неуязвимость не осталась навсегда без способа выключить
+		if settings is Dictionary:
+			settings["invincible"] = false
 		fixMissing(settings, loadjson("res://Scripts/singletons/config.json"))
 	else:
 		newConfig()

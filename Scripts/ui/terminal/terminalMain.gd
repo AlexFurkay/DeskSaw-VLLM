@@ -15,6 +15,7 @@ func _ready() -> void:
 
 	# show first (console) window by default
 	submenuButton.item_selected.connect(_on_submenu_picker_item_selected)
+	_addPhrasesPanel()
 	_on_submenu_picker_item_selected(0)
 	_buildSubmenuTabs()
 
@@ -40,6 +41,7 @@ func _ready() -> void:
 	# ходу (список скинов, предметы), их ловим через node_added
 	_scaleFontsUnder(self)
 	get_tree().node_added.connect(_on_node_added)
+	_fitCloseButton()
 
 	CommandsGlobal.runInitialCommands.emit()
 
@@ -69,6 +71,72 @@ func _scaleFont(c: Control) -> void:
 	elif c is RichTextLabel:
 		for key in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size", "mono_font_size"]:
 			c.add_theme_font_size_override(key, maxi(6, int(round(c.get_theme_font_size(key) * k))))
+
+
+## 054.995: вкладка «Фразы» - последние фразы всех персонажей (и игрока) с
+## временем. Фраза над головой быстро исчезает, пользователи просили лог.
+var _phrasesLabel: RichTextLabel
+
+func _addPhrasesPanel() -> void:
+	if submenuPanels.is_empty():
+		return
+	var model: Control = submenuPanels[0] as Control
+	var panel := Panel.new()
+	panel.name = "PhrasesView"
+	panel.theme = model.theme
+	panel.add_theme_stylebox_override("panel", model.get_theme_stylebox("panel"))
+	model.get_parent().add_child(panel)
+	panel.anchor_left = model.anchor_left
+	panel.anchor_top = model.anchor_top
+	panel.anchor_right = model.anchor_right
+	panel.anchor_bottom = model.anchor_bottom
+	panel.offset_left = model.offset_left
+	panel.offset_top = model.offset_top
+	panel.offset_right = model.offset_right
+	panel.offset_bottom = model.offset_bottom
+	panel.size_flags_horizontal = model.size_flags_horizontal
+	panel.size_flags_vertical = model.size_flags_vertical
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
+		margin.add_theme_constant_override(side, 12)
+	panel.add_child(margin)
+	_phrasesLabel = RichTextLabel.new()
+	_phrasesLabel.bbcode_enabled = true
+	_phrasesLabel.scroll_following = true
+	_phrasesLabel.selection_enabled = true # можно выделить и скопировать
+	_phrasesLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_phrasesLabel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(_phrasesLabel)
+	_phrasesLabel.text = "[color=gray]Здесь появляются последние %d фраз всех персонажей.[/color]\n" % GlobalVariable.PHRASE_LOG_MAX + "\n".join(GlobalVariable.phraseLog)
+	GlobalVariable.phraseLogged.connect(_onPhraseLogged)
+	submenuPanels.append(panel)
+	submenuButton.add_item("Фразы")
+	panel.hide()
+
+
+func _onPhraseLogged(line: String) -> void:
+	if _phrasesLabel.get_paragraph_count() > GlobalVariable.PHRASE_LOG_MAX + 20:
+		# в долгой сессии вкладка не растёт бесконечно - пересобираем из журнала
+		_phrasesLabel.text = "\n".join(GlobalVariable.phraseLog)
+	else:
+		_phrasesLabel.append_text("\n" + line)
+
+
+## 054.995: крестик закрытия - кнопка фиксированного размера 27x28 с обрезкой
+## текста; после увеличения шрифта "X" перестал влезать и пропал. Растим кнопку
+## вместе с текстом и отключаем обрезку.
+func _fitCloseButton() -> void:
+	var close: Button = windowControl.CloseButton if windowControl else null
+	if close == null:
+		return
+	close.clip_text = false
+	close.autowrap_mode = TextServer.AUTOWRAP_OFF
+	close.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	var side: float = round(28.0 * textScale())
+	close.offset_left = close.offset_right - side
+	close.offset_top = -side / 2.0
+	close.offset_bottom = side / 2.0
 
 
 func _scaleFontsUnder(node: Node) -> void:

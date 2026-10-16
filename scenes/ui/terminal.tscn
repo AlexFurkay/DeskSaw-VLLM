@@ -282,12 +282,6 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = -1
 
-[node name="TitleCard" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=2051856741 instance=ExtResource("5_hils5")]
-layout_mode = 2
-label = "Неуязвимость
-[i]Без смерти, потери настроения, голода, доверия...[/i]"
-key = "invincible"
-
 [node name="Lobotomy" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1319685572 instance=ExtResource("5_hils5")]
 layout_mode = 2
 label = "Включить настроение"
@@ -466,7 +460,7 @@ defaultValue = true
 
 [node name="AiFpsSave" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967699 instance=ExtResource("5_hils5")]
 layout_mode = 2
-label = "Снижать FPS до 25, пока ИИ отвечает (помогает при стримах и играх)"
+label = "Снижать FPS до 35, пока ИИ отвечает (помогает при стримах и играх)"
 key = "aiFpsSave"
 defaultValue = true
 

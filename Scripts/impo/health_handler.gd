@@ -92,7 +92,10 @@ func _onItemEnter(body: Node2D) -> void:
 	if health >= maxhealth:
 		awaitDB() # already full - item just gets consumed silently, no reaction
 	else:
-		AudioManager.play_sfx(AudioManager.heal)
+		# 054.995: шприц и бинт - звук укола, аптечка - свой звук лечения
+		# (раньше все три звучали как аптечка)
+		var itemKey: String = body.scene_file_path.get_file().get_basename()
+		AudioManager.play_sfx(AudioManager.injection if itemKey in ["syringe", "bandage"] else AudioManager.heal)
 		health = clamp(health + healAmount, minhealth, maxhealth)
 		pet.health = health
 		gbData.savetodisk("user://SAVE.json", gbData.data)

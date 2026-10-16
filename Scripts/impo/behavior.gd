@@ -156,6 +156,7 @@ func _sayFinal(category: String) -> void:
 	_urgentInQueue = 0
 	var processed := _applyStupid(line)
 	_recordSpoken(processed[0])
+	_showingPriority = PRIO_EMERGENCY
 	dialogueSys.setDia(processed[0], dialogueSys.speedMod + processed[1], 2.0, true)
 
 
@@ -351,7 +352,20 @@ var _queueTimer: Timer
 ## fell) jumps ahead of whatever's already queued, but can't monopolize the
 ## queue forever - after 2 urgent lines in a row, a normal one gets a turn,
 ## so a flurry of urgent reactions can't indefinitely starve getUp/hungry/etc.
-func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> void:
+## 054.995: приоритеты фраз. Перебить то, что сейчас на экране, может только
+## фраза уровнем выше; остальные встают в очередь (срочные - в её начало).
+## Раньше любая "срочная" (погладили, схватили) обрывала реплику разговора.
+const PRIO_NORMAL := 0     # о состоянии, экран, предметы
+const PRIO_REACTION := 1   # погладили, схватили, фентанил, встал
+const PRIO_DIALOGUE := 2   # разговор с игроком и между персами
+const PRIO_EMERGENCY := 3  # боль, крик от удара, падение, последние слова
+const EMERGENCY_CATEGORIES := ["screamBIG", "fell", "LightDamage", "MediumDamage", "HardDamage", "lastmoments", "overdose"]
+var _showingPriority := PRIO_NORMAL
+
+## priority -1 = по старому флагу urgent (реакция или обычная)
+func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false, priority: int = -1) -> void:
+	if priority < 0:
+		priority = PRIO_REACTION if urgent else PRIO_NORMAL
 	if isUnconscious:
 		# Последняя фраза (lastmoments/overdose) запрашивается ДО отключки,
 		# но ответ ИИ может прийти уже после неё - раньше он здесь молча
@@ -361,6 +375,7 @@ func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> vo
 			_messageQueue.clear()
 			_urgentInQueue = 0
 			var finalText := _applyStupid(text)
+			_recordSpoken(finalText[0])
 			dialogueSys.setDia(finalText[0], speed + finalText[1], 2.0, true)
 		return # 0 хп - state/screen/grab и всё остальное тоже не должно звучать, не только _say()
 	if isSleeping:
@@ -368,17 +383,18 @@ func _queueMessage(text: String, speed: float = 1.0, urgent: bool = false) -> vo
 	var processed := _applyStupid(text)
 	text = processed[0]
 	speed += processed[1]
-	if urgent and (dialogueSys.isTyping or not dialogueSys.dialogueTimer.is_stopped()):
-		# Urgent lines (screamBIG etc.) shouldn't politely wait behind
-		# whatever's already on screen - cut it off now. setDia()'s own
+	var onScreen: bool = dialogueSys.isTyping or not dialogueSys.dialogueTimer.is_stopped()
+	if urgent and onScreen and priority > _showingPriority:
+		# Фраза важнее той, что на экране, - обрываем её сейчас. setDia()'s own
 		# typeOut() has a generation-counter guard that safely abandons the
 		# old typing coroutine without corrupting the display, so calling
 		# it again here is enough to interrupt cleanly.
 		_recordSpoken(text)
+		_showingPriority = priority
 		dialogueSys.setDia(text, speed, 2.0, true)
 		return
 
-	var entry := {"text": text, "speed": speed}
+	var entry := {"text": text, "speed": speed, "priority": priority}
 	if urgent and _urgentInQueue < 2:
 		_messageQueue.insert(_urgentInQueue, entry)
 		_urgentInQueue += 1
@@ -407,10 +423,12 @@ const SPOKEN_LOG_MAX_AGE_MS := 3600000 # 60 минут (было 45)
 var _spokenLog: Array = [] # [{"t": msec, "text": реплика}]
 
 func _recordSpoken(text: String) -> void:
-	if isPlayer:
-		return
 	var clean := RegEx.create_from_string("\\[[^\\]]*\\]").sub(text, "", true).strip_edges()
 	if clean == "":
+		return
+	# во вкладку «Фразы» - все, включая реплики перса-игрока
+	GlobalVariable.logPhrase(PlayerManager.displayNameFor(_skinTag()) + (" (ты)" if isPlayer else ""), clean)
+	if isPlayer:
 		return
 	_spokenLog.append({"t": Time.get_ticks_msec(), "text": clean})
 	while _spokenLog.size() > SPOKEN_LOG_SIZE:
@@ -439,6 +457,7 @@ func _tryShowQueued() -> void:
 		_urgentInQueue -= 1
 
 	_recordSpoken(entry["text"])
+	_showingPriority = int(entry.get("priority", PRIO_NORMAL))
 	dialogueSys.setDia(entry["text"], entry["speed"], 2.0, true)
 
 
@@ -922,6 +941,7 @@ func playerInput(dir: float, jump: bool, sit: bool = false) -> void:
 func playerSay(text: String) -> void:
 	if isUnconscious:
 		return
+	_recordSpoken(text) # во вкладку «Фразы»
 	dialogueSys.setDia(text, 1.0, 2.0, true)
 	AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 
@@ -948,7 +968,7 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 		elif chatHistory.size() > 0:
 			# модель согласилась словами, но забыла метку - угадываем сами
 			action = _guessChatAction(String(chatHistory[chatHistory.size() - 1].get("text", "")), text)
-		_queueMessage(text, 1.0, true)
+		_queueMessage(text, 1.0, true, PRIO_DIALOGUE)
 		# голос при ответе: обычный, при плохом настроении - злой
 		AudioManager.play_random(voiceSet["bark" if moodSys.mood < -20.0 else "whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 		onReply.call(text)
@@ -1030,7 +1050,7 @@ func petTalkLoop() -> void:
 		# всего реплик в разговоре (вместе с первой): раньше всегда ровно 2
 		var turns := randi_range(PET_TALK_TURNS_MIN, PET_TALK_TURNS_MAX)
 		LLMManager.requestPetOpener(_skinTag(), otherSkin, _petStats() + _aiStateHint(), func(line: String):
-			_queueMessage(line, 1.0, true)
+			_queueMessage(line, 1.0, true, PRIO_DIALOGUE)
 			AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 			notePetLine(other, PlayerManager.displayNameFor(_skinTag()), line)
 			if is_instance_valid(other):
@@ -1091,7 +1111,7 @@ func _talkToPlayer(p: Node) -> void:
 			line = line.substr(line.find(">") + 1)
 		if isUnconscious or isSleeping or not is_inside_tree():
 			return
-		_queueMessage(line, 1.0, true)
+		_queueMessage(line, 1.0, true, PRIO_DIALOGUE)
 		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 		PlayerManager._remember(key, myName, line)) # ответ через Enter увидит, с чего начали
 
@@ -1138,7 +1158,7 @@ func replyToPet(speaker: Node, line: String, turnsLeft: int = 1) -> void:
 			await get_tree().create_timer(wait / 1000.0).timeout
 		if isUnconscious or isSleeping or not is_inside_tree():
 			return
-		_queueMessage(text, 1.0, true)
+		_queueMessage(text, 1.0, true, PRIO_DIALOGUE)
 		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 		notePetLine(speaker, myName, text)
 		if is_instance_valid(speaker):
@@ -1826,14 +1846,14 @@ func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true, 
 		if category in PLAYER_FILE_CATEGORIES:
 			var own: Array = dialogueSys.data.get(CATEGORY_EXAMPLES_FROM.get(category, category), [])
 			if not own.is_empty():
-				_queueMessage(String(own.pick_random()), dialogueSys.speedMod, category in URGENT_CATEGORIES)
+				_queueMessage(String(own.pick_random()), dialogueSys.speedMod, category in URGENT_CATEGORIES, PRIO_EMERGENCY if category in EMERGENCY_CATEGORIES else -1)
 		return
 	# 054.96: последние слова - сразу из файла персонажа, как start. Звучат
 	# раз за жизнь, ради них не стоит держать целый ИИ-пул (и ждать его).
 	if category in FILE_ONLY_CATEGORIES:
 		var fromFile: Array = dialogueSys.data.get(category, [])
 		if not fromFile.is_empty():
-			_queueMessage(String(fromFile.pick_random()), dialogueSys.speedMod, true)
+			_queueMessage(String(fromFile.pick_random()), dialogueSys.speedMod, true, PRIO_EMERGENCY)
 		return
 	if not ignoreCooldown and cooldown > 0.0:
 		var now := Time.get_ticks_msec()
@@ -1856,7 +1876,7 @@ func _say(category: String, cooldown: float = 0.0, ignoreCooldown: bool = true, 
 		# Пул прогрева ключуется по "Скин:категория" - иначе разные персонажи
 		# (когда их станет больше одного) делили бы один и тот же пул и
 		# путались бы в стиле друг друга.
-		LLMManager.requestPooledReaction(poolKey, examples, func(text): _queueMessage(tag + text, speed, urgent), styleHint, situation)
+		LLMManager.requestPooledReaction(poolKey, examples, func(text): _queueMessage(tag + text, speed, urgent, PRIO_EMERGENCY if category in EMERGENCY_CATEGORIES else -1), styleHint, situation)
 	else:
 		dialogueSys.send(cooldown, ignoreCooldown)
 	
