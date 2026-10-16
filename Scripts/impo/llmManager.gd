@@ -941,9 +941,17 @@ func aboutCharacter(skinName: String, withGender: bool = true) -> String:
 	return shown
 
 
-## 054.994: Рыжик "вспомнил", как человек учил его есть из чашки, и потом
-## сам цеплялся за эту выдумку в следующих ответах.
+## 054.994: общие воспоминания - аккуратно. Рыжик "вспомнил", как человек учил
+## его есть из чашки, и потом цеплялся за это в каждом ответе. Пользователю
+## сама механика понравилась: теперь примерно в каждом пятом разговоре можно
+## вспомнить мелочь из жизни на столе и держаться её, если она уже звучала;
+## в остальных - не выдумывать.
 const NO_FAKE_MEMORIES := "\nНе придумывай общих воспоминаний и событий, которых нет в разговоре выше и в описании тебя."
+const SMALL_MEMORY_OK := "\nЕсли к месту, можешь вспомнить небольшой случай из вашей жизни на этом рабочем столе - мелочь, без громких событий. Если такой случай уже упоминался в разговоре выше - держись его и не противоречь, новых не добавляй."
+const MEMORY_CHANCE := 0.2
+
+func _memoriesRule() -> String:
+	return SMALL_MEMORY_OK if randf() < MEMORY_CHANCE else NO_FAKE_MEMORIES
 
 ## Поводы для разговора двух персонажей (один выбирается случайно).
 const PET_TOPICS := [
@@ -986,7 +994,7 @@ func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, cal
 	if otherState != "":
 		prompt += "\nСостояние собеседника: " + otherState.strip_edges() + "."
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого, а не с беззаботной болтовни."
-	prompt += NO_FAKE_MEMORIES
+	prompt += _memoriesRule()
 	prompt += "\nТвоя реплика (только сама реплика):"
 	_enqueue(prompt, [], callback, tag)
 
@@ -1018,7 +1026,7 @@ func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String,
 	if playerState != "":
 		prompt += "\nСостояние его персонажа: " + playerState.strip_edges() + "."
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого."
-	prompt += NO_FAKE_MEMORIES
+	prompt += _memoriesRule()
 	prompt += "\nТвоя реплика (только сама реплика):"
 	_enqueue(prompt, [], callback, tag)
 
@@ -1083,7 +1091,7 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 		prompt += "\nРазговор (последние реплики, внизу - самая новая):\n" + "\n".join(lines)
 		var last: Dictionary = chatHistory[chatHistory.size() - 1]
 		prompt += "\nТолько что %s сказал тебе: \"%s\". Ответь ИМЕННО на это - на его вопрос или слова, а не на что-то своё." % [speaker, String(last.get("text", ""))]
-	prompt += NO_FAKE_MEMORIES
+	prompt += _memoriesRule()
 	prompt += "\nТвой ответ (только сама реплика):"
 
 	# в разговоре чуть "смелее" обычного - живее и разнообразнее
