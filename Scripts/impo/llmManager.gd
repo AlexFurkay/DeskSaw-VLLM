@@ -855,14 +855,19 @@ func _on_screen_tick() -> void:
 		return
 
 	var images: Array = [Marshalls.raw_to_base64(png_bytes)]
+	var prompt := buildScreenPrompt(tag, speaker._aiStateHint())
+	_enqueue(prompt, images, func(text):
+		if is_instance_valid(speaker):
+			speaker._on_llm_reaction(text, true), tag)
+
+
+func buildScreenPrompt(tag: String, stateHintText: String) -> String:
 	var prompt := _buildBasePrompt(tag) + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Маленькие пиксельные существа поверх окон - это {ты сама|ты сам} и твои соседи по рабочему столу, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. НЕ описывай и не пересказывай, что на экране (никаких 'Это окно...', 'Здесь видно...', 'На экране...') - человек и сам это видит. Вместо этого ОТРЕАГИРУЙ на увиденное как живой персонаж, своими словами и со своим отношением. Не начинай фразу со слова 'Это'. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
 	prompt += "\nПодход к реакции на этот раз: " + _pickScreenAngle()
 	# в 054.94 Voyager говорила человеку "ты застряла", "ты решила"
 	prompt += "\nЧеловек за компьютером - парень: о нём только в мужском роде ('ты застрял', 'ты решил', 'ты пытался')."
-	prompt += speaker._aiStateHint()
-	_enqueue(prompt, images, func(text):
-		if is_instance_valid(speaker):
-			speaker._on_llm_reaction(text, true), tag)
+	prompt += stateHintText
+	return prompt
 
 
 ## Почему экранные реакции звучали одинаково при любой креативности:
@@ -966,13 +971,17 @@ const ITEM_ANGLES := [
 func requestItemReaction(skinTag: String, itemDescription: String, stateHintText: String, callback: Callable) -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
+	_enqueue(buildItemPrompt(skinTag, itemDescription, stateHintText), [], callback, skinTag + ":item")
+
+
+func buildItemPrompt(skinTag: String, itemDescription: String, stateHintText: String) -> String:
 	var tag := skinTag + ":item"
 	var prompt := _buildBasePrompt(tag)
 	prompt += "\nРядом с тобой на рабочем столе лежит предмет: " + itemDescription + ". Отреагируй на него одной фразой как живой персонаж - не описывай предмет, а вырази своё отношение к нему. Скажи это как утверждение или восклицание."
 	prompt += "\nПодход к реакции на этот раз: " + ITEM_ANGLES[randi() % ITEM_ANGLES.size()]
 	if stateHintText != "":
 		prompt += "\n" + stateHintText.strip_edges()
-	_enqueue(prompt, [], callback, tag)
+	return prompt
 
 
 ## Ответ ИИ-персонажа на реплику игрока (PlayerManager). Высший приоритет:
@@ -1064,6 +1073,10 @@ const PET_TOPICS := [
 func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable, history: Array = [], otherState: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
+	_enqueue(buildPetOpenerPrompt(skinTag, otherSkin, stateText, history, otherState), [], callback, skinTag + ":pettalk")
+
+
+func buildPetOpenerPrompt(skinTag: String, otherSkin: String, stateText: String, history: Array = [], otherState: String = "") -> String:
 	var tag := skinTag + ":pettalk"
 	var myName: String = PlayerManager.displayNameFor(skinTag)
 	var prompt := _buildBasePrompt(tag)
@@ -1086,7 +1099,7 @@ func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, cal
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого, а не с беззаботной болтовни."
 	prompt += _memoriesRule()
 	prompt += "\nТвоя реплика (только сама реплика):"
-	_enqueue(prompt, [], callback, tag)
+	return prompt
 
 
 ## 054.99: ИИ-персонаж сам заговаривает с персом-игроком (человеком в теле
@@ -1095,6 +1108,10 @@ func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, cal
 func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String, callback: Callable) -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
+	_enqueue(buildPlayerOpenerPrompt(skinTag, playerSkin, stateText, history, playerState), [], callback, skinTag + ":chat")
+
+
+func buildPlayerOpenerPrompt(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String) -> String:
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag)
 	var prompt := _buildBasePrompt(tag)
@@ -1118,7 +1135,7 @@ func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String,
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого."
 	prompt += _memoriesRule()
 	prompt += "\nТвоя реплика (только сама реплика):"
-	_enqueue(prompt, [], callback, tag)
+	return prompt
 
 
 ## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
@@ -1126,6 +1143,22 @@ func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String,
 func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
+	var tag := skinTag + ":chat"
+	var prompt := buildChatReplyPrompt(skinTag, speaker, chatHistory, stateText, ownRecent, speakerSkin, playerSkin, speakerState)
+
+	# в разговоре чуть "смелее" обычного - живее и разнообразнее
+	var job := {"prompt": _g(skinTag, prompt), "images": [], "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.05)}
+	if busy and _currentTag.begins_with("prefetch:") and not _currentJob.is_empty():
+		# прерываем фоновый пакет - ответ человеку важнее
+		http.cancel_request()
+		_watchdogTimer.stop()
+		_backgroundQueue.push_front(_currentJob)
+		busy = false
+	_queue.push_front(job)
+	_processQueue()
+
+
+func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> String:
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
@@ -1183,17 +1216,7 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 		prompt += "\nТолько что %s сказал тебе: \"%s\". Ответь ИМЕННО на это - на его вопрос или слова, а не на что-то своё." % [speaker, String(last.get("text", ""))]
 	prompt += _memoriesRule()
 	prompt += "\nТвой ответ (только сама реплика):"
-
-	# в разговоре чуть "смелее" обычного - живее и разнообразнее
-	var job := {"prompt": _g(skinTag, prompt), "images": [], "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.05)}
-	if busy and _currentTag.begins_with("prefetch:") and not _currentJob.is_empty():
-		# прерываем фоновый пакет - ответ человеку важнее
-		http.cancel_request()
-		_watchdogTimer.stop()
-		_backgroundQueue.push_front(_currentJob)
-		busy = false
-	_queue.push_front(job)
-	_processQueue()
+	return prompt
 
 
 ## Called from a specific pet's passivetalk() loop. Result delivered ONLY to
@@ -1273,7 +1296,12 @@ var _lastStateTopic := -1
 func requestStateReaction(statLine: String, exampleLines: Array, callback: Callable, tag: String = "state", woundFocus: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
+	_enqueue(buildStatePrompt(statLine, exampleLines, tag, woundFocus), [], callback, tag)
 
+
+## 054.998: сборка запросов вынесена в build*Prompt - их же вызывает стенд
+## (test-stand), чтобы проверять ровно те запросы, что строит игра.
+func buildStatePrompt(statLine: String, exampleLines: Array, tag: String, woundFocus: String = "") -> String:
 	exampleLines = _filterExamplesForProfanity(exampleLines)
 
 	var prompt := _buildBasePrompt(tag)
@@ -1289,8 +1317,7 @@ func requestStateReaction(statLine: String, exampleLines: Array, callback: Calla
 	if exampleLines.size() > 0:
 		prompt += "\nПримеры того, как ты обычно говоришь в таком состоянии (не копируй дословно, ориентируйся только на стиль и настроение):\n- " + "\n- ".join(exampleLines)
 	prompt += "\nПридумай одну НОВУЮ короткую фразу в этом же духе. Сохраняй характер и примерную длину примеров."
-
-	_enqueue(prompt, [], callback, tag)
+	return prompt
 
 
 ## Lightweight variant for INSTANT events (petting, getting picked up,
@@ -1351,7 +1378,10 @@ func _refillPool(category: String, exampleLines: Array, styleHint: String = "", 
 	if _prefetchPending.get(category, false):
 		return # a refill is already in flight for this category
 	_prefetchPending[category] = true
+	_enqueue(buildPoolPrompt(category, exampleLines, styleHint, situationDescription), [], func(rawText): _onPoolRefilled(category, rawText), "prefetch:" + category)
 
+
+func buildPoolPrompt(category: String, exampleLines: Array, styleHint: String = "", situationDescription: String = "") -> String:
 	var filtered: Array = _filterExamplesForProfanity(exampleLines)
 
 	var prompt := _buildBasePrompt(category)
@@ -1367,8 +1397,7 @@ func _refillPool(category: String, exampleLines: Array, styleHint: String = "", 
 		# batch, just without a style example to lean on.
 		prompt += "\nОриентируйся на характер персонажа."
 	prompt += "\nВыведи ровно %d строк, каждая - отдельная новая фраза в этом же духе." % target # было PREFETCH_TARGET (7) - противоречило "напиши 20" выше для pet и т.п.
-
-	_enqueue(prompt, [], func(rawText): _onPoolRefilled(category, rawText), "prefetch:" + category)
+	return prompt
 
 
 ## Same idea as requestPooledReaction, but for moments with no existing quote
