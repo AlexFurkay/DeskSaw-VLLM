@@ -98,6 +98,11 @@ func _onItemEnter(body: Node2D) -> void:
 		AudioManager.play_sfx(AudioManager.injection if itemKey in ["syringe", "bandage"] else AudioManager.heal)
 		health = clamp(health + healAmount, minhealth, maxhealth)
 		pet.health = health
+		# 054.998: лечение немного поднимает настроение - но до 100 его
+		# аптечками не вытянуть, остальное - лаской и едой
+		var moodSys = get_parent().moodSys
+		if not get_parent().isPlayer: # у игрока настроение отключено
+			moodSys.mood = clampf(moodSys.mood + HEAL_MOOD.get(itemKey, 3.0), moodSys.minmood, minf(moodSys.maxmood, moodSys.woundMoodCap()))
 		gbData.savetodisk("user://SAVE.json", gbData.data)
 		get_parent()._applyInjuryLook()
 		get_parent()._say("healed")
@@ -114,6 +119,11 @@ func applyDamage(amount: float) -> void:
 	var wasAlive: bool = health > 0.0
 	health = clamp(health - amount, minhealth, maxhealth)
 	pet.health = health
+	# 054.998: удар бьёт и по настроению - по силе удара (5 урона -> -5).
+	# Раньше любой удар отнимал одинаковые 2,5 (это осталось в shock()).
+	var moodSys = get_parent().moodSys
+	if not get_parent().isPlayer: # у игрока настроение отключено
+		moodSys.mood = clampf(moodSys.mood - amount * DAMAGE_MOOD_PER_HP, moodSys.minmood, moodSys.maxmood)
 	gbData.savetodisk("user://SAVE.json", gbData.data)
 	get_parent()._applyInjuryLook()
 
@@ -139,6 +149,8 @@ func applyDamage(amount: float) -> void:
 	# else: too small to react to on its own - the existing fell/getUp line already covers it
 
 
+const DAMAGE_MOOD_PER_HP := 1.0
+const HEAL_MOOD := {"bandage": 3.0, "syringe": 5.0, "medkit": 8.0}
 const LIGHT_DAMAGE_THRESHOLD := 5.0
 const MEDIUM_DAMAGE_THRESHOLD := 15.0
 const HARD_DAMAGE_THRESHOLD := 30.0

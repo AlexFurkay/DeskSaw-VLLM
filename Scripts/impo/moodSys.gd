@@ -72,6 +72,7 @@ func moodCheck(delta: float = 1.0) -> float:
 		change *= 0.5
 	mood += change
 	mood = clamp(mood, minmood, maxmood)
+	mood = minf(mood, woundMoodCap())
 
 
 	var pull: float = 1.0 - pow(1.0 - normalRate, delta)
@@ -89,6 +90,30 @@ func moodCheck(delta: float = 1.0) -> float:
 
 
 	return snappedf(clamp(mood + tempOffset + drugOffset, minmood, maxmood), 0.05)
+
+
+## 054.998, реабилитация: пока раны серьёзные, настроение выше потолка не
+## поднимается (аптечками хп вылечить можно, а настроение - только лаской и едой).
+## Потолок касается базового настроения; приход от фентанила идёт поверх.
+const WOUND_CAP_HEAVY := 20.0 # здоровье ниже 30
+const WOUND_CAP_LIGHT := 60.0 # здоровье ниже 60
+
+func woundMoodCap() -> float:
+	var hp: float = _health()
+	if hp < 30.0:
+		return WOUND_CAP_HEAVY
+	if hp < 60.0:
+		return WOUND_CAP_LIGHT
+	return maxmood
+
+
+func _health() -> float:
+	var mas = get_parent()
+	if mas and mas.healthHandler:
+		return mas.healthHandler.health
+	return 100.0
+
+
 func tempCalc(total: float = 0.0):
 	total -= clamp(((1.0 - (gbData.data["saw"][petId]["health"] * 0.01)) * 3), 0.0, 3)
 	total = clamp(total, minmood, maxmood)
@@ -110,6 +135,13 @@ func calcmood(total: float):
 	pass # print(str(clamp(((1.0 - (pet["tired"] * 0.01)) * 1), 0.0, 1)) + " 123123")
 	if pet["hunger"] >= 85.0:
 		total += 0.25
+	# 054.998: раны давят на настроение постоянно (как голод): ниже 60 хп
+	# ~-1,2 в минуту, ниже 30 - ~-3 в минуту
+	var hp: float = _health()
+	if hp < 30.0:
+		total -= 1.5
+	elif hp < 60.0:
+		total -= 0.6
 	#clamp to user settings
 	total = clamp(total, minmood, maxmood)
 

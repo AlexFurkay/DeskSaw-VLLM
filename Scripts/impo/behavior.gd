@@ -323,6 +323,7 @@ func _prewarmRareCategories() -> void:
 		# готовая фраза нужна заранее: после передозировки персонаж сразу
 		# отключается, и "живой" запрос к ИИ уже не успел бы прозвучать
 		t + "overdose": dialogueSys.data.get("lastmoments", []),
+		t + "petWounded": dialogueSys.data.get("LowPassive", []),
 	}, {}, true, {}, {
 		t + "reallySleepy": CATEGORY_SITUATION.get("reallySleepy", ""),
 		t + "screamBIG": CATEGORY_SITUATION.get("screamBIG", ""),
@@ -340,6 +341,7 @@ func _prewarmRareCategories() -> void:
 		t + "fentanyl": CATEGORY_SITUATION.get("fentanyl", ""),
 		t + "withdrawal": CATEGORY_SITUATION.get("withdrawal", ""),
 		t + "overdose": CATEGORY_SITUATION.get("overdose", ""),
+		t + "petWounded": _woundedPetSituation(),
 	})
 
 var _messageQueue: Array = []      # [{text, speed}] shown in order; urgent entries get inserted at the front
@@ -843,28 +845,77 @@ func _wornDescription() -> String:
 ## исходного. Каждая доза добавляет зависимость (только на этот запуск),
 ## с ней следующие дозы действуют слабее, а без новой дозы начинается
 ## ломка. OVERDOSE_DOSES доз подряд (каждая в пределах DOSE_CHAIN_MS от
-## предыдущей) - передозировка, отключка как при 0 ХП. Все числа -
-## стартовые, баланс потом.
+## предыдущей) - передозировка, отключка как при 0 ХП.
+##
+## 054.998, баланс по таблице с Alex (отчёт 054.997, пункт 19). Ломка после
+## окончания прихода: 1 доза - нет, 2 дозы - ~20 мин, 3 - ~35 мин, максимум -
+## ~65 мин. Поэтому у ломки два порога: начинается, только если зависимость
+## дошла до WITHDRAWAL_START (от двух доз), а кончается ниже WITHDRAWAL_END.
+## Задумка: дозами из ломки не выбраться ("зло от добра") - поддерживающая
+## доза поднимает зависимость сильнее, чем снимает ломку, а еда и ласка
+## помогают. Персонаж по-прежнему не колет себя сам.
 const HIGH_DURATION_SEC := 300.0      # сколько держится эффект одной дозы
-const HIGH_BOOST := 60.0              # прибавка к настроению у "чистого" персонажа
+const HIGH_BOOST := 44.0              # прибавка к настроению у "чистого" персонажа (было 60)
 const COMEDOWN_FRACTION := 0.3        # после эффекта настроение падает на эту долю от прибавки
+const DOSE_MOOD_KEEP := 3.0           # навсегда остаётся в настроении от каждой дозы (как бинт)
 const ADDICTION_PER_DOSE := 20.0
-const ADDICTION_DECAY_PER_MIN := 1.0
-const WITHDRAWAL_THRESHOLD := 30.0    # с какой зависимости начинается ломка
+const ADDICTION_PER_DOSE_IN_WITHDRAWAL := 25.0 # поддерживающая доза
+const ADDICTION_RELAPSE := 40.0       # первая доза после того, как ломка прошла: "организм помнит"
+const ADDICTION_DECAY_PER_MIN := 1.33 # 100 -> 0 примерно за 75 мин
+const WITHDRAWAL_START := 30.0
+const WITHDRAWAL_END := 7.0
+const HEAVY_ADDICTION := 70.0         # тяжёлая ломка: еда радует вдвое меньше, ласку отвергает чаще
 const DOSE_CHAIN_MS := 300000         # дозы ближе друг к другу, чем это, считаются "подряд"
 const OVERDOSE_DOSES := 4
+const WITHDRAWAL_LINE_MIN_MS := 480000  # отдельная фраза о ломке - раз в 8-12 мин
+const WITHDRAWAL_LINE_MAX_MS := 720000
+const WITHDRAWAL_ANY_GAP_MS := 120000   # между ЛЮБЫМИ фразами о ломке - не меньше 2 мин
+const WITHDRAWAL_MENTION_CHANCE := 0.25 # ломка в фразах о состоянии и на экран - в каждой четвёртой
+const TOSS_MIN_MS := 60000              # толкнуть шприц к человеку - раз в 1-2 мин
+const TOSS_MAX_MS := 120000
+const TOSS_LINE_GAP_MS := 180000        # фраза при толчке - не чаще раза в 3 мин
+const FOOD_HELP_MS := 600000            # вкусная еда ускоряет спад зависимости 10 мин
+const PET_HELP_MS := 120000             # после ласки падение настроения в ломке вдвое слабее 2 мин
 var addiction := 0.0
 var _dosesInRow := 0
 var _lastDoseMsec := -10000000
+var _highMs := int(HIGH_DURATION_SEC * 1000.0)
+var _withdrawalActive := false
+var _hadWithdrawal := false
 var _nextWithdrawalLineMsec := 0
+var _lastWithdrawalLineMsec := -10000000
+var _nextTossMsec := 0
+var _lastTossLineMsec := -10000000
+var _foodHelpUntil := 0
+var _foodHelpFactor := 1.0
+var _petHelpUntil := 0
 
 
 func _isHigh() -> bool:
-	return Time.get_ticks_msec() - _lastDoseMsec < int(HIGH_DURATION_SEC * 1000.0)
+	return Time.get_ticks_msec() - _lastDoseMsec < _highMs
 
 
 func _inWithdrawal() -> bool:
-	return addiction >= WITHDRAWAL_THRESHOLD and not _isHigh()
+	return _withdrawalActive and not _isHigh()
+
+
+## Обновляет флаг ломки по двум порогам (вызывается при каждом изменении).
+func _updateWithdrawalState() -> void:
+	if not _withdrawalActive and addiction >= WITHDRAWAL_START and not _isHigh():
+		_withdrawalActive = true
+		_hadWithdrawal = true
+	elif _withdrawalActive and addiction < WITHDRAWAL_END:
+		_withdrawalActive = false
+
+
+## Можно ли сейчас сказать фразу о ломке (общая пауза между всеми такими фразами).
+func _withdrawalLineAllowed() -> bool:
+	return Time.get_ticks_msec() - _lastWithdrawalLineMsec >= WITHDRAWAL_ANY_GAP_MS
+
+
+func _sayWithdrawal(situation: String = "", poolSuffix: String = "") -> void:
+	_lastWithdrawalLineMsec = Time.get_ticks_msec()
+	_say("withdrawal", 0.0, true, situation, poolSuffix)
 
 
 ## Вызывается из health_handler.gd, когда шприц с фентанилом попал в персонажа.
@@ -875,20 +926,39 @@ func takeFentanyl() -> void:
 	if now - _lastDoseMsec > DOSE_CHAIN_MS:
 		_dosesInRow = 0
 	_dosesInRow += 1
-	_lastDoseMsec = now
+	var duringWithdrawal := _inWithdrawal()
 
 	if _dosesInRow >= OVERDOSE_DOSES:
+		_lastDoseMsec = now
 		dialogueSys.speedMod = 0.8
 		_sayFinal("overdose")
 		goUnconscious(false)
 		return
 
+	# поддерживающая доза в ломке - облегчение вдвое короче, зависимость растёт сильнее
+	_highMs = int(HIGH_DURATION_SEC * 1000.0 * (0.5 if duringWithdrawal else 1.0))
+	_lastDoseMsec = now
+	var gain := ADDICTION_PER_DOSE
+	if duringWithdrawal:
+		gain = ADDICTION_PER_DOSE_IN_WITHDRAWAL
+	elif _hadWithdrawal and not _withdrawalActive:
+		gain = ADDICTION_RELAPSE # срыв: ломка уже прошла, а организм помнит
+		_hadWithdrawal = false
 	# чем сильнее зависимость, тем слабее эффект (толерантность)
 	var boost: float = HIGH_BOOST / (1.0 + addiction / 40.0)
-	moodSys.startDrugHigh(boost, HIGH_DURATION_SEC, boost * COMEDOWN_FRACTION)
-	addiction = minf(100.0, addiction + ADDICTION_PER_DOSE)
+	moodSys.startDrugHigh(boost, _highMs / 1000.0, boost * COMEDOWN_FRACTION)
+	moodSys.mood = clampf(moodSys.mood + DOSE_MOOD_KEEP, moodSys.minmood, maxf(moodSys.mood, minf(moodSys.maxmood, moodSys.woundMoodCap())))
+	addiction = minf(100.0, addiction + gain)
 	dialogueSys.speedMod = 0.8
 	_say("fentanyl")
+
+
+## Поел (hunger_handler.gd). Вкусное (7+) в ломке ускоряет спад зависимости:
+## 7 -> на 15%, 10 -> на 25%, 10 минут после еды.
+func onAte(taste: int) -> void:
+	if taste >= 7 and addiction > 0.0:
+		_foodHelpFactor = 1.0 + lerpf(0.15, 0.25, clampf((taste - 7) / 3.0, 0.0, 1.0))
+		_foodHelpUntil = Time.get_ticks_msec() + FOOD_HELP_MS
 
 
 ## Раз в 30 сек: зависимость понемногу спадает сама, а в ломке настроение
@@ -898,15 +968,22 @@ func drugLoop() -> void:
 		await get_tree().create_timer(30.0).timeout
 		if isUnconscious or isPlayer:
 			continue # у игрока ломки нет
+		var now := Time.get_ticks_msec()
 		if addiction > 0.0:
-			addiction = maxf(0.0, addiction - ADDICTION_DECAY_PER_MIN * 0.5)
+			var decay := ADDICTION_DECAY_PER_MIN * 0.5
+			if now < _foodHelpUntil:
+				decay *= _foodHelpFactor
+			addiction = maxf(0.0, addiction - decay)
+		_updateWithdrawalState()
 		if not _inWithdrawal():
 			continue
-		moodSys.mood = clampf(moodSys.mood - addiction * 0.02, moodSys.minmood, moodSys.maxmood)
-		var now := Time.get_ticks_msec()
-		if now >= _nextWithdrawalLineMsec and not isSleeping and not beingDragged and not shocked:
-			_nextWithdrawalLineMsec = now + randi_range(120000, 240000)
-			_say("withdrawal")
+		var drain := addiction * 0.02
+		if now < _petHelpUntil:
+			drain *= 0.5 # ласка смягчает ломку
+		moodSys.mood = clampf(moodSys.mood - drain, moodSys.minmood, moodSys.maxmood)
+		if now >= _nextWithdrawalLineMsec and _withdrawalLineAllowed() and not isSleeping and not beingDragged and not shocked:
+			_nextWithdrawalLineMsec = now + randi_range(WITHDRAWAL_LINE_MIN_MS, WITHDRAWAL_LINE_MAX_MS)
+			_sayWithdrawal()
 
 
 # ---------------- Игрок ----------------
@@ -1453,8 +1530,12 @@ func itemWatch() -> void:
 		_itemCommentedAt[key] = now
 		_lastItemReactionMsec = now
 		var extra := ""
-		if hungerHandler.hungry < 30.0 and _isFoodKey(key):
-			extra = "\nТы голодна."
+		if _isFoodKey(key):
+			# 054.998: у каждого персонажа свои вкусы (паспорт, поле tastes)
+			var taste := tasteFor(key, 5)
+			extra = "\nНа вкус для тебя это " + ("очень вкусно." if taste >= 7 else ("противно." if taste <= 3 else "так себе, обычная еда."))
+			if hungerHandler.hungry < 30.0:
+				extra += "\nТы {голодна|голоден}." # было "Ты голодна." и для мужских персонажей
 		LLMManager.requestItemReaction(_skinTag(), ITEM_DESCRIPTIONS[key], _aiStateHint() + extra, _on_state_reaction)
 
 
@@ -1480,6 +1561,15 @@ func _itemKey(body: Node) -> String:
 	return meta if meta is String else ""
 
 
+## 054.998: вкус еды для ЭТОГО персонажа - из паспорта (tastes), а если там
+## нет - вкус самого предмета. Дюне и Вельвет жёлтая плоть - 10, Розе хлеб - 2...
+func tasteFor(key: String, itemTaste: int) -> int:
+	var tastes = LLMManager.passport(_skinTag()).get("tastes", {})
+	if tastes is Dictionary and tastes.has(key):
+		return int(tastes[key])
+	return itemTaste
+
+
 func _isFoodKey(key: String) -> bool:
 	return key in ["bread", "pizzaslice", "burger", "banana", "juicedobry", "geofruit", "yellowflesh"]
 
@@ -1489,7 +1579,8 @@ func _isFoodKey(key: String) -> bool:
 func _drugLevel() -> int:
 	if _isHigh():
 		return 2 if moodSys.drugOffset > 30.0 else 1
-	if _inWithdrawal():
+	# 054.998: ломка упоминается примерно в каждой четвёртой фразе (была в каждой)
+	if _inWithdrawal() and randf() < WITHDRAWAL_MENTION_CHANCE:
 		return -1
 	return 0
 
@@ -1538,7 +1629,7 @@ func passivetalk() -> void:
 					]
 					if _isHigh():
 						statLine += ", ты под действием фентанила - тебе слишком хорошо и всё плывёт"
-					elif _inWithdrawal():
+					elif _inWithdrawal() and randf() < WITHDRAWAL_MENTION_CHANCE:
 						statLine += ", у тебя ломка - тебе плохо без фентанила"
 					if not _worn.is_empty():
 						statLine += ", на тебе надето: " + _wornDescription()
@@ -1616,7 +1707,7 @@ const ITEM_DESCRIPTIONS := {
 	"banana": "банан",
 	"juicedobry": "пакет яблочного сока 'Добрый'",
 	"geofruit": "странный минеральный фрукт, наполовину похожий на камень",
-	"yellowflesh": "кусок жёлтой плоти непонятного происхождения",
+	"yellowflesh": "кусок жёлтой плоти - мясо существ, похожих на савиан (таких, как ты и твои соседи)",
 	"containercrate": "обычный ящик с припасами",
 	"sawblade": "ржавое лезвие циркулярной пилы",
 	"fentanyl": "шприц с сине-белой жидкостью - фентанил",
@@ -1631,7 +1722,7 @@ const ITEM_DESCRIPTIONS := {
 ## Categories that are a reaction to something sudden happening right now -
 ## they should jump straight to the front of the display queue instead of
 ## waiting behind whatever ambient line is already lined up, same as drag.
-const URGENT_CATEGORIES := ["petReject", "screamBIG", "fell", "pet", "LightDamage", "MediumDamage", "HardDamage", "lastmoments", "fentanyl", "overdose"]
+const URGENT_CATEGORIES := ["petReject", "screamBIG", "fell", "pet", "petWounded", "LightDamage", "MediumDamage", "HardDamage", "lastmoments", "fentanyl", "overdose"]
 
 ## Which [tag] each category's quotes originally used in TRANSLATION.json -
 ## AI-generated replacement text never includes this on its own, so it's
@@ -1677,6 +1768,7 @@ const CATEGORY_SITUATION := {
 ## другой, близкой по духу категории.
 const CATEGORY_EXAMPLES_FROM := {
 	"overdose": "lastmoments",
+	"petWounded": "LowPassive",
 }
 
 ## Body-part injury art, matched by filename through skinmapper's own
@@ -1944,11 +2036,19 @@ func _tryTossSyringe() -> void:
 	var reach: float = 120.0 * float(gbData.settings.get("petScale", 4.0)) / 4.0
 	if absf(syringe.global_position.x - moveSys.rigid.global_position.x) > reach:
 		return
+	# 054.998: толчок - раз в 1-2 мин, фраза при нём - не чаще раза в 3 мин.
+	# Раньше: толкнул, шприц упал рядом, подошёл, толкнул - и фраза каждые секунды.
+	var now := Time.get_ticks_msec()
+	if now < _nextTossMsec:
+		return
+	_nextTossMsec = now + randi_range(TOSS_MIN_MS, TOSS_MAX_MS)
 	if syringe is RigidBody2D:
 		var toCursor: Vector2 = (moveSys.rigid.get_global_mouse_position() - syringe.global_position).normalized()
 		syringe.linear_velocity = toCursor * 650.0 + Vector2(0.0, -250.0)
 		syringe.angular_velocity = randf_range(-10.0, 10.0)
-	_say("withdrawal", 0.0, true, TOSS_SITUATION, "toss")
+	if now - _lastTossLineMsec >= TOSS_LINE_GAP_MS and _withdrawalLineAllowed():
+		_lastTossLineMsec = now
+		_sayWithdrawal(TOSS_SITUATION, "toss")
 
 
 func _pickWalkTarget() -> float:
@@ -1958,7 +2058,7 @@ func _pickWalkTarget() -> float:
 
 	# ломка - к шприцу с фентанилом (колоть себя сама она НЕ может - только
 	# отбросит шприц к человеку, см. _tryTossSyringe)
-	if _inWithdrawal() and randf() < 0.8:
+	if _inWithdrawal() and randf() < 0.8 and Time.get_ticks_msec() >= _nextTossMsec:
 		var syringe := _nearestBody(func(body, key): return key == "fentanyl")
 		if syringe:
 			_tossTarget = syringe
@@ -2100,6 +2200,19 @@ func _walkTo(targetX: float, isCommand: bool = false) -> void:
 	moveSys.dir = 0
 	moveSys.maxspeed = _baseMaxSpeed
 
+const PET_REJECT_MOOD := 20.0
+## 054.998: тяжело раненого гладят - не радость, а реакция по характеру
+## (поле "woundedPet" в паспорте: Роза то благодарит, то огрызается, Липи
+## больно и просит полечить, Дюне ласка не нужна - кормить!).
+const WOUNDED_PET_HP := 30.0
+
+func _woundedPetSituation() -> String:
+	var hint := String(LLMManager.passport(_skinTag()).get("woundedPet", ""))
+	if hint == "":
+		hint = "Отреагируй на ласку в своём характере."
+	return "Тебя гладят рукой, а ты тяжело {ранена|ранен}, тебе очень больно. " + hint
+
+
 func petReject() -> void:
 	dialogueSys.speedMod = 1.2
 	_say("petReject", 2, false)
@@ -2122,9 +2235,13 @@ func petLimb(limb: RigidBody2D):
 	else:
 		AudioManager.play_random(voiceSet["whine"], 0.375, 0, 1, true, 1, 'exp_pet', "whine")
 
-	if moodSys.mood + moodSys.drugOffset < 10.0: # под фентанилом ласку принимает даже при плохом базовом настроении
-		petReject()
+	# под фентанилом ласку принимает даже при плохом базовом настроении;
+	# 054.998: порог 10 -> 20 (Дюна с 16 хп радовался ласке)
+	if moodSys.mood + moodSys.drugOffset < PET_REJECT_MOOD or (_inWithdrawal() and addiction > HEAVY_ADDICTION and randf() < 0.5):
+		petReject() # тяжёлая ломка - отталкивает ласку через раз
 		return
+	if _inWithdrawal():
+		_petHelpUntil = Time.get_ticks_msec() + PET_HELP_MS # ласка смягчает ломку
 
 	#print("I JUST PET THE EXPIE ON HIS ", limb.name)
 	faceSys.setEmotion("happy")
@@ -2150,7 +2267,10 @@ func petLimb(limb: RigidBody2D):
 	
 	if not dialogueSys.is_dialogue_playing():
 		dialogueSys.speedMod = 0.7
-		_say("pet", 2, false)
+		if healthHandler.health < WOUNDED_PET_HP:
+			_say("petWounded", 2, false, _woundedPetSituation())
+		else:
+			_say("pet", 2, false)
 		
 	await get_tree().create_timer(5).timeout
 	faceSys.setEmotion("normal")

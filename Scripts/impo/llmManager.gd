@@ -217,6 +217,24 @@ func _loreFor(skinName: String) -> String:
 	return _loreBySkin[skinName]
 
 
+## 054.998: паспорт скина (character.json) целиком - для новых полей
+## (вкусы, фирменные слова, реакция раненого на ласку). Сначала папка игрока,
+## потом зашитая в сборку. Кэш сбрасывается в reloadLore().
+var _passportBySkin: Dictionary = {}
+
+func passport(skinName: String) -> Dictionary:
+	if not _passportBySkin.has(skinName):
+		var result := {}
+		for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+			if FileAccess.file_exists(path):
+				var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+				if data is Dictionary:
+					result = data
+					break
+		_passportBySkin[skinName] = result
+	return _passportBySkin[skinName]
+
+
 ## Род персонажа - из паспорта скина character.json (поле gender). Сначала
 ## папка игрока, потом зашитая в сборку (у старых игроков файла в папке
 ## может не быть - _syncBundledSkins существующие папки не обновляет).
@@ -730,6 +748,7 @@ func reloadLore() -> void:
 	# правка lore.txt/character.json не применялась до перезапуска игры
 	_loreBySkin.clear()
 	_genderBySkin.clear()
+	_passportBySkin.clear()
 	_clearPrefetchPools() # old cached lines were written under the old lore
 	print("LLMManager: lore reloaded (", lore.length(), " chars)")
 	poolsCleared.emit()

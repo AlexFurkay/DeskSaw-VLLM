@@ -63,10 +63,20 @@ func _onItemEnter(body: Node2D) -> void:
 		get_parent()._say("EatReject")
 		awaitDB()
 		return
+	# 054.998: вкус - свой у каждого персонажа (паспорт), настроение - по вкусу
+	var itemKey: String = body.scene_file_path.get_file().get_basename()
+	var taste: int = get_parent().tasteFor(itemKey, int(props.tasteIfConsumable))
 	AudioManager.play_sfx(AudioManager.eat)
 	hungry += props.replenishIfConsumable
-	self.get_parent().moodSys.mood += props.moodBoostIfConsumable
-	get_parent()._say(_getTasteCategory(props.tasteIfConsumable))
+	var moodSys = get_parent().moodSys
+	var boost := _moodForTaste(taste)
+	if boost > 0.0 and get_parent().addiction > get_parent().HEAVY_ADDICTION and get_parent()._inWithdrawal():
+		boost *= 0.5 # тяжёлая ломка - еда радует вдвое меньше
+	if not get_parent().isPlayer:
+		# вверх - не выше потолка ран (moodSys.woundMoodCap)
+		moodSys.mood = clampf(moodSys.mood + boost, moodSys.minmood, maxf(moodSys.mood, minf(moodSys.maxmood, moodSys.woundMoodCap())))
+	get_parent().onAte(taste)
+	get_parent()._say(_getTasteCategory(taste))
 
 	body.queue_free()
 	awaitDB()
@@ -76,6 +86,14 @@ func awaitDB() -> void:
 	await get_tree().create_timer(cd).timeout
 	foodDb = false
 	pass
+## Вкус 10 -> +4, 5 -> 0, 1 -> -2 (невкусное опускает не сильно - решение Alex).
+## Раньше настроение было свойством предмета, одно на всех (плоть -6 даже Дюне).
+func _moodForTaste(taste: int) -> float:
+	if taste >= 5:
+		return (taste - 5) * 0.8
+	return -(5 - taste) * 0.5
+
+
 func _getTasteCategory(taste: int) -> String:
 	if taste <= 3:
 		return "EatBad"
