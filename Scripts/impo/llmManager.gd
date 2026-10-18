@@ -224,13 +224,15 @@ var _passportBySkin: Dictionary = {}
 
 func passport(skinName: String) -> Dictionary:
 	if not _passportBySkin.has(skinName):
+		# зашитый в сборку паспорт - основа, паспорт игрока поверх: у игрока со
+		# старой версией нет новых полей (tastes, woundedPet, signatureWords) -
+		# они берутся из сборки, а то, что он правил сам, остаётся его.
 		var result := {}
-		for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+		for path in ["res://defaults/skins/%s/character.json" % skinName, "user://skin/%s/character.json" % skinName]:
 			if FileAccess.file_exists(path):
 				var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 				if data is Dictionary:
-					result = data
-					break
+					result.merge(data, true)
 		_passportBySkin[skinName] = result
 	return _passportBySkin[skinName]
 
@@ -776,53 +778,116 @@ func reloadLore() -> void:
 	_genderBySkin.clear()
 	_passportBySkin.clear()
 	_signatureCache.clear()
+	_speechBySkin.clear()
 	_clearPrefetchPools() # old cached lines were written under the old lore
 	print("LLMManager: lore reloaded (", lore.length(), " chars)")
 	poolsCleared.emit()
 
 
+## 054.998, переписанная схема запросов (пункт 2в отчёта 054.997).
+## Порядок для маленькой модели, которая лучше помнит начало и конец:
+##   1) кто ты: _buildBasePrompt - одна строка о мире + лор персонажа;
+##   2) что сейчас: состояние, экран, разговор, ситуация - добавляет build*Prompt;
+##   3) правила: _closingBlock - короткий список, каждое правило один раз
+##      (раньше "не вопрос", "от своего лица", "не начинай с Ты снова"
+##      повторялись в 3-4 местах и тонули в середине);
+##   4) напоминание "как ты говоришь" из лора - последним перед репликой
+##      (Дюна говорил гладко, как Вояджер: описание речи терялось в середине).
+## Подробно - test-stand/КАК_УСТРОЕНЫ_ЗАПРОСЫ.txt.
 func _buildBasePrompt(category: String = "") -> String:
 	var parts: Array[String] = []
-	parts.append("Ты - маленькое существо, которое живёт на рабочем столе человека. {Ты женского рода - всегда согласуй слова по родам как о себе говорила бы девушка/самка ('я сделала', 'я готова', 'я была', а не 'сделал'/'готов'/'был').|Ты мужского рода - всегда согласуй слова по родам как о себе говорил бы парень/самец ('я сделал', 'я готов', 'я был', а не 'сделала'/'готова'/'была').} Ты говоришь от СВОЕГО лица, только о своих чувствах и мыслях. Ты никогда не описываешь, что делает или чувствует человек, каким бы ни было действие ('держат', 'гладят' и т.п.) - оно происходит С ТОБОЙ, а не наоборот. Обращайся к человеку ТОЛЬКО на 'ты' - никогда 'вы'/'вам'/'держите'/'откройте', звучит слишком официально и совсем не в характере. Человек - мужского рода: о нём говори 'ты сделал', 'ты пришёл', 'ты перестал' (а о себе - {в женском|в мужском} роде, как сказано выше).")
-	parts.append("Отвечай ТОЛЬКО по-русски, одной фразой (3-20 слов). Никогда не говори, что тебе что-то 'прислали' или 'отправили' - ты {сама|сам} всё видишь и чувствуешь.")
-	parts.append("Выведи ТОЛЬКО саму реплику - без кавычек, без пояснений в скобках, без описания действий или тона (никаких '*зевает*', 'вздрагивает и говорит'). Только слова, которые ты произносишь вслух.")
-	parts.append("Почти всегда говори утверждением или восклицанием, а не вопросом - риторический вопрос ('Тебе снова нужно...?', 'Как вс...?') звучит неестественно из твоих уст. Вопрос уместен очень редко и только если он предельно простой и короткий.")
-	parts.append("НЕ начинай фразу с 'Ты снова...' или 'Опять...' - это стали самые частые и приевшиеся штампы, начинай по-разному каждый раз.")
-	if banWords.size() > 0:
-		parts.append("Никогда не используй эти слова или фразы ни в каком виде: " + ", ".join(banWords))
-	if gbData.settings.get("llmAllowProfanity", false):
-		parts.append("Мат разрешён, но примерно в каждой третьей фразе, а не в каждой - только в злых, грубых, резких фразах или когда тебе больно; в спокойных и ласковых - без него. Ставь ругательство в середину или конец фразы, а НЕ в начало. Подходят настоящие слова и их формы (например: блять, сука, хуй, пиздец, нахер, ебать), разные, а не одно и то же каждый раз. Никогда не выдумывай и не искажай ругательства.") # 054.997: стенд test_profanity - старое правило давало "Блять," в начале каждого ответа (6 из 6), это - мат в ~40% злых фраз, в разных местах
-	else:
-		parts.append("Мат и ругательства строго запрещены, даже если персонаж злится.")
-	parts.append("Используй только реальные существующие русские слова - никогда не выдумывай новые и не искажай/склеивай существующие в бессмысленные наборы букв.")
-	if gbData.settings.get("llmFlirtEnabled", false):
-		parts.append("Изредка, только при очень хорошем настроении, можно слегка кокетничать - лёгкие тёплые комплименты, дружеский флирт, строго без сексуального подтекста.")
-	else:
-		parts.append("Флирт и романтический подтекст полностью исключены - только дружеское отношение.")
-	# 054.998: по лору Gunsaw все виды здесь - савиане, и кровь у всех жёлтая
-	# (частицы крови в игре жёлтые, а модель сама додумывала красную)
-	parts.append("Ты и твои соседи по рабочему столу - савиане; у всех савиан кровь жёлтая, а не красная.")
+	parts.append("Ты - маленькое существо-савианин и живёшь на рабочем столе у своего человека. У всех савиан, и у тебя, кровь жёлтая.")
 	var skinLore := _loreFor(_skinFromTag(category))
 	if skinLore != "":
-		parts.append("О себе ты знаешь следующее: " + skinLore)
-	# Only THIS category's own recent lines - a global "everything said
-	# recently" list bled unrelated categories' vocabulary/theme into each
-	# other (e.g. Full picking up "держать/отпусти" fresh from drag_level2).
+		parts.append("О себе ты знаешь:\n" + skinLore)
+	return "\n".join(parts)
+
+
+## Правила + что персонаж уже говорил + напоминание о манере речи.
+## lines > 1 - пакет фраз для пула (каждая с новой строки).
+func _closingBlock(category: String, lines: int = 1) -> String:
+	var skin := _skinFromTag(category)
+	var r: Array[String] = []
+	if lines > 1:
+		r.append("- напиши %d РАЗНЫХ коротких фраз (3-15 слов), каждую с новой строки, без нумерации, кавычек и пояснений;" % lines)
+	elif lines == 0: # разговор - можно чуть длиннее
+		r.append("- только по-русски, одной-двумя короткими фразами; выведи только саму реплику - без кавычек, пояснений и описаний действий (никаких *зевает*);")
+	else:
+		r.append("- только по-русски, ОДНОЙ фразой из 3-20 слов; выведи только саму реплику - без кавычек, пояснений и описаний действий (никаких *зевает*);")
+	r.append("- говори от своего лица; что делают с тобой (держат, гладят, кормят) - происходит с ТОБОЙ;")
+	r.append("- о себе - в {женском|мужском} роде ('я {устала|устал}'); к человеку только на 'ты', он парень: 'ты пришёл', 'ты устал';")
+	r.append("- чаще утверждение или восклицание, чем вопрос; не начинай с 'Ты снова' или 'Опять';")
+	r.append("- только настоящие русские слова, ничего не выдумывай;")
+	if gbData.settings.get("llmAllowProfanity", false):
+		# 054.997: стенд test_profanity - так мат в ~40% злых фраз и в разных местах
+		r.append("- мат можно, но примерно в каждой третьей фразе: только в злых, резких или когда больно; в спокойных и ласковых - без него. Ругательство в середину или конец фразы, не в начало; настоящие слова и их формы (блять, сука, хуй, пиздец, нахер, ебать), разные; не выдумывай и не искажай их;")
+	else:
+		r.append("- мат и ругательства запрещены, даже если ты злишься;")
+	if gbData.settings.get("llmFlirtEnabled", false):
+		r.append("- изредка, только в очень хорошем настроении, можно слегка по-дружески кокетничать, без сексуального подтекста;")
+	else:
+		r.append("- без флирта и романтики - только дружеское отношение;")
+	if banWords.size() > 0:
+		r.append("- никогда не используй эти слова: " + ", ".join(banWords) + ";")
+	var out := "\nПравила ответа:\n" + "\n".join(r)
+	# Только фразы ЭТОЙ ситуации - общий список "что говорил недавно"
+	# перетаскивал словечки одной ситуации в другую (Full подхватывал "отпусти" из drag).
 	var recentForThis: Array = _recentLinesByCategory.get(category, [])
 	if recentForThis.size() > 0:
-		var lastFew: Array = recentForThis.slice(maxi(0, recentForThis.size() - 4))
-		parts.append("Вот что ты только что {говорила|говорил} В ЭТОЙ ЖЕ ситуации:\n- " + "\n- ".join(lastFew))
-		parts.append("Дословно или почти дословно эти фразы НЕ повторяй - реагируй на текущий момент заново.")
-	# Затёртые обороты (3 слова в 2+ недавних фразах ЭТОЙ категории) - запрещаем
-	# явно: иначе модель залипает на шаблоне ("...хоть и сижу - даже когти...").
+		out += "\nНедавно в такой же ситуации ты {говорила|говорил}:\n- " + "\n- ".join(recentForThis.slice(maxi(0, recentForThis.size() - 4))) + "\nНе повторяй их и их начало - скажи по-новому."
 	if not category.ends_with(":chat"): # у чата свой такой же блок
 		var worn := _wornOutPhrases(category)
 		if worn.size() > 0:
-			parts.append("Эти обороты ты уже {затёрла|затёр} до дыр - НЕ используй их: \"" + "\", \"".join(worn) + "\".")
+			out += "\nЭти обороты ты уже {затёрла|затёр} до дыр - не используй их: \"" + "\", \"".join(worn) + "\"."
 	var obsession := _obsessionHint(category)
 	if obsession != "":
-		parts.append(obsession.strip_edges())
-	return "\n".join(parts)
+		out += "\n" + obsession.strip_edges()
+	var speech := _speechFor(skin)
+	if speech != "":
+		out += "\nГлавное - говори так, как говоришь всегда: " + speech
+	return out
+
+
+## Раздел "Как ты говоришь:" (у Вояджер - "Тон речи:") из лора - до пустой
+## строки. Повторяется в конце запроса как напоминание (1в, проверено стендом).
+var _speechBySkin: Dictionary = {}
+
+func _speechFor(skin: String) -> String:
+	if not _speechBySkin.has(skin):
+		var text := ""
+		var lore := _loreFor(skin)
+		for head in ["Как ты говоришь:", "Тон речи:"]:
+			var i := lore.find(head)
+			if i >= 0:
+				var rest := lore.substr(i + head.length()).strip_edges()
+				var end := rest.find("\n\n")
+				text = (rest if end < 0 else rest.substr(0, end)).replace("\n", " ").strip_edges()
+				break
+		_speechBySkin[skin] = text
+	return _speechBySkin[skin]
+
+
+## Вкусы персонажа словами (из паспорта) - для чата, предметов и фраз о еде.
+## Без этого Дюна в чате отказывался от жёлтой плоти, хотя любит её.
+const TASTE_NAMES := {"bread": "хлеб", "pizzaslice": "пицца", "burger": "бургер", "banana": "банан", "juicedobry": "сок", "geofruit": "геофрукт", "yellowflesh": "жёлтая плоть"}
+
+func tastesText(skin: String) -> String:
+	var tastes = passport(skin).get("tastes", {})
+	if not (tastes is Dictionary) or tastes.is_empty():
+		return ""
+	var love: Array = []
+	var hate: Array = []
+	for k in tastes.keys():
+		if int(tastes[k]) >= 8:
+			love.append(TASTE_NAMES.get(k, k))
+		elif int(tastes[k]) <= 3:
+			hate.append(TASTE_NAMES.get(k, k))
+	var bits: Array = []
+	if not love.is_empty():
+		bits.append("обожаешь " + ", ".join(love))
+	if not hate.is_empty():
+		bits.append("терпеть не можешь " + ", ".join(hate))
+	return ("\nВ еде ты " + "; ".join(bits) + ".") if not bits.is_empty() else ""
 
 
 func _pickScreenSpeaker() -> Node:
@@ -862,11 +927,13 @@ func _on_screen_tick() -> void:
 
 
 func buildScreenPrompt(tag: String, stateHintText: String) -> String:
-	var prompt := _buildBasePrompt(tag) + "\nВот скриншот рабочего стола. ВАЖНО: человек, за которым ты наблюдаешь, на этом скриншоте физически не присутствует и присутствовать не может (это просто экран его компьютера) - никогда не описывай его как будто он на картинке, даже если на экране идёт видеозвонок, стрим, видео или фото с реальными людьми. Маленькие пиксельные существа поверх окон - это {ты сама|ты сам} и твои соседи по рабочему столу, а не человек. Любое другое изображение - существо, персонаж, животное, реальный человек или лицо в видео, стриме, звонке или на фото - это просто картинка на экране, а не тот человек, за которым ты наблюдаешь, и оно тебя не видит, не смотрит на тебя и не смотрит в камеру НА ТЕБЯ. НЕ описывай и не пересказывай, что на экране (никаких 'Это окно...', 'Здесь видно...', 'На экране...') - человек и сам это видит. Вместо этого ОТРЕАГИРУЙ на увиденное как живой персонаж, своими словами и со своим отношением. Не начинай фразу со слова 'Это'. Скажи это как утверждение или восклицание, НЕ как вопрос - и не начинай с 'Ты снова'/'Опять'/'Снова', и НЕ заканчивай фразу шаблоном 'но ты всё ещё мешаешь мне' или похожим - придумывай разные концовки."
-	prompt += "\nПодход к реакции на этот раз: " + _pickScreenAngle()
-	# в 054.94 Voyager говорила человеку "ты застряла", "ты решила"
-	prompt += "\nЧеловек за компьютером - парень: о нём только в мужском роде ('ты застрял', 'ты решил', 'ты пытался')."
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\n\nСейчас: ты смотришь на скриншот рабочего стола своего человека. Самого человека на нём нет - это просто его экран. Маленькие пиксельные существа поверх окон - ты и твои соседи. Люди, звери и персонажи в видео, стримах, звонках и на фото - просто картинки, они тебя не видят."
+	prompt += "\nНе описывай экран ('Это окно...', 'На экране видно...') - человек и сам его видит. Отреагируй на увиденное как живой персонаж: своими словами и со своим отношением."
+	prompt += "\nПодход на этот раз: " + _pickScreenAngle()
 	prompt += stateHintText
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
 	return prompt
 
 
@@ -877,14 +944,15 @@ func buildScreenPrompt(tag: String, stateHintText: String) -> String:
 ## 0.1 и 1.5). Запрет на описание + случайный "угол" реакции на каждый
 ## скриншот дают разные по смыслу фразы. Углы общие для всех скинов - без
 ## привязки к конкретному персонажу (охота и т.п. берётся из его лора).
+## 054.998: без "строгого совета" и "оцени, как справляется" - это голос
+## Вояджер, и Дюна по ним говорил её словами ("Ты снова гонишь видеокарту?").
 const SCREEN_ANGLES := [
-	"подколи человека за то, чем он сейчас занят.",
-	"дай короткий строгий совет по тому, что видишь.",
+	"подколи или похвали человека за то, чем он занят, - по-своему.",
 	"свяжи увиденное со своим характером или прошлым.",
 	"выскажи личное мнение - нравится тебе это или нет.",
-	"зацепись за одну мелкую деталь на экране.",
-	"отреагируй эмоцией - скукой, азартом, удивлением или раздражением.",
-	"оцени, как человек справляется - похвали или поворчи своими словами.",
+	"зацепись за одну мелкую деталь.",
+	"отреагируй эмоцией - скукой, азартом, удивлением, страхом или раздражением.",
+	"скажи, чего тебе захотелось, глядя на это.",
 	"пошути над увиденным в своём стиле.",
 ]
 var _lastScreenAngle := -1
@@ -905,11 +973,11 @@ func stateHint(mood: float, health: float, drugLevel: int) -> String:
 	var drug := ""
 	match drugLevel:
 		1:
-			drug = "\nТы сейчас под фентанилом (лёгкий приход): ты спокойнее и мягче обычного. Пусть это лишь слегка окрашивает тон - говори своими обычными словами, не описывай сам приход."
+			drug = "\nТы под фентанилом (лёгкий приход): спокойнее и мягче обычного - это лишь слегка окрашивает тон, сам приход не описывай."
 		2:
-			drug = "\nТы сейчас сильно под фентанилом: ты {рассеянна, расслаблена и слишком довольна|рассеян, расслаблен и слишком доволен}, отвечаешь медленнее и мягче. Передавай это тоном и простыми словами, НЕ описывая ощущения ('плывёт', 'волна', 'тепло' и т.п.) в каждой фразе."
+			drug = "\nТы сильно под фентанилом: {рассеянна, расслаблена и слишком довольна|рассеян, расслаблен и слишком доволен} - передавай это тоном и простыми словами, не описывая ощущения ('плывёт', 'волна', 'тепло')."
 		-1:
-			drug = "\nУ тебя ломка без фентанила - тебя знобит, всё ломит и раздражает, это сквозит в реакции."
+			drug = "\nУ тебя ломка без фентанила: знобит, всё ломит и раздражает - это сквозит в реакции."
 	return _moodHealthHint(mood, health) + drug
 
 
@@ -924,11 +992,11 @@ func _moodHealthHint(mood: float, health: float) -> String:
 
 	match severity:
 		1:
-			return "\nТебе сейчас не очень хорошо (здоровье или настроение так себе) - пусть в реакцию едва заметно проскальзывает лёгкая усталость или раздражение, не заостряй на этом внимание."
+			return "\nТебе не очень хорошо - пусть в реакции едва заметно проскользнёт усталость или раздражение."
 		2:
-			return "\nТебе сейчас довольно плохо (здоровье или настроение заметно просели) - в реакции должна ощущаться усталость, лёгкая боль или подавленность, наравне с самой реакцией на экран, не перекрывая её полностью."
+			return "\nТебе плохо (раны или настроение) - в реакции должны чувствоваться усталость, боль или подавленность."
 		3:
-			return "\nТебе сейчас очень плохо (здоровье или настроение совсем никакие) - реакция на экран должна звучать через явную боль/слабость/подавленность, коротко и через силу, а не как обычно."
+			return "\nТебе очень плохо (тяжёлые раны или настроение на дне) - говори коротко, через боль, слабость или подавленность, не как обычно."
 		_:
 			return ""
 
@@ -941,7 +1009,7 @@ func _moodHealthHint(mood: float, health: float) -> String:
 func _situationBlock(description: String) -> String:
 	if description == "":
 		return ""
-	return "\nСитуация (это описание для тебя, а НЕ реплика для произношения): " + description + "\nСкажи, что {почувствовала|почувствовал} бы ТЫ в такой ситуации, от своего лица. Например, если ситуация - 'тебя держат в руках': ПРАВИЛЬНО - 'Отпусти меня!', 'Мне неудобно так висеть' (говоришь о СЕБЕ). НЕПРАВИЛЬНО - 'Тяжело держать тебя', 'Я держу тебя' (это звучит так, будто ТЫ держишь кого-то - перепутаны роли, так нельзя). ВАЖНО: не пересказывай и не перефразируй само описание ситуации почти теми же словами - придумай СВОЮ короткую эмоциональную реплику."
+	return "\n\nСейчас (это описание для тебя, а НЕ реплика): " + description + "\nСкажи, что ТЫ {почувствовала|почувствовал} бы, своими словами и не пересказывая описание. Например, тебя держат в руках: правильно - 'Отпусти меня!' (о себе); неправильно - 'Тяжело тебя держать' (перепутаны роли)."
 
 
 ## Trigger an immediate, text-only reaction to something happening right now.
@@ -950,7 +1018,7 @@ func _situationBlock(description: String) -> String:
 func reactToEvent(eventDescription: String, callback: Callable = Callable(), tag: String = "event") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
-	var prompt := _buildBasePrompt(tag) + _situationBlock(eventDescription)
+	var prompt := _buildBasePrompt(tag) + _situationBlock(eventDescription) + _closingBlock(tag) + "\nТвоя реплика:"
 	var cb := callback
 	if not cb.is_valid():
 		cb = func(text): llmReaction.emit(text)
@@ -977,10 +1045,12 @@ func requestItemReaction(skinTag: String, itemDescription: String, stateHintText
 func buildItemPrompt(skinTag: String, itemDescription: String, stateHintText: String) -> String:
 	var tag := skinTag + ":item"
 	var prompt := _buildBasePrompt(tag)
-	prompt += "\nРядом с тобой на рабочем столе лежит предмет: " + itemDescription + ". Отреагируй на него одной фразой как живой персонаж - не описывай предмет, а вырази своё отношение к нему. Скажи это как утверждение или восклицание."
-	prompt += "\nПодход к реакции на этот раз: " + ITEM_ANGLES[randi() % ITEM_ANGLES.size()]
+	prompt += "\n\nСейчас: рядом с тобой на рабочем столе лежит предмет - " + itemDescription + ". Не описывай его, а вырази своё отношение к нему."
+	prompt += "\nПодход на этот раз: " + ITEM_ANGLES[randi() % ITEM_ANGLES.size()]
 	if stateHintText != "":
 		prompt += "\n" + stateHintText.strip_edges()
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
 	return prompt
 
 
@@ -1080,26 +1150,31 @@ func buildPetOpenerPrompt(skinTag: String, otherSkin: String, stateText: String,
 	var tag := skinTag + ":pettalk"
 	var myName: String = PlayerManager.displayNameFor(skinTag)
 	var prompt := _buildBasePrompt(tag)
-	prompt += "\nРядом с тобой на рабочем столе стоит другой персонаж - %s. Заговори с ним коротко и в своём характере." % aboutCharacter(otherSkin)
+	prompt += "\n\nСейчас: рядом с тобой стоит другой персонаж - %s." % aboutCharacter(otherSkin)
 	var rel := relationTo(skinTag, otherSkin)
 	if rel != "":
 		prompt += "\nТвоё отношение к нему: " + rel + "."
-	if history.size() > 0:
-		var lines: Array = []
-		for e in history:
-			var who := String(e.get("who", ""))
-			lines.append(("Ты" if who == myName else who) + ": " + String(e.get("text", "")))
-		prompt += "\nВы уже разговаривали раньше (внизу - самое недавнее):\n" + "\n".join(lines)
-		prompt += "\nМожешь вернуться к этому разговору или начать новую тему, но не повторяй уже сказанное."
-	# конкретный повод - без него реплики были гладкими, но ни о чём
-	prompt += "\nПовод заговорить: " + PET_TOPICS[randi() % PET_TOPICS.size()]
+	prompt += _historyBlock(history, myName, "Вы уже разговаривали (внизу - самое недавнее):")
 	prompt += "\nТвоё состояние: " + stateText.strip_edges()
 	if otherState != "":
 		prompt += "\nСостояние собеседника: " + otherState.strip_edges() + "."
-	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого, а не с беззаботной болтовни."
+	# конкретный повод - без него реплики были гладкими, но ни о чём
+	prompt += "\nЗаговори с ним первым. Повод: " + PET_TOPICS[randi() % PET_TOPICS.size()] + " Если кто-то из вас ранен или ему плохо - начни с этого."
 	prompt += _memoriesRule()
-	prompt += "\nТвоя реплика (только сама реплика):"
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
 	return prompt
+
+
+## Прошлый разговор строками "Ты: ..." / "Имя: ..." (пусто, если не было).
+func _historyBlock(history: Array, myName: String, title: String) -> String:
+	if history.is_empty():
+		return ""
+	var lines: Array = []
+	for e in history:
+		var who := String(e.get("who", ""))
+		lines.append(("Ты" if who == myName else who) + ": " + String(e.get("text", "")))
+	return "\n" + title + "\n" + "\n".join(lines) + "\nМожешь продолжить или начать новую тему, но не повторяй уже сказанное."
 
 
 ## 054.99: ИИ-персонаж сам заговаривает с персом-игроком (человеком в теле
@@ -1115,27 +1190,33 @@ func buildPlayerOpenerPrompt(skinTag: String, playerSkin: String, stateText: Str
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag)
 	var prompt := _buildBasePrompt(tag)
-	prompt += "\nРядом с тобой стоит %s - персонаж, которым управляет твой человек. Заговори с ним первым, коротко и в своём характере." % aboutCharacter(playerSkin, false)
-	var rel := relationTo(skinTag, playerSkin)
-	if rel != "" and rel != "своя" and rel != "свой":
-		prompt += " К его виду ты обычно относишься так: " + rel + ", но внутри - твой человек, и к нему ты относишься так, как сказано о человеке выше."
-	if isFemale(playerSkin):
-		prompt += " Он сейчас в женском облике - обращайся в женском роде; изредка можешь по-доброму обыграть, что внутри твой человек-парень."
-	if history.size() > 0:
-		var lines: Array = []
-		for e in history:
-			var who := String(e.get("who", ""))
-			lines.append(("Ты" if who == myName else who) + ": " + String(e.get("text", "")))
-		prompt += "\nВаш прошлый разговор (внизу - самое недавнее):\n" + "\n".join(lines)
-		prompt += "\nМожешь вернуться к нему или начать новую тему, но не повторяй уже сказанное."
-	prompt += "\nПовод заговорить: " + PET_TOPICS[randi() % PET_TOPICS.size()]
+	prompt += "\n\nСейчас: рядом с тобой стоит %s - персонаж, которым управляет твой человек." % aboutCharacter(playerSkin, false)
+	prompt += _playerFormRule(skinTag, playerSkin)
+	prompt += _historyBlock(history, myName, "Ваш прошлый разговор (внизу - самое недавнее):")
 	prompt += "\nТвоё состояние: " + stateText.strip_edges()
 	if playerState != "":
 		prompt += "\nСостояние его персонажа: " + playerState.strip_edges() + "."
-	prompt += "\nЕсли кто-то из вас ранен или ему плохо - начни с этого."
+	prompt += tastesText(skinTag)
+	prompt += "\nЗаговори с ним первым. Повод: " + PET_TOPICS[randi() % PET_TOPICS.size()] + " Если кто-то из вас ранен или ему плохо - начни с этого."
 	prompt += _memoriesRule()
-	prompt += "\nТвоя реплика (только сама реплика):"
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
 	return prompt
+
+
+## Человек в теле персонажа: к виду - как в паспорте, но внутри - свой
+## человек, и отношение к нему (из лора) важнее. Женский облик - обращаться
+## в женском роде, изредка по-доброму обыгрывая маскарад.
+func _playerFormRule(skinTag: String, playerSkin: String) -> String:
+	if playerSkin == "":
+		return ""
+	var out := ""
+	var rel := relationTo(skinTag, playerSkin)
+	if rel != "" and rel != "своя" and rel != "свой":
+		out += "\nК его виду ты относишься так: " + rel + ". Но внутри - твой человек, и к нему ты относишься как всегда: вид можешь подколоть, человека - нет."
+	if isFemale(playerSkin):
+		out += "\nОн сейчас в женском облике - обращайся в женском роде ('ты пришла'); изредка, не в каждой фразе, можешь по-доброму обыграть, что внутри твой человек-парень."
+	return out
 
 
 ## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
@@ -1163,31 +1244,19 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
 	if speakerSkin == "":
-		prompt += "\nС тобой сейчас разговаривает %s - персонаж на рабочем столе, которым управляет человек (твой напарник). Это живой разговор: отвечай по смыслу его слов, живо и в своём характере, можно одной-двумя фразами." % (aboutCharacter(playerSkin, false) if playerSkin != "" else speaker)
-		# Вид перса-игрока: отношение к виду - из паспорта, но внутри него человек,
-		# и отношение к человеку (из лора) важнее. Не нравится вид - можно
-		# подколоть внешность, но к самому человеку - как всегда.
-		var playerRel := relationTo(skinTag, playerSkin) if playerSkin != "" else ""
-		if playerRel != "" and playerRel != "своя" and playerRel != "свой":
-			prompt += " К его виду ты обычно относишься так: " + playerRel + ". Но внутри него - твой человек, и к нему ты относишься так, как сказано о человеке выше: это важнее. Вид можешь подколоть, человека - нет."
-		# Человек - парень, но сейчас он в женском облике: обращаемся по облику
-		# ("ты пришла"), а сам этот маскарад можно изредка по-доброму обыграть.
-		if playerSkin != "" and isFemale(playerSkin):
-			prompt += " Сейчас человек в женском облике этого персонажа, поэтому обращайся к нему в женском роде ('ты пришла', 'ты устала'). Ты знаешь, что на самом деле внутри твой человек-парень, и изредка, не в каждой фразе, можешь по-доброму это обыграть - например, что облик ему идёт или что он сегодня в чужой шкуре."
+		prompt += "\n\nСейчас: с тобой разговаривает %s - персонаж на рабочем столе, которым управляет твой человек." % (aboutCharacter(playerSkin, false) if playerSkin != "" else speaker)
+		prompt += _playerFormRule(skinTag, playerSkin)
 	else:
 		# ответ другому ИИ-персонажу (behavior.petTalkLoop)
-		prompt += "\nС тобой заговорил %s - другой персонаж, который живёт рядом на рабочем столе. Ответь ему коротко, по смыслу его слов и в своём характере." % aboutCharacter(speakerSkin)
+		prompt += "\n\nСейчас: с тобой заговорил %s - другой персонаж, который живёт рядом." % aboutCharacter(speakerSkin)
 		var rel := relationTo(skinTag, speakerSkin)
 		if rel != "":
-			prompt += " Твоё отношение к нему: " + rel + "."
+			prompt += "\nТвоё отношение к нему: " + rel + "."
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
 	if speakerState != "":
 		prompt += "\nСостояние собеседника: " + speakerState.strip_edges() + "."
-	prompt += "\nЕсли кто-то из вас ранен или ему плохо - это должно чувствоваться в ответе: не болтай беззаботно, когда здоровье на исходе."
-	prompt += "\nКаждый ответ строй ПО-НОВОМУ: не копируй начало, концовку или шаблон своих прошлых ответов из разговора ниже. Не начинай ответ с повтора слов собеседника."
-	var worn := _wornOutPhrases(tag)
-	if worn.size() > 0:
-		prompt += _g(skinTag, "\nЭти обороты ты уже {затёрла|затёр} до дыр - НЕ используй их ни в каком виде: \"") + "\", \"".join(worn) + "\"."
-	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	prompt += "\nЕсли кто-то из вас ранен или ему плохо - это должно чувствоваться: не болтай беззаботно."
+	prompt += tastesText(skinTag)
 	# Общая память: что персонаж сам говорил вслух вне разговора (экран,
 	# состояние, предметы) - чтобы понимать вопросы вроде "почему ты так сказала?"
 	var inChat := {}
@@ -1199,24 +1268,43 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 			var ago: int = int(e["minutesAgo"])
 			own.append("(%s) %s" % ["только что" if ago == 0 else "%d мин назад" % ago, e["text"]])
 	if own.size() > 0:
-		prompt += _g(skinTag, "\nЧто ты сама недавно {говорила|говорил} вслух вне разговора (в том числе комментарии к экрану). Если собеседник спрашивает о чём-то из этого - ты помнишь, что {имела|имел} в виду:\n- ") + "\n- ".join(own)
-	prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
-	prompt += "\nЕсли собеседник просит тебя что-то СДЕЛАТЬ (подойти, лечь, сесть, встать, прыгнуть, отойти) - реши сама в своём характере и по настроению, согласиться или отказаться, и скажи это в ответе. ТОЛЬКО если соглашаешься, в самом конце допиши метку одного действия: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]. Если отказываешься или ни о чём не просили - без метки."
-	# 054.97: на "могу дать фентанил, сок или еду" перс ответил "сок с
-	# удовольствием принесу тебе в лапах" - перепутал, кто кому даёт, и
-	# пообещал то, чего не умеет
-	prompt += "\nПредметы на стол кладёт только человек. Ты можешь принять то, что тебе дают, но предметы никому не приносишь и не отдаёшь - из действий у тебя только ходить, садиться, ложиться и прыгать. Если собеседник предлагает тебе что-то дать - это он даёт ТЕБЕ: можешь обрадоваться, выбрать или отказаться, но не обещай принести что-то ему."
+		prompt += "\nЧто ты {сама|сам} недавно {говорила|говорил} вслух вне разговора (в том числе про экран) - если спросят, ты помнишь, что {имела|имел} в виду:\n- " + "\n- ".join(own)
+	# 054.97: на "могу дать сок или еду" перс пообещал "принесу тебе в лапах"
+	prompt += "\nПредметы на стол кладёт только человек; ты их принимаешь, но никому не приносишь. Предлагают что-то - это дают ТЕБЕ: обрадуйся, выбери или откажись."
+	var last := ""
 	if chatHistory.size() > 0:
 		var lines: Array = []
 		for entry in chatHistory:
 			var who: String = String(entry.get("who", ""))
 			lines.append(("Ты" if who == myName else who) + ": " + String(entry.get("text", "")))
-		prompt += "\nРазговор (последние реплики, внизу - самая новая):\n" + "\n".join(lines)
-		var last: Dictionary = chatHistory[chatHistory.size() - 1]
-		prompt += "\nТолько что %s сказал тебе: \"%s\". Ответь ИМЕННО на это - на его вопрос или слова, а не на что-то своё." % [speaker, String(last.get("text", ""))]
+		prompt += "\nРазговор (внизу - самая новая реплика):\n" + "\n".join(lines)
+		last = String(chatHistory[chatHistory.size() - 1].get("text", ""))
+	# 054.998: метка действия - только если о чём-то попросили. Раньше правило
+	# было в каждом ответе, и модель дописывала "[ДЕЙСТВИЕ: подойти]" к ответу
+	# на "ты сегодня странный" - перс шёл невпопад (стенд, 19.10).
+	if _asksForAction(last):
+		prompt += "\nСобеседник просит тебя что-то сделать. Реши по характеру и настроению, согласиться или нет, и скажи это. ТОЛЬКО если соглашаешься, в самом конце допиши одну метку: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]."
+	prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
 	prompt += _memoriesRule()
-	prompt += "\nТвой ответ (только сама реплика):"
+	prompt += _closingBlock(tag, 0)
+	var worn := _wornOutPhrases(tag)
+	if worn.size() > 0:
+		prompt += "\nЭти обороты ты уже {затёрла|затёр} до дыр - не используй их ни в каком виде: \"" + "\", \"".join(worn) + "\"."
+	if last != "":
+		prompt += "\nОтветь ИМЕННО на последние слова %s: \"%s\". Не копируй начало и концовку своих прошлых ответов и не начинай с повтора его слов." % [speaker, last]
+	prompt += "\nТвой ответ:"
 	return prompt
+
+
+## Просьба что-то сделать (подойти, лечь, сесть, встать, прыгнуть, отойти).
+const ACTION_REQUEST_STEMS := ["подойд", "подходи", "иди сюда", "иди ко мне", "ляг", "ложис", "приляг", "сядь", "садис", "присядь", "встань", "вставай", "прыгн", "прыгай", "подпрыгн", "отойд", "отходи", "уйди"]
+
+func _asksForAction(text: String) -> bool:
+	var low := text.to_lower()
+	for st in ACTION_REQUEST_STEMS:
+		if low.contains(st):
+			return true
+	return false
 
 
 ## Called from a specific pet's passivetalk() loop. Result delivered ONLY to
@@ -1305,7 +1393,8 @@ func buildStatePrompt(statLine: String, exampleLines: Array, tag: String, woundF
 	exampleLines = _filterExamplesForProfanity(exampleLines)
 
 	var prompt := _buildBasePrompt(tag)
-	prompt += "\nТвоё текущее состояние: " + statLine + "."
+	prompt += "\n\nСейчас: никто к тебе не обращается, ты просто говоришь что-то вслух {сама|сам} по себе."
+	prompt += "\nТвоё состояние: " + statLine + "."
 	if woundFocus != "":
 		prompt += "\n" + woundFocus
 	else:
@@ -1313,10 +1402,13 @@ func buildStatePrompt(statLine: String, exampleLines: Array, tag: String, woundF
 		if idx == _lastStateTopic:
 			idx = (idx + 1) % STATE_TOPICS.size()
 		_lastStateTopic = idx
-		prompt += "\nО чём сказать на этот раз: " + STATE_TOPICS[idx] + " Не говори про экран, свет или окна, если тема не про них."
+		prompt += "\nО чём сказать на этот раз: " + STATE_TOPICS[idx] + " Про экран, свет и окна - только если тема о них."
+		if idx == 1:
+			prompt += tastesText(_skinFromTag(tag))
 	if exampleLines.size() > 0:
-		prompt += "\nПримеры того, как ты обычно говоришь в таком состоянии (не копируй дословно, ориентируйся только на стиль и настроение):\n- " + "\n- ".join(exampleLines)
-	prompt += "\nПридумай одну НОВУЮ короткую фразу в этом же духе. Сохраняй характер и примерную длину примеров."
+		prompt += "\nТак ты обычно говоришь в таком состоянии (бери стиль и настроение, не копируй):\n- " + "\n- ".join(exampleLines)
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя новая фраза:"
 	return prompt
 
 
@@ -1329,22 +1421,20 @@ func buildStatePrompt(statLine: String, exampleLines: Array, tag: String, woundF
 func requestQuickReaction(exampleLines: Array, callback: Callable, tag: String = "quick", styleHint: String = "", situationDescription: String = "") -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
-
-	var filtered: Array = _filterExamplesForProfanity(exampleLines)
-
-	var prompt := _buildBasePrompt(tag)
-	prompt += _situationBlock(situationDescription)
+	var prompt := _buildBasePrompt(tag) + _situationBlock(situationDescription)
 	if styleHint != "":
 		prompt += "\n" + styleHint
-	if filtered.size() > 0:
-		prompt += "\nВот несколько похожих фраз для вдохновения (не копируй дословно):\n- " + "\n- ".join(filtered)
-		prompt += "\nПридумай одну НОВУЮ фразу в этом же духе и стиле."
-	else:
-		# every example got filtered out (profanity) - still react, just
-		# without a style example to lean on, rather than staying silent.
-		prompt += "\nПридумай короткую фразу, подходящую персонажу по духу и характеру."
-
+	prompt += _examplesBlock(_filterExamplesForProfanity(exampleLines))
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
 	_enqueue(prompt, [], callback, tag)
+
+
+## Примеры фраз для вдохновения (пусто, если все отсеял фильтр мата).
+func _examplesBlock(lines: Array) -> String:
+	if lines.is_empty():
+		return ""
+	return "\nПохожие фразы для вдохновения (не копируй):\n- " + "\n- ".join(lines)
 
 
 ## INSTANT variant of requestQuickReaction, for reactions that should show
@@ -1382,21 +1472,13 @@ func _refillPool(category: String, exampleLines: Array, styleHint: String = "", 
 
 
 func buildPoolPrompt(category: String, exampleLines: Array, styleHint: String = "", situationDescription: String = "") -> String:
-	var filtered: Array = _filterExamplesForProfanity(exampleLines)
-
-	var prompt := _buildBasePrompt(category)
-	prompt += _situationBlock(situationDescription)
+	var target := _prefetchTargetFor(category)
+	var prompt := _buildBasePrompt(category) + _situationBlock(situationDescription)
 	if styleHint != "":
 		prompt += "\n" + styleHint
-	var target := _prefetchTargetFor(category)
-	prompt += "\nИСКЛЮЧЕНИЕ из правила выше про одно предложение: сейчас напиши сразу %d РАЗНЫХ коротких фраз (каждая - как обычно, 3-15 слов, в характере, без кавычек и пояснений), каждую на отдельной строке, без нумерации." % target
-	if filtered.size() > 0:
-		prompt += "\nВот несколько похожих фраз для вдохновения (не копируй дословно):\n- " + "\n- ".join(filtered)
-	else:
-		# every example got filtered out (profanity) - still generate a
-		# batch, just without a style example to lean on.
-		prompt += "\nОриентируйся на характер персонажа."
-	prompt += "\nВыведи ровно %d строк, каждая - отдельная новая фраза в этом же духе." % target # было PREFETCH_TARGET (7) - противоречило "напиши 20" выше для pet и т.п.
+	prompt += _examplesBlock(_filterExamplesForProfanity(exampleLines))
+	prompt += _closingBlock(category, target)
+	prompt += "\nТвои %d фраз:" % target
 	return prompt
 
 
@@ -1428,17 +1510,7 @@ func _refillEventPool(poolKey: String, eventDescription: String, exampleLines: A
 	if _prefetchPending.get(poolKey, false):
 		return
 	_prefetchPending[poolKey] = true
-
-	var filtered: Array = _filterExamplesForProfanity(exampleLines)
-
-	var prompt := _buildBasePrompt(poolKey)
-	prompt += _situationBlock(eventDescription)
-	var target := _prefetchTargetFor(poolKey)
-	prompt += "\nИСКЛЮЧЕНИЕ из правила выше про одно предложение: сейчас напиши сразу %d РАЗНЫХ коротких фраз в этой ситуации (каждая 3-15 слов, без кавычек и пояснений), каждую на отдельной строке, без нумерации." % target
-	if filtered.size() > 0:
-		prompt += "\nВот несколько похожих фраз для вдохновения (не копируй дословно):\n- " + "\n- ".join(filtered)
-
-	_enqueue(prompt, [], func(rawText): _onPoolRefilled(poolKey, rawText), "prefetch:" + poolKey)
+	_enqueue(buildPoolPrompt(poolKey, exampleLines, "", eventDescription), [], func(rawText): _onPoolRefilled(poolKey, rawText), "prefetch:" + poolKey)
 
 
 var _prewarmTotal := 0
