@@ -2854,6 +2854,7 @@ scale = Vector2(0.999981, 0.99997854)
 
 [node name="RichTextLabel" type="RichTextLabel" parent="textParent" unique_id=323548257]
 texture_filter = 1
+mouse_filter = 2
 offset_left = -122.79461
 offset_top = -24.251263
 offset_right = 122.74047
@@ -2877,6 +2878,7 @@ offset_bottom = -7.0826797
 
 [node name="DebugText" type="Label" parent="textParent" unique_id=739158021]
 visible = false
+mouse_filter = 2
 offset_left = -40.0
 offset_top = -40.0
 offset_right = 36.0

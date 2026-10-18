@@ -456,7 +456,7 @@ valueType = "int"
 layout_mode = 2
 label = "Сохранять персонажей между запусками"
 key = "expiePersistence"
-defaultValue = true
+defaultValue = false
 
 [node name="AiFpsSave" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967699 instance=ExtResource("5_hils5")]
 layout_mode = 2
@@ -540,9 +540,10 @@ horizontal_alignment = 1
 
 [node name="SkinName" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=737089591 instance=ExtResource("12_qw8t2")]
 layout_mode = 2
-label = "Папка скина по умолчанию"
+label = "Персонаж по умолчанию (появляется при запуске)"
 key = "defaultSkin"
-defaultValue = "Body"
+defaultValue = "VoyagerAlt"
+choicesFromSkins = true
 
 [node name="MoodMin" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1160899127 instance=ExtResource("9_r80vr")]
 layout_mode = 2
@@ -657,7 +658,7 @@ size_flags_horizontal = 3
 
 [node name="DefaultSkinButton" type="Button" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer/SkinsMarginContainer/ScrollContainer/VBoxContainer" unique_id=1892626913]
 layout_mode = 2
-text = "Experiment (по умолчанию)"
+text = "Experiment"
 autowrap_mode = 3
 
 [node name="OptionsMarginContainer" type="MarginContainer" parent="MarginContainer/ViewportPanel/SkinsView/MarginContainer/HBoxContainer/SelectorPanel/VBoxContainer" unique_id=1591849225]

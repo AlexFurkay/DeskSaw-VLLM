@@ -40,6 +40,10 @@ GlobalKeys="*res://Scripts/preload/GlobalKeys.cs"
 PlayerManager="*res://Scripts/impo/playerManager.gd"
 Diagnostics="*res://Scripts/preload/diagnostics.gd"
 
+[debug]
+
+file_logging/max_log_files=20
+
 [display]
 
 window/size/borderless=true

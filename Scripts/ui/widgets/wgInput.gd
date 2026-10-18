@@ -12,6 +12,9 @@ extends PanelContainer
 @export var key: String
 ## If the key hasn't been created before, which should be it's default value?
 @export var defaultValue: String
+## 054.998: вместо текстового поля - выпадающий список папок персонажей
+## (user://skin). Для "скина по умолчанию": имя папки нельзя ввести с ошибкой.
+@export var choicesFromSkins: bool = false
 
 @export_category("Nodes - DONT CHANGE")
 @export var _textEdit: TextEdit
@@ -58,6 +61,45 @@ func _ready() -> void:
 		refresh()
 		_textEdit.text_changed.connect(_on_text_edit_changed)
 		GlobalVariable.dataNuked.connect(_read_refresh)
+		if choicesFromSkins:
+			_setupSkinChoices()
+
+
+var _choices: OptionButton
+
+func _setupSkinChoices() -> void:
+	_textEdit.visible = false
+	_choices = OptionButton.new()
+	_choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_textEdit.get_parent().add_child(_choices)
+	_textEdit.get_parent().move_child(_choices, _textEdit.get_index())
+	_fillSkinChoices()
+	_choices.item_selected.connect(_on_choice_selected)
+	# новые папки скинов могли появиться после запуска - список при каждом открытии
+	_choices.get_popup().about_to_popup.connect(_fillSkinChoices)
+
+
+func _fillSkinChoices() -> void:
+	var current := String(gbData.settings.get(key, defaultValue))
+	_choices.clear()
+	var names: Array = []
+	var dir := DirAccess.open("user://skin")
+	if dir:
+		for d in dir.get_directories():
+			if d != "Body" and d != "Default":
+				names.append(d)
+	names.sort()
+	if not names.has(current):
+		names.push_front(current) # чужое/старое значение не теряем молча
+	for n in names:
+		_choices.add_item(n)
+	_choices.select(names.find(current))
+	# список - отдельное окно, общий масштаб текста консоли его не задевает
+	_choices.get_popup().add_theme_font_size_override("font_size", maxi(6, int(round(_choices.get_theme_font_size("font_size")))))
+
+
+func _on_choice_selected(index: int) -> void:
+	_textEdit.text = _choices.get_item_text(index) # дальше как при ручном вводе
 
 var _ignore_next_change: bool = false
 func _read_refresh() -> void:
@@ -65,6 +107,8 @@ func _read_refresh() -> void:
 	# correctly display all values.
 	_ignore_next_change = true
 	refresh()
+	if _choices:
+		_fillSkinChoices()
 
 func _on_text_edit_changed() -> void:
 	if _ignore_next_change:

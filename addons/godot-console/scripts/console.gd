@@ -20,7 +20,7 @@ var _history_index : int
 
 
 func _init() -> void:
-	create_command("clear", clear, "очищает окно консоли")
+	create_command("clear", _command_clear, "очищает окно консоли")
 	create_command("help", _command_help, "список всех команд")
 
 ## Return [param true] if the console has a command.
@@ -209,6 +209,13 @@ func clear() -> void:
 	_history_index = 0
 
 	cleared.emit()
+
+
+## 054.998: после clear сразу список команд - иначе окно пустое, и новичок
+## не знает, что help возвращает подсказки.
+func _command_clear() -> void:
+	clear()
+	_command_help()
 
 
 func _command_help() -> void:

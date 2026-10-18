@@ -28,6 +28,7 @@ func _ready() -> void:
 	openDBButton.pressed.connect(_on_db_button_press)
 
 	visibility_changed.connect(_update)
+	gbData.SettingsChanged.connect(_markDefaultSkin)
 	scan_for_skins()
 
 	# Персонаж-игрок (PlayerManager): кнопка рядом со Spawn
@@ -75,9 +76,24 @@ func _defaultSkinPath() -> String:
 	return p if DirAccess.dir_exists_absolute(p) else "res://assets/Body/"
 
 
+## 054.998: "(по умолчанию)" - у того персонажа, который выбран в настройке
+## "Персонаж по умолчанию" (defaultSkin). Раньше надпись была вшита в кнопку
+## Experiment - наследство оригинала, где он и был по умолчанию.
+const DEFAULT_MARK := " (по умолчанию)"
+
+func _markDefaultSkin() -> void:
+	var def := String(gbData.settings.get("defaultSkin", ""))
+	defaultSkinButton.text = "Experiment" + (DEFAULT_MARK if def == EXPIE_SKIN else "")
+	for i in skinButtons.size():
+		if i < skinsDirectoryArray.size() and is_instance_valid(skinButtons[i]):
+			var n: String = skinsDirectoryArray[i].name
+			skinButtons[i].text = n + (DEFAULT_MARK if n == def else "")
+
+
 func _update() -> void:
 	if !visible:
 		return
+	_markDefaultSkin()
 	# refresh expie display
 	skinNameLabel.text = get_skin_name()
 	GlobalVariable.userSkinPath = (
@@ -92,39 +108,13 @@ func _update() -> void:
 func get_skin_name() -> String:
 	return "Experiment" if selectedSkin == null else selectedSkin.name
 
+## 054.998: раньше тут была своя копия спавна, и она записывала в сохранение
+## не того персонажа: Experiment из этого меню сохранялся как скин из
+## настройки "по умолчанию" (после перезапуска с сохранением персонажей
+## превращался в Вояджер), а размер был всегда 4 вместо настройки petScale.
+## Теперь - общий спавн, как у команды spawn_pet.
 func spawnExpie(petId: String = ""):
-	var path = "res://scenes/sawianBase.tscn"
-	var scene = load(path)
-	var instance = scene.instantiate()
-
-	if petId == "":
-		var n = selectedSkin.name if selectedSkin else gbData.settings.get("defaultSkin", "Body")
-		petId = gbData.addPet(n)
-	instance.get_node("behavior").petId = petId
-
-	var wrapper = Node2D.new()
-	wrapper.scale = Vector2(4.0, 4.0)
-
-	get_tree().current_scene.add_child(wrapper)
-	wrapper.owner = get_tree().current_scene
-
-	wrapper.add_child(instance)
-	instance.owner = get_tree().current_scene
-
-	"""
-	# im totally not upset that it took me 20 minutes to fuigye0=fuwerauoasdfg to figure out that this was running seperately
-	from the spawn command.
-	which is why the ids werent being added to the dictionary
- 	im totally not.
-
-	maybe i should go over prs for an extra hour or two next time
-
-	
-	"""
-
-	instance.global_position.x = float(GlobalVariable.screenWidth) / 2
-	instance.global_position.y = - float(GlobalVariable.screenHeight) * 2
-	wrapper.set_meta("Category", "entity")
+	CommandsGlobal.spawnExpie(petId)
 
 
 ## Look for all available user skins and store them.
@@ -168,6 +158,7 @@ func regenerate_buttons() -> void:
 		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		btn.pressed.connect(_on_skin_button_press.bind(skin))
 		skinButtons.append(btn)
+	_markDefaultSkin()
 
 ## Select a skin when pressing on a skin button.
 func _on_skin_button_press(skin_entry = null) -> void:

@@ -19,8 +19,6 @@ var _ollama := "ещё не проверено"
 
 func _ready() -> void:
 	_startMsec = Time.get_ticks_msec()
-	if FileAccess.file_exists(REPORT):
-		DirAccess.copy_absolute(ProjectSettings.globalize_path(REPORT), ProjectSettings.globalize_path(REPORT_PREV))
 	Console.create_command("diag_report", writeReport, "пересобрать отчёт диагностики (diagnostics.txt в папке сохранений)")
 	await get_tree().create_timer(FIRST_REPORT_DELAY).timeout
 	await _checkOllama()
@@ -30,7 +28,16 @@ func _ready() -> void:
 		_appendStatus()
 
 
+## 054.998: прошлый отчёт уходит в _prev только когда пишется новый. Раньше
+## копия делалась сразу при запуске, а новый отчёт - через 20 с: если игру
+## закрыть раньше, оба файла становились одинаковыми, а позапрошлый терялся.
+var _prevSaved := false
+
 func writeReport() -> void:
+	if not _prevSaved:
+		_prevSaved = true
+		if FileAccess.file_exists(REPORT):
+			DirAccess.copy_absolute(ProjectSettings.globalize_path(REPORT), ProjectSettings.globalize_path(REPORT_PREV))
 	var L: Array[String] = []
 	L.append("=== DeskSaw VLLM - диагностика ===")
 	L.append("Сборка: %s   Время: %s   Работает: %d мин" % [GlobalVariable.BUILD, Time.get_datetime_string_from_system(), (Time.get_ticks_msec() - _startMsec) / 60000])

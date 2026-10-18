@@ -130,6 +130,43 @@ func _ready() -> void:
 	_scheduleScreenTick()
 
 
+## 054.998: при выходе из игры - отменить запросы и сразу выгрузить модель.
+## Раньше модель сидела в видеопамяти ещё 30 минут (keep_alive), а уже
+## начатые запросы Ollama досчитывала после выхода: у тестеров Ollama
+## грузила компьютер при закрытой игре.
+func _exit_tree() -> void:
+	_queue.clear()
+	_backgroundQueue.clear()
+	if http:
+		http.cancel_request() # оборванное соединение - Ollama бросает генерацию
+	_unloadModelSync()
+
+
+## Запрос с keep_alive 0 и без текста - Ollama выгружает модель. Синхронно и
+## не дольше ~1,5 с: игра закрывается, ждать ответа асинхронно уже некому.
+func _unloadModelSync() -> void:
+	if modelName == "":
+		return
+	var client := HTTPClient.new()
+	if client.connect_to_host("127.0.0.1", 11434) != OK:
+		return
+	var deadline := Time.get_ticks_msec() + 1500
+	while client.get_status() in [HTTPClient.STATUS_CONNECTING, HTTPClient.STATUS_RESOLVING]:
+		if Time.get_ticks_msec() > deadline:
+			return
+		client.poll()
+		OS.delay_msec(10)
+	if client.get_status() != HTTPClient.STATUS_CONNECTED:
+		return
+	var body := JSON.stringify({"model": modelName, "keep_alive": 0})
+	if client.request(HTTPClient.METHOD_POST, "/api/generate", ["Content-Type: application/json"], body) != OK:
+		return
+	while client.get_status() == HTTPClient.STATUS_REQUESTING and Time.get_ticks_msec() < deadline:
+		client.poll()
+		OS.delay_msec(10)
+	client.close()
+
+
 func _loadSavedSettings() -> void:
 	modelName = String(gbData.settings.get("llmModelName", modelName)).strip_edges()
 	creativity = gbData.settings.get("llmCreativity", creativity)

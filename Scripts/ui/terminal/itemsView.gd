@@ -63,7 +63,7 @@ const ITEM_RU_NAMES := {
 	"banana": "банан", "bandage": "бинт", "beret": "берет", "bread": "хлеб",
 	"burger": "бургер", "chair": "стул", "containercrate": "ящик",
 	"fentanyl": "фентанил", "geofruit": "геофрукт", "glasses": "очки",
-	"hat": "шляпа", "juicedobry": "сок «Добрый»", "medcrate": "медящик",
+	"hat": "шляпа", "juicedobry": "сок «Добрый»", "medcrate": "мед. ящик",
 	"medkit": "аптечка", "nightstand": "тумбочка", "pizzaslice": "пицца",
 	"sawblade": "пила", "syringe": "шприц", "yellowflesh": "жёлтая плоть",
 }

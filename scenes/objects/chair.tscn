@@ -8,8 +8,14 @@
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_det"]
 size = Vector2(112, 144)
 
-[sub_resource type="RectangleShape2D" id="RectangleShape2D_col"]
-size = Vector2(96, 128)
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_back"]
+size = Vector2(24, 56)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_seat"]
+size = Vector2(96, 24)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_leg"]
+size = Vector2(24, 48)
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_ol"]
 shader = ExtResource("1_sh")
@@ -39,7 +45,20 @@ scale = Vector2(8, 8)
 texture = ExtResource("2_tx")
 
 [node name="Collision" type="CollisionShape2D" parent="."]
-shape = SubResource("RectangleShape2D_col")
+position = Vector2(0, 4)
+shape = SubResource("RectangleShape2D_seat")
+
+[node name="CollisionBack" type="CollisionShape2D" parent="."]
+position = Vector2(-36, -36)
+shape = SubResource("RectangleShape2D_back")
+
+[node name="CollisionLegL" type="CollisionShape2D" parent="."]
+position = Vector2(-36, 40)
+shape = SubResource("RectangleShape2D_leg")
+
+[node name="CollisionLegR" type="CollisionShape2D" parent="."]
+position = Vector2(36, 40)
+shape = SubResource("RectangleShape2D_leg")
 
 [node name="draggable" type="Node" parent="." node_paths=PackedStringArray("sprite")]
 script = ExtResource("3_dr")
