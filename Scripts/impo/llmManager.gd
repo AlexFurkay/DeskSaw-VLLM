@@ -542,7 +542,7 @@ func _obsessiveWords(tag: String) -> Dictionary:
 	for line in recent:
 		var seen := {}
 		for w in _normWords(String(line)):
-			if w.length() < 3 or not _isCyrillicWord(w) or (w.length() < 5 and _MOTIF_SHORT_STOP.has(w)):
+			if w.length() < 3 or not _isCyrillicWord(w) or (w.length() < 5 and _MOTIF_SHORT_STOP.has(w)) or _isSignatureWord(skin, w):
 				continue
 			var stem := w.substr(0, 5)
 			if _MOTIF_STOP.has(w) or seen.has(stem):
@@ -557,6 +557,31 @@ func _obsessiveWords(tag: String) -> Dictionary:
 	return result
 
 
+## 054.998: фирменные слова персонажа (паспорт, signatureWords) фильтр повторов
+## не трогает. Лог 054.997: у Дюны выбрасывалось 89% фраз о состоянии, потому
+## что "Дюна" и "еда" есть почти в каждой - это его манера речи, а не повтор;
+## да ещё модели велели "обойтись без этих слов", и Дюна начинал говорить
+## гладко, как Вояджер. Основа слова: без последней буквы, 2-4 буквы
+## ("еда" -> "ед", "охота" -> "охот"), формы слова до +5 букв.
+var _signatureCache: Dictionary = {}
+
+func _signatureStems(skin: String) -> Array:
+	if not _signatureCache.has(skin):
+		var stems: Array = []
+		for w in passport(skin).get("signatureWords", []):
+			var low := String(w).to_lower()
+			stems.append(low.substr(0, clampi(low.length() - 1, 2, 4)))
+		_signatureCache[skin] = stems
+	return _signatureCache[skin]
+
+
+func _isSignatureWord(skin: String, w: String) -> bool:
+	for st in _signatureStems(skin):
+		if w.begins_with(st) and w.length() <= st.length() + 5:
+			return true
+	return false
+
+
 func _isCyrillicWord(w: String) -> bool:
 	var c := w.unicode_at(0)
 	return (c >= 0x0430 and c <= 0x044F) or c == 0x0451
@@ -566,8 +591,9 @@ func _hitsObsession(tag: String, text: String) -> bool:
 	var motifs := _obsessiveWords(tag)
 	if motifs.is_empty():
 		return false
+	var skin := _skinFromTag(tag)
 	for w in _normWords(text):
-		if w.length() >= 3 and motifs.has(w.substr(0, 5)):
+		if w.length() >= 3 and motifs.has(w.substr(0, 5)) and not _isSignatureWord(skin, w):
 			return true
 	return false
 
@@ -612,10 +638,10 @@ const _SKIN_STOP := ["тебя", "меня", "тебе", "себя", "хочу",
 	"всех", "весь", "вся", "лучше", "пусть", "мной", "тобой", "него", "неё", "этой", "этом", "так", "раз"]
 const SKIN_WORN_WINDOW := 15 # последних фраз каждой ситуации скина
 const SKIN_WORN_SHARE := 0.10 # слово в 10%+ этих фраз - перебор
-func _contentStems(text: String) -> Dictionary:
+func _contentStems(text: String, skin: String = "") -> Dictionary:
 	var stems := {}
 	for w in _normWords(text):
-		if w.length() < 4 or not _isCyrillicWord(w) or _SKIN_STOP.has(w):
+		if w.length() < 4 or not _isCyrillicWord(w) or _SKIN_STOP.has(w) or (skin != "" and _isSignatureWord(skin, w)):
 			continue
 		var st := w.substr(0, 4)
 		if not stems.has(st):
@@ -637,7 +663,7 @@ func _skinOverusedWords(skin: String) -> Dictionary:
 	var counts := {}
 	var forms := {}
 	for line in lines:
-		var stems := _contentStems(String(line))
+		var stems := _contentStems(String(line), skin)
 		for st in stems.keys():
 			counts[st] = int(counts.get(st, 0)) + 1
 			forms[st] = stems[st]
@@ -749,6 +775,7 @@ func reloadLore() -> void:
 	_loreBySkin.clear()
 	_genderBySkin.clear()
 	_passportBySkin.clear()
+	_signatureCache.clear()
 	_clearPrefetchPools() # old cached lines were written under the old lore
 	print("LLMManager: lore reloaded (", lore.length(), " chars)")
 	poolsCleared.emit()
@@ -772,6 +799,9 @@ func _buildBasePrompt(category: String = "") -> String:
 		parts.append("Изредка, только при очень хорошем настроении, можно слегка кокетничать - лёгкие тёплые комплименты, дружеский флирт, строго без сексуального подтекста.")
 	else:
 		parts.append("Флирт и романтический подтекст полностью исключены - только дружеское отношение.")
+	# 054.998: по лору Gunsaw все виды здесь - савиане, и кровь у всех жёлтая
+	# (частицы крови в игре жёлтые, а модель сама додумывала красную)
+	parts.append("Ты и твои соседи по рабочему столу - савиане; у всех савиан кровь жёлтая, а не красная.")
 	var skinLore := _loreFor(_skinFromTag(category))
 	if skinLore != "":
 		parts.append("О себе ты знаешь следующее: " + skinLore)
@@ -1597,7 +1627,7 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 					_logDebugLine(category, "REJECTED:TOO_FRAGMENTARY", raw)
 					continue # too fragmentary to salvage - drop this line entirely
 
-		var lineStems := _contentStems(cleaned)
+		var lineStems := _contentStems(cleaned, _skinFromTag(category))
 		var overused := ""
 		for st in lineStems.keys():
 			var used := int(batchStems.get(st, 0))
