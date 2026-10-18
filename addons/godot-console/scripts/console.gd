@@ -10,6 +10,10 @@ extends Node
 signal printed_line(string: String)
 ## Emitted when the console history is cleared.
 signal cleared()
+## 054.998: строка прогресса (скачивание модели) - обновляется на месте, если
+## после неё ничего не печаталось (replace = true).
+signal progress_line(string: String, replace: bool)
+var _lastWasProgress := false
 
 
 var _commands: Dictionary[StringName, Dictionary] = {}
@@ -71,14 +75,23 @@ func create_command(command_name: StringName, callable: Callable, description: S
 
 ## Print string to the console.
 func print(string: String) -> void:
+	_lastWasProgress = false
 	printed_line.emit(string + "\n")
+
+## Печатает строку прогресса; следующий вызов заменит её, если между ними
+## ничего не печаталось.
+func print_progress(string: String) -> void:
+	progress_line.emit(string, _lastWasProgress)
+	_lastWasProgress = true
 
 ## Print warning message to the console.
 func warning(string: String) -> void:
+	_lastWasProgress = false
 	printed_line.emit("[color=YELLOW]" + string + "[/color]\n")
 
 ## Print error message to the console.
 func error(string: String) -> void:
+	_lastWasProgress = false
 	printed_line.emit("[color=RED]" + string + "[/color]\n")
 
 

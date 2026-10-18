@@ -84,6 +84,9 @@ func set_console(console: ConsoleNode) -> void:
 		if _console.cleared.is_connected(_console_output.clear):
 			_console.cleared.disconnect(_console_output.clear)
 
+		if _console.progress_line.is_connected(_on_progress_line):
+			_console.progress_line.disconnect(_on_progress_line)
+
 	if is_instance_valid(console):
 		if not console.printed_line.is_connected(_console_output.append_text):
 			var error := console.printed_line.connect(_console_output.append_text)
@@ -93,8 +96,19 @@ func set_console(console: ConsoleNode) -> void:
 			var error := console.cleared.connect(_console_output.clear)
 			assert(error == OK, error_string(error))
 
+		if not console.progress_line.is_connected(_on_progress_line):
+			console.progress_line.connect(_on_progress_line)
+
 	_console = console
 	_console_input.editable = is_instance_valid(_console)
+
+
+## После "строка\n" последний абзац пустой - сама строка прогресса предпоследняя.
+func _on_progress_line(string: String, replace: bool) -> void:
+	var count := _console_output.get_paragraph_count()
+	if replace and count >= 2:
+		_console_output.remove_paragraph(count - 2)
+	_console_output.append_text(string + "\n")
 
 
 func get_console() -> ConsoleNode:

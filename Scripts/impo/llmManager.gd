@@ -2083,6 +2083,9 @@ func checkModel(name: String, callback: Callable) -> void:
 
 ## 054.995: список скачанных моделей для меню ai_model.
 ## callback(names: Array, ok: bool) - ok=false, если Ollama не ответила.
+## Размеры (байты) - в modelSizes после ответа.
+var modelSizes: Dictionary = {}
+
 func fetchModels(callback: Callable) -> void:
 	var http := HTTPRequest.new()
 	Engine.get_main_loop().root.add_child(http)
@@ -2094,8 +2097,10 @@ func fetchModels(callback: Callable) -> void:
 			var parsed = JSON.parse_string(body.get_string_from_utf8())
 			if parsed is Dictionary and parsed.has("models"):
 				ok = true
+				modelSizes.clear()
 				for m in parsed["models"]:
 					names.append(String(m.get("name", "?")))
+					modelSizes[names[-1]] = float(m.get("size", 0))
 		http.queue_free()
 		callback.call(names, ok)
 	)
@@ -2158,35 +2163,189 @@ func setModel(name: String, pull: bool = true) -> void:
 		pullModel(name)
 
 
-## Console command: aiModel triggers this automatically. Calls Ollama's own
-## /api/pull directly (not the CLI "ollama pull") so it works regardless of
-## whether ollama.exe is on PATH. Non-streaming - Ollama just holds the
-## connection open until the whole model is downloaded, then replies once.
-## For a large model this can take a long time; there's no progress bar,
-## just a final success/failure line in the console.
+## Скачивание модели через Ollama (/api/pull, без ollama.exe в PATH).
+## 054.998: потоком - Ollama шлёт строку за строкой, сколько скачано, и в
+## консоли одна строка-полоска обновляется на месте:
+## "Установка модели 31% [====          ] 1,9 из 6,1 ГБ". Раньше было молча
+## до самого конца.
+const PULL_BAR_WIDTH := 20
+
 func pullModel(name: String, onDone: Callable = Callable()) -> void:
-	var pullHttp := HTTPRequest.new()
-	Engine.get_main_loop().root.add_child(pullHttp)
-	Console.print("Скачиваю модель [color=CYAN]%s[/color] через Ollama, если её ещё нет - подожди, для больших моделей это может занять долго..." % name)
-	pullHttp.request_completed.connect(func(_result, response_code, _headers, body):
-		if response_code == 200:
-			var parsed = JSON.parse_string(body.get_string_from_utf8())
-			if parsed is Dictionary and String(parsed.get("status", "")) == "success":
-				Console.print("Модель [color=CYAN]%s[/color] готова к использованию." % name)
-			else:
-				Console.print("Модель [color=CYAN]%s[/color]: ответ Ollama получен, но статус не 'success' - проверь вручную (ollama list)." % name)
-		else:
-			Console.print("Не получилось скачать модель [color=CYAN]%s[/color] (код ответа %d) - проверь, запущена ли Ollama, и правильно ли написано имя модели." % [name, response_code])
-		pullHttp.queue_free()
-		if onDone.is_valid():
-			onDone.call(response_code == 200)
-	)
-	var payload := {"name": name, "stream": false}
-	var headers := ["Content-Type: application/json"]
-	var err := pullHttp.request("http://127.0.0.1:11434/api/pull", headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
-	if err != OK:
-		Console.print("Не получилось отправить запрос на скачивание модели [color=CYAN]%s[/color] (ошибка %d)." % [name, err])
-		pullHttp.queue_free()
+	Console.print("Скачиваю модель [color=CYAN]%s[/color] через Ollama..." % name)
+	var client := HTTPClient.new()
+	var ok := false
+	var errText := ""
+	if client.connect_to_host("127.0.0.1", 11434) == OK:
+		while client.get_status() in [HTTPClient.STATUS_CONNECTING, HTTPClient.STATUS_RESOLVING]:
+			client.poll()
+			await get_tree().process_frame
+	if client.get_status() != HTTPClient.STATUS_CONNECTED:
+		errText = "Ollama не отвечает - проверь, что она запущена (значок в трее)"
+	elif client.request(HTTPClient.METHOD_POST, "/api/pull", ["Content-Type: application/json"], JSON.stringify({"model": name, "stream": true})) != OK:
+		errText = "не удалось отправить запрос"
+	else:
+		while client.get_status() == HTTPClient.STATUS_REQUESTING:
+			client.poll()
+			await get_tree().process_frame
+		var buffer := ""
+		var totals := {}
+		var completed := {}
+		var lastDraw := 0
+		var lastBar := ""
+		while client.get_status() == HTTPClient.STATUS_BODY:
+			client.poll()
+			var chunk := client.read_response_body_chunk()
+			if chunk.is_empty():
+				await get_tree().process_frame
+				continue
+			buffer += chunk.get_string_from_utf8()
+			while buffer.contains("\n"):
+				var line := buffer.get_slice("\n", 0)
+				buffer = buffer.substr(line.length() + 1)
+				var msg = JSON.parse_string(line)
+				if not (msg is Dictionary):
+					continue
+				if msg.has("error"):
+					errText = String(msg["error"])
+				elif String(msg.get("status", "")) == "success":
+					ok = true
+				elif msg.has("digest") and msg.has("total"):
+					totals[msg["digest"]] = float(msg["total"])
+					completed[msg["digest"]] = float(msg.get("completed", 0))
+					var bar := _pullBar(_sumValues(completed), _sumValues(totals))
+					if Time.get_ticks_msec() - lastDraw > 300 and bar != lastBar:
+						lastDraw = Time.get_ticks_msec()
+						lastBar = bar
+						Console.print_progress(bar)
+		if ok and not totals.is_empty():
+			Console.print_progress(_pullBar(_sumValues(totals), _sumValues(totals)))
+	client.close()
+	if ok:
+		Console.print("Модель [color=CYAN]%s[/color] скачана." % name)
+	else:
+		Console.print("[color=RED]Не получилось скачать модель %s: %s.[/color]" % [name, errText if errText != "" else "Ollama оборвала загрузку"])
+	if onDone.is_valid():
+		onDone.call(ok)
+
+
+func _sumValues(d: Dictionary) -> float:
+	var total := 0.0
+	for v in d.values():
+		total += float(v)
+	return total
+
+
+func _pullBar(done: float, total: float) -> String:
+	var frac := clampf(done / total, 0.0, 1.0) if total > 0.0 else 0.0
+	var filled := int(round(frac * PULL_BAR_WIDTH))
+	return "Установка модели %d%% [%s%s] %s из %s" % [int(frac * 100.0), "=".repeat(filled), " ".repeat(PULL_BAR_WIDTH - filled), gbText(done), gbText(total)]
+
+
+## 6140415975 -> "6,1 ГБ", 91000000 -> "91 МБ"
+static func gbText(bytes: float) -> String:
+	if bytes < 1e9:
+		return "%d МБ" % int(round(bytes / 1e6))
+	return ("%.1f ГБ" % (bytes / 1e9)).replace(".", ",")
+
+
+## 054.998: можно ли проверить модель ДО скачивания - по "паспорту" в реестре
+## Ollama (несколько КБ). Возвращает {"problem": текст или "", "sure": bool}.
+## sure=false - проверить заранее не вышло (модель не из библиотеки Ollama,
+## нет связи с реестром, незнакомое семейство) - тогда проверка после скачивания.
+## Зрение: отдельный блок зрения (projector), "clip" в семействах или семейство
+## со встроенным зрением. Размышления: renderer/parser "...thinking" или шаблон
+## с Think (так помечены qwen3:8b и даже qwen3-vl:8b без -instruct).
+const VISION_FAMILIES := ["qwen3vl", "qwen25vl", "qwen2vl", "mistral3", "gemma3", "mllama", "llava", "llama4", "minicpmv"]
+const TEXT_FAMILIES := ["llama", "qwen2", "qwen3", "qwen3moe", "gemma2", "gemma", "phi3", "phi4", "mistral", "deepseek2", "gptoss", "granite", "command-r", "starcoder2", "nomic-bert", "bert"]
+const REGISTRY := "https://registry.ollama.ai/v2/"
+
+func checkRegistry(name: String) -> Dictionary:
+	var unsure := {"problem": "", "sure": false}
+	var path := name.strip_edges()
+	var tag := "latest"
+	if path.contains(":"):
+		tag = path.get_slice(":", 1)
+		path = path.get_slice(":", 0)
+	if path.contains("/"):
+		if path.get_slice("/", 0).contains("."):
+			return unsure # hf.co/... и другие сайты - заранее не проверить
+	else:
+		path = "library/" + path
+	var manifest = await _registryJson(REGISTRY + path + "/manifests/" + tag, ["Accept: application/vnd.docker.distribution.manifest.v2+json"])
+	if manifest is int:
+		if manifest == 404:
+			return {"problem": "такой модели нет в библиотеке Ollama - проверь имя", "sure": true}
+		return unsure
+	var configDigest := ""
+	var templateDigest := ""
+	var hasProjector := false
+	if manifest.get("config") is Dictionary:
+		configDigest = String(manifest["config"].get("digest", ""))
+	for layer in manifest.get("layers", []):
+		var media := String(layer.get("mediaType", ""))
+		if media.ends_with(".projector"):
+			hasProjector = true
+		elif media.ends_with(".template"):
+			templateDigest = String(layer.get("digest", ""))
+	var config = {}
+	if configDigest != "":
+		config = await _registryJson(REGISTRY + path + "/blobs/" + configDigest)
+	if config is int:
+		return unsure
+	var families: Array = config.get("model_families", [config.get("model_family", "")])
+	var family := String(config.get("model_family", ""))
+	var thinking := String(config.get("renderer", "")).contains("thinking") or String(config.get("parser", "")).contains("thinking")
+	if not thinking and templateDigest != "":
+		var tpl = await _registryText(REGISTRY + path + "/blobs/" + templateDigest)
+		thinking = tpl is String and tpl.to_lower().contains("think")
+	var vision := hasProjector or families.has("clip") or VISION_FAMILIES.has(family)
+	var problems: Array = []
+	if thinking:
+		problems.append("с режимом размышлений (thinking)")
+	if not vision and TEXT_FAMILIES.has(family):
+		problems.append("не умеет видеть картинки (нет vision)")
+	elif not vision:
+		return {"problem": ", ".join(problems), "sure": not problems.is_empty()} # незнакомое семейство - зрение проверим после
+	return {"problem": ", ".join(problems), "sure": true}
+
+
+## JSON с адреса; при ошибке - код ответа (int).
+func _registryJson(url: String, headers: Array = []):
+	var res = await _httpGet(url, headers)
+	if res[0] != 200:
+		return res[0]
+	var parsed = JSON.parse_string(res[1].get_string_from_utf8())
+	return parsed if parsed is Dictionary else 0
+
+
+func _registryText(url: String):
+	var res = await _httpGet(url, [])
+	return res[1].get_string_from_utf8() if res[0] == 200 else res[0]
+
+
+func _httpGet(url: String, headers: Array) -> Array:
+	var http := HTTPRequest.new()
+	http.timeout = 15.0
+	add_child(http)
+	if http.request(url, PackedStringArray(headers)) != OK:
+		http.queue_free()
+		return [0, PackedByteArray()]
+	var res: Array = await http.request_completed
+	http.queue_free()
+	return [res[1], res[3]]
+
+
+## 054.998: удалить скачанную модель из Ollama (освободить место).
+func deleteModel(name: String) -> bool:
+	var http := HTTPRequest.new()
+	http.timeout = 30.0
+	add_child(http)
+	if http.request("http://127.0.0.1:11434/api/delete", ["Content-Type: application/json"], HTTPClient.METHOD_DELETE, JSON.stringify({"model": name})) != OK:
+		http.queue_free()
+		return false
+	var res: Array = await http.request_completed
+	http.queue_free()
+	return res[1] == 200
 
 
 ## Console command: banwords

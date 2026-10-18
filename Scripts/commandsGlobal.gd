@@ -167,10 +167,44 @@ func clearObj(category: String = "object"):
 		print("cleared pet persistence data")
 
 
-func nukesettings():
-	#command that fixes the "terror" bug
-	gbData.killEverything()
-	GlobalVariable.dataNuked.emit()
+## 054.998: full_reset вместо nuke_data. nuke_data срабатывала сразу, без
+## вопросов, и не трогала лоры персонажей - пользы почти не было. Теперь
+## настоящий заводской сброс с двумя подтверждениями (решение Alex).
+const FULL_RESET_LIST := [
+	"все настройки вернутся к значениям по умолчанию этой версии (интервалы, мат, флирт, FPS, звуки, монитор, размер консоли, запрещённые слова)",
+	"все персонажи на экране и их состояние (здоровье, голод, настроение, зависимость) будут удалены, появится один персонаж по умолчанию",
+	"8 встроенных персонажей (Dune, Expie, Leapy, Milky, Orange, Roza, Velvet, Voyager) вернутся к заводским лорам, фразам и паспортам",
+	"ВСЕ ТВОИ ПРАВКИ В ЛОРАХ И ФРАЗАХ ВСТРОЕННЫХ ПЕРСОНАЖЕЙ ПРОПАДУТ (старые папки на всякий случай уйдут в full_reset_backup)",
+	"общий файл фраз (TRANSLATION.json) вернётся к стоковому",
+	"останутся: скачанные модели, выбранная модель и её настройки, персонажи, которых ты добавил сам, логи",
+	"после сброса игра перезапустится",
+]
+
+func _cmd_fullReset() -> void:
+	Console.print("[color=ORANGE]Сбросить игру к заводскому состоянию? Введи ДА, чтобы продолжить, что угодно другое - отмена.[/color]")
+	Console.pending_input = _fullResetStep1
+
+
+func _fullResetStep1(answer: String) -> void:
+	if answer.strip_edges().to_upper() != "ДА":
+		Console.print("Сброс отменён.")
+		return
+	Console.print("[color=WHITE]После сброса:[/color]")
+	for line in FULL_RESET_LIST:
+		Console.print("[color=#ff5a5a]- " + line + "[/color]")
+	Console.print("[color=ORANGE]Точно? Напиши VLLM, чтобы подтвердить, что угодно другое - отмена.[/color]")
+	Console.pending_input = _fullResetStep2
+
+
+func _fullResetStep2(answer: String) -> void:
+	if answer.strip_edges().to_upper() != "VLLM":
+		Console.print("Сброс отменён.")
+		return
+	var backup: String = gbData.fullReset()
+	Console.print("[color=GREEN]Сброс выполнен. Старые папки персонажей: %s. Перезапускаю игру...[/color]" % backup)
+	await get_tree().create_timer(1.5).timeout
+	OS.set_restart_on_exit(true, OS.get_cmdline_args())
+	get_tree().quit()
 
 func setmonitor(monitorIndex: int = 0):
 	var maxIndex: int = DisplayServer.get_screen_count() - 1
@@ -255,7 +289,8 @@ func _ready():
 	Console.create_command("ai_status", _cmd_aiStatus, "показывает текущее состояние всех настроек ИИ")
 	Console.create_command("ai_creativity", _cmd_aiCreativity, "0.0-1.5, выше = более дикие/случайные ответы, ниже = безопаснее/предсказуемее (стандартно 0.7 для qwen3-vl:8b-instruct)")
 	Console.create_command("ai_repetition_guard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова (стандартно 1.2 для qwen3-vl:8b-instruct)")
-	Console.create_command("ai_model", _cmd_aiModel, "выбор модели Ollama: список скачанных моделей, дальше вводи цифру (выбрать) или имя (скачать новую), 0 - выход")
+	Console.create_command("model_manager", _openModelManager, "менеджер моделей Ollama: все скачанные модели (размер, подходит ли, настройки), выбрать, удалить или скачать новую")
+	Console.create_command("ai_model", _cmd_aiModel, "то же, что model_manager; ai_model <имя> - сразу скачать и выбрать модель")
 	Console.create_command("ban_words", _cmd_banwords, "список слов/фраз, которые ИИ никогда не должен использовать: после списка вводи номер (удалить), слово (добавить) или 0 (выход)")
 	Console.create_command("reload_lore", LLMManager.reloadLore, "перечитывает лор и паспорта всех персонажей (lore.txt, character.json) без перезапуска - наборы фраз создадутся заново")
 	Console.create_command("resize_console", resize, "размер окна консоли: resize_console <ширина> <высота> (проще растянуть уголок справа снизу)")
@@ -270,7 +305,7 @@ func _ready():
 	Console.create_command("change_player_mode", _cmd_changePlayerMode, "меняет клавиши входа/выхода из управления игроком (сейчас: Ctrl+Alt+P). Клавиши пишутся ВРУЧНУЮ через + без пробелов, например: change_player_mode Ctrl+Shift+K. Можно: Ctrl, Alt, Shift, Win + одна обычная клавиша (A-Z, 0-9, F1-F24, Space, Tab, Home, End, Insert, Delete, PageUp, PageDown, стрелки Left/Right/Up/Down)")
 	Console.create_command("pet_size", _cmd_petSize, "меняет размер персонажа (по умолчанию 4.0) - действует на новых заспавненных, не на уже существующих")
 	#Console.create_command("openSkinFolder", openskinfold, "opens the skin folder")
-	Console.create_command("nuke_data", nukesettings, "сбрасывает ВСЁ. Файл сохранения, настройки и т.д. Используй на свой страх и риск.")
+	Console.create_command("full_reset", _cmd_fullReset, "сброс к заводскому состоянию (с двойным подтверждением): настройки, персонажи на экране, лоры и фразы встроенных персонажей. Модель и её настройки остаются")
 	#Console.create_command("expieID", toggleExpieDebugIDs, "toggles debug IDs for expies")
 	#Console.create_command("deathLoop", deathLoop, "please dont crash")
 	
@@ -352,21 +387,26 @@ func _cmd_aiRepetitionGuard(value: float) -> void:
 	LLMManager.setRepetitionGuard(value)
 	Console.print("Защита от повторов: [color=CYAN]%s[/color]" % LLMManager.repetitionGuard)
 
-## 054.995: ai_model без имени - список скачанных моделей, выбор цифрой
-## (как despawn_pet). Раньше нужно было смотреть имя в ai_status и вводить
-## его целиком. ai_model <имя> по-прежнему работает сразу.
+## 054.998: model_manager (и ai_model - то же меню). Все скачанные модели:
+## размер, подходит ли игре (зрение и без режима размышлений), какая сейчас,
+## какие под неё настройки. Дальше как в ban_words: вводишь ответ без имени
+## команды - номер (выбрать), "удалить N", имя новой модели (скачать), 0 - выход.
+## Новая модель проверяется ДО скачивания по реестру Ollama; если заранее не
+## понять - после, а неподходящую можно сразу удалить.
 const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "ministral-3:14b"]
 
 func _cmd_aiModel(name: String = "") -> void:
 	if name != "":
 		_downloadAndSwitch(name)
 		return
+	_openModelManager()
+
+
+func _openModelManager() -> void:
 	Console.print("Спрашиваю у Ollama список моделей...")
 	LLMManager.fetchModels(_showModelMenu)
 
 
-## 054.996: у каждой модели спрашиваем у Ollama, подходит ли она (зрение и
-## без режима размышлений - обязательные условия), и только потом показываем меню.
 func _showModelMenu(names: Array, ok: bool) -> void:
 	if not ok:
 		Console.print("[color=RED]Ollama не ответила - проверь, что она запущена (значок в трее).[/color]")
@@ -374,20 +414,37 @@ func _showModelMenu(names: Array, ok: bool) -> void:
 	var problems := {}
 	for n in names:
 		problems[n] = await _checkModelAsync(String(n))
-	Console.print("[color=ORANGE]Чтобы выбрать модель, введи её цифру и нажми Enter[/color]")
-	Console.print("[color=ORANGE]Чтобы скачать новую модель, напиши её имя и нажми Enter[/color]")
-	Console.print("[color=ORANGE]Игре подходят только модели со зрением (vision) и без режима размышлений (thinking)[/color]")
 	Console.print("Скачанные модели (сейчас: [color=CYAN]%s[/color]):" % LLMManager.modelName)
 	Console.print("0. выход")
 	for i in names.size():
-		var p: String = problems[names[i]]
-		Console.print("%d. %s%s%s" % [i + 1, names[i], "  <- сейчас" if names[i] == LLMManager.modelName else "", ("  [color=RED](не подходит: %s)[/color]" % p) if p != "" else ""])
+		var n: String = names[i]
+		var p: String = problems[n]
+		var line := "%d. %s  [color=GRAY]%s[/color]  " % [i + 1, n, LLMManager.gbText(LLMManager.modelSizes.get(n, 0.0))]
+		line += ("[color=RED]не подходит: %s[/color]" % p) if p != "" else "[color=GREEN]подходит[/color]"
+		line += "  [color=GRAY]%s[/color]" % _modelSettingsText(n)
+		if n == LLMManager.modelName:
+			line += "  [color=CYAN]<- сейчас[/color]"
+		Console.print(line)
 	if names.is_empty():
 		Console.print("(пока ни одной)")
 	var missing: Array = RECOMMENDED_MODELS.filter(func(m): return not names.has(m))
 	if not missing.is_empty():
 		Console.print("Можно скачать (подходят игре): [color=CYAN]%s[/color]" % ", ".join(missing))
+	Console.print("[color=ORANGE]Введи номер и нажми Enter - выбрать модель[/color]")
+	Console.print("[color=ORANGE]Введи «удалить» и номер (например: удалить 2) - удалить модель[/color]")
+	Console.print("[color=ORANGE]Введи имя новой модели - скачать её[/color]")
+	Console.print("[color=ORANGE]0 - выход. Игре подходят только модели со зрением (vision) и без режима размышлений (thinking)[/color]")
 	Console.pending_input = _modelMenuAnswer.bind(names, problems)
+
+
+## Настройки под модель: у текущей - те, что стоят сейчас; у остальных - что
+## поставится при переключении (свой набор есть только у проверенных моделей).
+func _modelSettingsText(n: String) -> String:
+	if n == LLMManager.modelName:
+		return "креативность %s, защита от повторов %s" % [LLMManager.creativity, LLMManager.repetitionGuard]
+	if LLMManager.MODEL_PRESETS.has(n):
+		return "креативность %s, защита от повторов %s" % LLMManager.MODEL_PRESETS[n]
+	return "настройки останутся текущими"
 
 
 func _checkModelAsync(name: String) -> String:
@@ -399,37 +456,79 @@ func _checkModelAsync(name: String) -> String:
 
 
 func _modelMenuAnswer(answer: String, names: Array, problems: Dictionary) -> void:
+	answer = answer.strip_edges()
 	if answer == "0":
-		Console.print("Выход из выбора модели.")
+		Console.print("Выход из меню моделей.")
 		return
 	if answer.is_valid_int():
 		var i := int(answer) - 1
 		if i < 0 or i >= names.size():
-			Console.print("[color=ORANGE]Нет модели под номером %s - введи ai_model ещё раз.[/color]" % answer)
+			Console.print("[color=ORANGE]Нет модели под номером %s.[/color]" % answer)
+			Console.pending_input = _modelMenuAnswer.bind(names, problems)
 			return
 		var p: String = problems.get(names[i], "")
 		if p != "":
 			Console.print("[color=RED]%s не подойдёт: %s. Игре нужна модель со зрением и без режима размышлений.[/color]" % [names[i], p])
+			Console.pending_input = _modelMenuAnswer.bind(names, problems)
 			return
 		_switchModel(String(names[i]), false) # уже скачана
 		return
-	if Console.has_command(answer.split(" ", false)[0]):
-		Console.print("Выход из выбора модели.")
+	var words := answer.split(" ", false)
+	if words.size() == 2 and words[0].to_lower() == "удалить" and words[1].is_valid_int():
+		var d := int(words[1]) - 1
+		if d < 0 or d >= names.size():
+			Console.print("[color=ORANGE]Нет модели под номером %s.[/color]" % words[1])
+			Console.pending_input = _modelMenuAnswer.bind(names, problems)
+			return
+		if names[d] == LLMManager.modelName:
+			Console.print("[color=ORANGE]%s сейчас выбрана - сначала переключись на другую, потом удаляй.[/color]" % names[d])
+			Console.pending_input = _modelMenuAnswer.bind(names, problems)
+			return
+		_askDeleteModel(String(names[d]), true)
+		return
+	if Console.has_command(words[0]):
+		Console.print("Выход из меню моделей.")
 		Console.execute(answer)
 		return
 	_downloadAndSwitch(answer)
 
 
-## Новая модель по имени: скачать -> проверить -> переключиться, только если
-## подходит (раньше игра переключалась сразу, даже на неподходящую).
+## Подтверждение удаления: номер-да/0-нет. backToMenu - после ответа снова меню.
+func _askDeleteModel(name: String, backToMenu: bool) -> void:
+	Console.print("[color=YELLOW]Удалить %s и освободить %s? 1 - да, 0 - нет[/color]" % [name, LLMManager.gbText(LLMManager.modelSizes.get(name, 0.0))])
+	Console.pending_input = _deleteModelAnswer.bind(name, backToMenu)
+
+
+func _deleteModelAnswer(answer: String, name: String, backToMenu: bool) -> void:
+	if answer.strip_edges() == "1":
+		if await LLMManager.deleteModel(name):
+			Console.print("Модель [color=CYAN]%s[/color] удалена." % name)
+		else:
+			Console.print("[color=RED]Не получилось удалить %s - попробуй в командной строке: ollama rm %s[/color]" % [name, name])
+	else:
+		Console.print("Удаление отменено.")
+	if backToMenu:
+		_openModelManager()
+
+
+## Новая модель по имени: проверить по реестру -> скачать с полоской ->
+## проверить у Ollama -> переключиться, только если подходит.
 func _downloadAndSwitch(name: String) -> void:
-	Console.print("[color=ORANGE]Напоминание: модель должна уметь видеть картинки (vision) и быть без режима размышлений (thinking).[/color]")
+	name = name.strip_edges()
+	Console.print("Проверяю модель [color=CYAN]%s[/color] до скачивания..." % name)
+	var pre: Dictionary = await LLMManager.checkRegistry(name)
+	if pre["sure"] and pre["problem"] != "":
+		Console.print("[color=RED]%s не подойдёт: %s. Ничего не скачиваю, модель не переключена (сейчас: %s).[/color]" % [name, pre["problem"], LLMManager.modelName])
+		return
+	if not pre["sure"]:
+		Console.print("[color=ORANGE]Заранее проверить %s не получилось - проверю после скачивания. Напоминание: нужна модель со зрением (vision) и без режима размышлений (thinking).[/color]" % name)
 	LLMManager.pullModel(name, func(downloaded: bool):
 		if not downloaded:
 			return # pullModel уже написал, что не так
 		LLMManager.checkModel(name, func(p: String):
 			if p != "":
 				Console.print("[color=RED]%s скачана, но не подойдёт: %s. Модель не переключена (сейчас: %s).[/color]" % [name, p, LLMManager.modelName])
+				LLMManager.fetchModels(func(_n, _ok): _askDeleteModel(name, false)) # узнать размер
 			else:
 				_switchModel(name, false)))
 
@@ -544,10 +643,15 @@ func _ensureModelInstalled() -> void:
 	LLMManager.fetchModels(func(names: Array, ok: bool):
 		if not ok or names.is_empty() or names.has(LLMManager.modelName):
 			return
-		var pick: String = String(names[0])
-		for m in RECOMMENDED_MODELS:
-			if names.has(m):
-				pick = m
-				break
-		Console.print("[color=ORANGE]Модели %s нет в Ollama - переключаюсь на %s.[/color]" % [LLMManager.modelName, pick])
-		_switchModel(pick, false))
+		# 054.998: только на ПОДХОДЯЩУЮ модель (со зрением, без размышлений) -
+		# раньше без рекомендованных бралась первая попавшаяся, хоть без зрения
+		var ordered: Array = RECOMMENDED_MODELS.filter(func(m): return names.has(m))
+		for n in names:
+			if not ordered.has(n):
+				ordered.append(n)
+		for n in ordered:
+			if await _checkModelAsync(String(n)) == "":
+				Console.print("[color=ORANGE]Модели %s нет в Ollama - переключаюсь на %s.[/color]" % [LLMManager.modelName, n])
+				_switchModel(String(n), false)
+				return
+		Console.print("[color=RED]Модели %s нет в Ollama, а среди скачанных нет подходящей (нужна со зрением и без режима размышлений). Открой model_manager и скачай, например, %s.[/color]" % [LLMManager.modelName, RECOMMENDED_MODELS[0]]))

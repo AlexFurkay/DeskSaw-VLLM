@@ -495,6 +495,35 @@ func killEverything():
 	newSkinFile()
 	newConfig()
 
+## 054.998, команда full_reset: всё к стоковым значениям этой сборки, кроме
+## выбранной модели и её настроек. Папки 8 встроенных персонажей заменяются
+## версиями из сборки (старые - в full_reset_backup/<время>/, на всякий случай).
+## Персонажи, добавленные пользователем, и логи не трогаются.
+const FULL_RESET_KEEP := ["llmModelName", "llmCreativity", "llmRepetitionGuard"]
+
+func fullReset() -> String:
+	var keep := {}
+	for k in FULL_RESET_KEEP:
+		if settings.has(k):
+			keep[k] = settings[k]
+	newConfig() # сначала настройки: newsave() создаёт персонажа из defaultSkin
+	for k in keep:
+		settings[k] = keep[k]
+	savetodisk(conPath, settings)
+	newsave()
+	newTrans()
+	var backupRoot := "user://full_reset_backup/" + Time.get_datetime_string_from_system().replace(":", "-")
+	var dir := DirAccess.open("res://defaults/skins")
+	if dir:
+		for skinName in dir.get_directories():
+			var userSkinDir: String = skinfilepath + "/" + skinName
+			if DirAccess.dir_exists_absolute(userSkinDir):
+				DirAccess.make_dir_recursive_absolute(backupRoot)
+				DirAccess.rename_absolute(userSkinDir, backupRoot + "/" + skinName)
+	_syncBundledSkins() # папок нет - скопируются начисто из сборки
+	return ProjectSettings.globalize_path(backupRoot)
+
+
 func outdated():
 	if settings.outdated:
 		print("already outdated")
