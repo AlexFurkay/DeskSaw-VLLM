@@ -1637,6 +1637,28 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 
 const MAX_QUEUED_PER_TAG := 2
 
+
+## 054.998: персонажа удалили, а его наборы фраз ещё стояли в очереди - и
+## видеокарта генерировала их для того, кого уже нет, пока новый персонаж ждал.
+## Убираем из очереди всё, что относится к этому скину, и из счётчика прогрева.
+func dropSkinJobs(skin: String) -> void:
+	var removed := 0
+	for j in _backgroundQueue.duplicate():
+		var tag: String = j.get("tag", "")
+		if tag.begins_with("prefetch:" + skin + ":"):
+			_backgroundQueue.erase(j)
+			_prefetchPending[tag.trim_prefix("prefetch:")] = false
+			removed += 1
+	for j in _queue.duplicate():
+		if String(j.get("tag", "")).begins_with(skin + ":"):
+			_queue.erase(j)
+	if removed > 0 and _prewarmTotal > 0:
+		_prewarmTotal = maxi(_prewarmDone, _prewarmTotal - removed)
+		if _prewarmDone >= _prewarmTotal:
+			_prewarmTotal = 0
+			_prewarmDone = 0
+			prewarmBatchFinished.emit()
+
 func _enqueue(prompt: String, images: Array, callback: Callable, tag: String = "") -> void:
 	prompt = _g(_skinFromTag(tag), prompt) # {женский|мужской} -> по роду скина
 	var job := {"prompt": prompt, "images": images, "callback": callback, "tag": tag, "t": Time.get_ticks_msec()}

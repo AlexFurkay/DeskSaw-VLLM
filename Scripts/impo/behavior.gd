@@ -471,6 +471,18 @@ func _on_llm_reaction(text: String, direct: bool = false) -> void:
 		return
 	_queueMessage(text)
 
+## 054.998: удалили последнего персонажа этого скина - его недоделанные
+## наборы фраз больше не нужны (LLMManager.dropSkinJobs).
+func _exit_tree() -> void:
+	if isPlayer or not is_instance_valid(LLMManager):
+		return
+	var skin := _skinTag()
+	for p in get_tree().get_nodes_in_group("pets"):
+		if p != self and not p.is_queued_for_deletion() and p._skinTag() == skin:
+			return
+	LLMManager.dropSkinJobs(skin)
+
+
 func _initalSpawn() -> void:
 	#teag you can like guess what this does
 	faceSys.setEmotion("default")
@@ -506,7 +518,25 @@ func _initalSpawn() -> void:
 	petTalkLoop()
 	pass
 
+## 054.998: засыпая, перс подпрыгивает со звуком - видно, что он уснул (Alex:
+## "видный знак и выглядит забавно"). Раньше подскок был случайным (части тела
+## получали скорость ходьбы), а приземление считалось ударом: урон и
+## пробуждение - Вояджер уснула только с третьего раза. Теперь подскок всегда
+## одинаковый, звук обычный (скулёж), а SLEEP_GRACE_MS после засыпания удары
+## не считаются. Настоящий удар позже - будит, как раньше.
+const SLEEP_HOP_SPEED := 260.0
+const SLEEP_GRACE_MS := 3000
+var _sleepGraceUntil := 0
+
+func _sleepHop() -> void:
+	_sleepGraceUntil = Time.get_ticks_msec() + SLEEP_GRACE_MS
+	moveSys.rigid.linear_velocity = Vector2(0.0, -SLEEP_HOP_SPEED)
+	moveSys.rigid.angular_velocity = 0.0
+	AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
+
+
 func sleep():
+	_sleepHop()
 	#handle sleeep loop this is probably one of the worst ways i couldve handled this ill fix it later
 	while get_tree():
 			#print("2")
@@ -649,7 +679,10 @@ func _physics_process(_delta: float) -> void:
 		_bodyPrevValid = false
 		if not beingDragged:
 			print("KNOCK[%s] horizontal vx=%.0f state=%s" % [_skinTag(), moveSys.rigid.linear_velocity.x, moveSys.states.keys()[moveSys.currstate]])
-		tempRagdoll(not beingDragged, false, abs(moveSys.rigid.linear_velocity.x)) # true = genuine uncontrolled fall, not a hand-release
+		# 054.998: упёрся в ящик и споткнулся - падает, но без урона и крика.
+		# Урон - только если сбил брошенный/летящий предмет.
+		var hardFall: bool = not beingDragged and _hitByFlyingObject()
+		tempRagdoll(hardFall, false, abs(moveSys.rigid.linear_velocity.x))
 	elif not ragdolled:
 		# Стоит на ногах: ловим жёсткое приземление (падение вертикально,
 		# например с ящика) - раньше проверялась только горизонтальная
@@ -708,6 +741,8 @@ func _damageForImpact(speed: float) -> float:
 func _registerImpact(speed: float) -> void:
 	if isUnconscious or not _spawnSettled or Time.get_ticks_msec() < _spawnGraceUntil:
 		return
+	if isSleeping and Time.get_ticks_msec() < _sleepGraceUntil:
+		return # приземление после подскока при засыпании - не удар
 	var now := Time.get_ticks_msec()
 	if now - _lastImpactMsec < IMPACT_COOLDOWN_MS:
 		return
@@ -2125,6 +2160,42 @@ func _stopBeforeDanger(x: float, targetX: float) -> float:
 
 
 ## Пила прямо по курсу ближе безопасного расстояния.
+## Рядом летит предмет (бросили) - значит, перса сбило им, а не он сам споткнулся.
+const FLYING_OBJECT_SPEED := 450.0
+
+func _hitByFlyingObject() -> bool:
+	var maxDist: float = 220.0 * float(gbData.settings.get("petScale", 4.0)) / 4.0
+	for body in detectRange.inRadius.keys():
+		if is_instance_valid(body) and body is RigidBody2D and body.linear_velocity.length() > FLYING_OBJECT_SPEED:
+			if moveSys.rigidtorso.global_position.distance_to(body.global_position) < maxDist:
+				return true
+	return false
+
+
+## 054.998: впереди высокий предмет (нижний и верхний лучи упёрлись) - раньше
+## перс шёл в него, упирался, ящик отталкивал - "споткнулся" с уроном.
+## Невысокие и так перепрыгиваются (movement_handler.checkJump).
+func _tallObstacleAhead() -> bool:
+	return moveSys.wallDetect.is_colliding() and moveSys.heightDetect.is_colliding() and moveSys.wallDetect.get_collider() is RigidBody2D
+
+
+## В ломке перс не обходит предметы, а лезет напролом: лёгкое отпинывает,
+## на тяжёлое пытается запрыгнуть (себе урона от этого нет - см. KNOCK выше).
+var _stormAt := 0
+
+func _stormObstacle() -> void:
+	var now := Time.get_ticks_msec()
+	if now < _stormAt:
+		return
+	_stormAt = now + 900
+	var thing = moveSys.wallDetect.get_collider()
+	if thing is RigidBody2D and thing.mass <= 2.0:
+		thing.linear_velocity = Vector2(moveSys.dir * 520.0, -320.0)
+		thing.angular_velocity = randf_range(-8.0, 8.0)
+	else:
+		moveSys.jump()
+
+
 func _dangerAhead(dir: float) -> bool:
 	if dir == 0.0:
 		return false
@@ -2186,6 +2257,11 @@ func _walkTo(targetX: float, isCommand: bool = false) -> void:
 		# пилу могли подкинуть уже по ходу прогулки - останавливаемся перед ней
 		if _dangerAhead(moveSys.dir):
 			break
+		if _tallObstacleAhead():
+			if _inWithdrawal():
+				_stormObstacle()
+			else:
+				break # обходим: эта прогулка кончилась, следующая выберет другую цель
 		# под фентанилом - заплетающиеся ноги: внезапные остановки
 		if high and randf() < 0.08:
 			moveSys.dir = 0
