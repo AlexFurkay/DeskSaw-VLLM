@@ -1355,7 +1355,14 @@ func _stripDisplayTags(line: String) -> String:
 ## Мелкие привычки модели, которые проще поправить, чем выбрасывать фразу:
 ## английское "Hey" она пишет как "Гей" ("Гей? Дюна тут...").
 var _heyRegex := RegEx.create_from_string("^(Гей|Хей)(?=[\\s,!?.—-])")
+## 054.999: эмодзи и *описания действий* (*покраснела*, *хвостом махнула*) модель
+## в чате иногда пишет вопреки правилам (стенд flirt, Роза) - вырезаем сами.
+var _starActionRegex := RegEx.create_from_string("\\*[^*]{1,40}\\*")
+var _emojiRegex := RegEx.create_from_string("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{FE0F}]")
 func _fixOutputQuirks(text: String) -> String:
+	text = _starActionRegex.sub(text, "", true)
+	text = _emojiRegex.sub(text, "", true)
+	text = text.replace("  ", " ").strip_edges()
 	return _heyRegex.sub(text, "Эй")
 
 
