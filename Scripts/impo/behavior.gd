@@ -1591,7 +1591,7 @@ func itemWatch() -> void:
 			extra = "\nНа вкус для тебя это " + ("очень вкусно." if taste >= 7 else ("противно." if taste <= 3 else "так себе, обычная еда."))
 			if hungerHandler.hungry < 30.0:
 				extra += "\nТы {голодна|голоден}." # было "Ты голодна." и для мужских персонажей
-		LLMManager.requestItemReaction(_skinTag(), ITEM_DESCRIPTIONS[key], _aiStateHint() + extra, _on_state_reaction)
+		LLMManager.requestItemReaction(_skinTag(), _itemDesc(key), _aiStateHint() + extra, _on_state_reaction)
 
 
 ## Знакомые предметы (есть в ITEM_DESCRIPTIONS) в радиусе ITEM_NEAR_DISTANCE.
@@ -1601,7 +1601,7 @@ func _nearbyItemBodies() -> Array:
 	for body in detectRange.inRadius.keys():
 		if not is_instance_valid(body):
 			continue
-		if not ITEM_DESCRIPTIONS.has(_itemKey(body)):
+		if _itemDesc(_itemKey(body)) == "":
 			continue
 		if moveSys.rigidtorso.global_position.distance_to(body.global_position) < maxDist:
 			result.append(body)
@@ -1626,7 +1626,15 @@ func tasteFor(key: String, itemTaste: int) -> int:
 
 
 func _isFoodKey(key: String) -> bool:
-	return key in ["bread", "pizzaslice", "burger", "banana", "juicedobry", "geofruit", "yellowflesh"]
+	return key in ["bread", "pizzaslice", "burger", "banana", "juicedobry", "geofruit", "yellowflesh"] or CustomItems.isFood(key)
+
+
+## Описание предмета для ИИ: встроенные (ITEM_DESCRIPTIONS) и пользовательские
+## (CustomItems, ключ "custom:<id>"). "" - незнакомый предмет.
+func _itemDesc(key: String) -> String:
+	if ITEM_DESCRIPTIONS.has(key):
+		return ITEM_DESCRIPTIONS[key]
+	return CustomItems.describe(key)
 
 
 ## Состояние персонажа для ИИ-реакций (предметы, экран): настроение,
@@ -2134,7 +2142,7 @@ func _pickWalkTarget() -> float:
 			return mx - signf(mx - x) * 120.0
 	# любопытство - к интересному предмету (но не к пиле)
 	if randf() < 0.2:
-		var thing := _nearestBody(func(body, key): return ITEM_DESCRIPTIONS.has(key) and not DANGER_ITEMS.has(key))
+		var thing := _nearestBody(func(body, key): return _itemDesc(key) != "" and not DANGER_ITEMS.has(key))
 		if thing:
 			return _stopBeforeDanger(x, thing.global_position.x + randf_range(-60.0, 60.0))
 	# случайная точка: от 150 до 700 пикс, у края - разворот к центру

@@ -11,6 +11,7 @@ class ItemEntry:
 	var name: String
 	var icon: Texture
 	var scene_path: String
+	var customId := "" # пользовательский предмет (CustomItems)
 var itemList: Array[ItemEntry] = []
 
 var _itemsPath = "res://scenes/objects/"
@@ -22,7 +23,13 @@ func  _ready() -> void:
 	if wikiButton and wikiButtonClose:
 		wikiButtonClose.pressed.connect(_on_wiki_close_button_press)
 	_recalculate_columns()
+	_buildCustomUi()
 	_refresh()
+	# 054.999: свои PNG, положенные в папку руками, появляются при следующем открытии вкладки
+	visibility_changed.connect(func():
+		if is_visible_in_tree():
+			CustomItems.reload()
+			_refresh())
 
 func _refresh() -> void:
 	_generate_item_list()
@@ -45,6 +52,12 @@ func _generate_item_list() -> void:
 		entry.scene_path = _itemsPath.path_join(item)
 		entry.icon = _get_scene_texture(entry.scene_path)
 		itemList.append(entry)
+	for e in CustomItems.all():
+		var entry = ItemEntry.new()
+		entry.name = "★ " + String(e["name"])
+		entry.customId = String(e["id"])
+		entry.icon = CustomItems.icon(entry.customId)
+		itemList.append(entry)
 
 ## Get the main scene's item texture.
 func _get_scene_texture(scene_path: String) -> Texture:
@@ -53,7 +66,10 @@ func _get_scene_texture(scene_path: String) -> Texture:
 	var instance = load(scene_path).instantiate()
 	for i in instance.get_children():
 		if i is Sprite2D:
-			return i.texture
+			var tex: Texture = i.texture
+			instance.free() # экземпляр нужен только ради картинки - раньше не удалялся
+			return tex
+	instance.free()
 	push_error("sprite2d node not found on scene '%s'" % [scene_path])
 	return Texture.new()
 
@@ -86,6 +102,25 @@ func _generate_buttons() -> void:
 		btn.find_child("Button").pressed.connect(_on_item_button_press.bind(item_entry))
 
 func _on_item_button_press(item: ItemEntry) -> void:
+	if _mode != "":
+		var mode := _mode
+		_setMode("")
+		if item.customId == "":
+			_hint.text = "Встроенные предметы менять и удалять нельзя - только свои (со звёздочкой)."
+		elif mode == "edit":
+			_openForm(item.customId)
+		else:
+			_openDelete(item.customId)
+		return
+	if item.customId != "":
+		var body: RigidBody2D = CustomItems.build(item.customId)
+		if body == null:
+			_hint.text = "Не получилось открыть картинку предмета - проверь файл в папке."
+			return
+		get_tree().current_scene.add_child(body)
+		body.global_position = body.get_global_mouse_position()
+		body.owner = get_tree().current_scene
+		return
 	# TODO: directly connect this to the command, maybe?
 	var scene = load(item.scene_path)
 	var instance = scene.instantiate()
@@ -109,3 +144,215 @@ func _on_wiki_button_press() -> void:
 
 func _on_wiki_close_button_press() -> void:
 	wikiButton.hide()
+
+# ---------------- 054.999: пользовательские предметы ----------------
+# Кнопки над сеткой: Добавить / Изменить / Удалить / Открыть папку. "Изменить"
+# и "Удалить" включают режим: следующий щелчок по своему предмету (★) открывает
+# форму вместо появления предмета. Форма - панель поверх вкладки (не окно:
+# окно игры прозрачное, отдельные окна в нём ведут себя капризно).
+
+var _mode := ""
+var _hint: Label
+var _form: PanelContainer
+var _fields: VBoxContainer
+var _formTitle: Label
+var _formError: Label
+var _nameEdit: LineEdit
+var _descEdit: LineEdit
+var _foodCheck: CheckBox
+var _tasteSpin: SpinBox
+var _tasteRow: HBoxContainer
+var _preview: TextureRect
+var _pngLabel: Label
+var _saveButton: Button
+var _editId := ""
+var _pickedPng := ""
+var _deleting := false
+var _fileDialog: FileDialog
+
+
+func _buildCustomUi() -> void:
+	var scroll := itemContainer.get_parent()
+	var vbox := scroll.get_parent()
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 8)
+	for b in [["Добавить свой предмет", func(): _openForm("")],
+			["Изменить свой", func(): _setMode("edit")],
+			["Удалить свой", func(): _setMode("delete")],
+			["Открыть папку", func(): OS.shell_open(CustomItems.folder())]]:
+		var btn := Button.new()
+		btn.text = b[0]
+		btn.pressed.connect(b[1])
+		bar.add_child(btn)
+	vbox.add_child(bar)
+	vbox.move_child(bar, scroll.get_index())
+	_hint = Label.new()
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(_hint)
+	vbox.move_child(_hint, scroll.get_index())
+
+	_form = PanelContainer.new()
+	_form.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_form.hide()
+	add_child(_form)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 16)
+	_form.add_child(margin)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	margin.add_child(col)
+	_formTitle = Label.new()
+	col.add_child(_formTitle)
+
+	_fields = VBoxContainer.new()
+	_fields.add_theme_constant_override("separation", 6)
+	col.add_child(_fields)
+	var pngRow := HBoxContainer.new()
+	var pick := Button.new()
+	pick.text = "Выбрать картинку (PNG)"
+	pick.pressed.connect(_pickPng)
+	pngRow.add_child(pick)
+	_preview = TextureRect.new()
+	_preview.custom_minimum_size = Vector2(64, 64)
+	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_preview.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	pngRow.add_child(_preview)
+	_pngLabel = Label.new()
+	_pngLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pngLabel.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	pngRow.add_child(_pngLabel)
+	_fields.add_child(pngRow)
+	_fields.add_child(_label("Название:"))
+	_nameEdit = LineEdit.new()
+	_nameEdit.max_length = 40
+	_fields.add_child(_nameEdit)
+	_fields.add_child(_label("Что это - описание для персонажей (о нём они и будут говорить):"))
+	_descEdit = LineEdit.new()
+	_descEdit.placeholder_text = "например: плюшевый заяц с оторванным ухом"
+	_descEdit.max_length = 160
+	_fields.add_child(_descEdit)
+	_foodCheck = CheckBox.new()
+	_foodCheck.text = "Это еда"
+	_foodCheck.toggled.connect(func(on: bool): _tasteRow.visible = on)
+	_fields.add_child(_foodCheck)
+	_tasteRow = HBoxContainer.new()
+	_tasteRow.add_child(_label("Вкус для всех персонажей (0 - есть не станут, 10 - объедение):"))
+	_tasteSpin = SpinBox.new()
+	_tasteSpin.min_value = 0
+	_tasteSpin.max_value = 10
+	_tasteSpin.step = 1
+	_tasteRow.add_child(_tasteSpin)
+	_fields.add_child(_tasteRow)
+	var info := _label("Картинка - лучше с прозрачным фоном. Взять предмет можно за любую видимую часть картинки. Большая картинка уменьшится до 32 пикселей, как остальные предметы.")
+	info.modulate = Color(1, 1, 1, 0.7)
+	_fields.add_child(info)
+
+	_formError = _label("")
+	_formError.modulate = Color(1, 0.45, 0.45)
+	col.add_child(_formError)
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 8)
+	_saveButton = Button.new()
+	_saveButton.pressed.connect(_onFormSave)
+	buttons.add_child(_saveButton)
+	var cancel := Button.new()
+	cancel.text = "Отмена"
+	cancel.pressed.connect(func(): _form.hide())
+	buttons.add_child(cancel)
+	col.add_child(buttons)
+
+
+func _label(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
+
+
+func _setMode(mode: String) -> void:
+	_mode = mode
+	match mode:
+		"edit":
+			_hint.text = "Щёлкни по своему предмету (со звёздочкой), чтобы изменить его."
+		"delete":
+			_hint.text = "Щёлкни по своему предмету (со звёздочкой), чтобы удалить его."
+		_:
+			_hint.text = ""
+
+
+func _openForm(id: String) -> void:
+	_setMode("")
+	_editId = id
+	_deleting = false
+	_pickedPng = ""
+	_fields.show()
+	_formError.text = ""
+	var e := CustomItems.entry(CustomItems.KEY_PREFIX + id) if id != "" else {}
+	_formTitle.text = "Изменить предмет" if id != "" else "Новый предмет"
+	_saveButton.text = "Сохранить"
+	_nameEdit.text = String(e.get("name", ""))
+	_descEdit.text = String(e.get("description", ""))
+	_foodCheck.button_pressed = bool(e.get("food", false))
+	_tasteRow.visible = _foodCheck.button_pressed
+	_tasteSpin.value = int(e.get("taste", 5))
+	_preview.texture = CustomItems.icon(id) if id != "" else null
+	_pngLabel.text = "" if id != "" else "картинка не выбрана"
+	_form.show()
+
+
+func _openDelete(id: String) -> void:
+	_editId = id
+	_deleting = true
+	_fields.hide()
+	_formError.text = ""
+	_formTitle.text = "Удалить «%s»? Картинка и описание пропадут из папки." % String(CustomItems.entry(CustomItems.KEY_PREFIX + id).get("name", id))
+	_saveButton.text = "Удалить"
+	_form.show()
+
+
+func _pickPng() -> void:
+	if _fileDialog == null:
+		_fileDialog = FileDialog.new()
+		_fileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_fileDialog.access = FileDialog.ACCESS_FILESYSTEM
+		_fileDialog.filters = PackedStringArray(["*.png ; Картинка PNG"])
+		_fileDialog.use_native_dialog = true
+		_fileDialog.file_selected.connect(_onPngPicked)
+		add_child(_fileDialog)
+	_fileDialog.popup_centered_ratio(0.6)
+
+
+func _onPngPicked(path: String) -> void:
+	var img := Image.load_from_file(path)
+	if img == null or img.is_empty():
+		_formError.text = "Это не похоже на PNG-картинку."
+		return
+	_pickedPng = path
+	_preview.texture = ImageTexture.create_from_image(img)
+	_pngLabel.text = path.get_file()
+	if _nameEdit.text.strip_edges() == "":
+		_nameEdit.text = path.get_file().get_basename()
+
+
+func _onFormSave() -> void:
+	if _deleting:
+		CustomItems.remove(_editId)
+		_form.hide()
+		_refresh()
+		return
+	var name := _nameEdit.text.strip_edges()
+	if _editId == "" and _pickedPng == "":
+		_formError.text = "Выбери картинку."
+		return
+	if name == "":
+		_formError.text = "Напиши название."
+		return
+	var id := CustomItems.save(_editId, name, _descEdit.text.strip_edges(), _foodCheck.button_pressed, int(_tasteSpin.value), _pickedPng)
+	if id == "":
+		_formError.text = "Не получилось прочитать картинку."
+		return
+	_form.hide()
+	_hint.text = "Готово. Щёлкни по «★ %s», чтобы предмет появился у курсора." % name
+	_refresh()

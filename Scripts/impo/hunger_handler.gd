@@ -64,7 +64,7 @@ func _onItemEnter(body: Node2D) -> void:
 		awaitDB()
 		return
 	# 054.998: вкус - свой у каждого персонажа (паспорт), настроение - по вкусу
-	var itemKey: String = body.scene_file_path.get_file().get_basename()
+	var itemKey: String = get_parent()._itemKey(body) # и пользовательские ("custom:<id>")
 	var taste: int = get_parent().tasteFor(itemKey, int(props.tasteIfConsumable))
 	AudioManager.play_sfx(AudioManager.eat)
 	hungry += props.replenishIfConsumable
