@@ -1350,11 +1350,14 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# 054.998: метка действия - только если о чём-то попросили. Раньше правило
 	# было в каждом ответе, и модель дописывала "[ДЕЙСТВИЕ: подойти]" к ответу
 	# на "ты сегодня странный" - перс шёл невпопад (стенд, 19.10).
-	if speakerSkin == "":
-		prompt += secretBlock(skinTag, last) # тайна - только в разговоре с игроком
+	# тайна - только в разговоре с игроком. Ставится в самый конец запроса и без
+	# случайного тона: "ответь с подколкой/иронией" после "расскажи тайну" - и qwen
+	# отшучивалась на каждом шаге (стенд sec2, 20.10)
+	var secretPart := secretBlock(skinTag, last) if speakerSkin == "" else ""
 	if _asksForAction(last):
 		prompt += "\nСобеседник просит тебя что-то сделать. Реши по характеру и настроению, согласиться или нет, и скажи это. ТОЛЬКО если соглашаешься, в самом конце допиши одну метку: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]."
-	prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
+	if secretPart == "":
+		prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
 	prompt += _memoriesRule()
 	prompt += _closingBlock(tag, 0)
 	var worn := _wornOutPhrases(tag)
@@ -1364,6 +1367,7 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 		prompt += "\nОтветь ИМЕННО на последние слова %s: \"%s\". Не копируй начало и концовку своих прошлых ответов и не начинай с повтора его слов." % [speaker, last]
 		if own.size() > 0 or chatHistory.size() > 2:
 			prompt += " Если спрашивают о том, что ты {говорила|говорил} раньше или о чём шла речь, - найди это выше (в разговоре или в своих словах до него) и ответь именно об этом, конкретно."
+	prompt += secretPart
 	prompt += "\nТвой ответ:"
 	return prompt
 
