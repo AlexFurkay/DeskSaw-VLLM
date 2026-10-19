@@ -394,7 +394,7 @@ func _cmd_aiRepetitionGuard(value: float) -> void:
 ## команды - номер (выбрать), "удалить N", имя новой модели (скачать), 0 - выход.
 ## Новая модель проверяется ДО скачивания по реестру Ollama; если заранее не
 ## понять - после, а неподходящую можно сразу удалить.
-const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "ministral-3:14b"]
+const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "gemma3:12b", "ministral-3:14b"]
 
 func _cmd_aiModel(name: String = "") -> void:
 	if name != "":

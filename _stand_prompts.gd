@@ -3,7 +3,7 @@ extends SceneTree
 ## Запросы строит САМА игра (LLMManager.build*Prompt), стенд подставляет персонажа,
 ## состояние, скриншот и отправляет в Ollama с настройками игры.
 ##
-## Запуск: run_stand.sh <метка> [скины через запятую|all] [модель] [режим]
+## Запуск: run_stand.sh <метка> [скины через запятую|all] [модель] [режим] [лор auto|full|lite]
 ##   режимы: main (экран/состояние/чат/пулы), flirt, withdrawal, talk (длинная беседа)
 ## Скриншоты - test-stand/screens, результат - results_<метка>.txt,
 ## прогресс - файл PROGRESS_<метка>_NNN.txt (имя меняется от 000 до 100).
@@ -62,9 +62,13 @@ func _run() -> void:
 		skins = Array(args[1].split(","))
 	if args.size() > 2:
 		model = args[2]
+	if args.size() > 4:
+		gb.settings["loreMode"] = args[4] # auto | full | lite (054.999)
 	if args.size() > 3:
 		mode = args[3]
-	var preset: Array = PRESETS.get(model, [0.7, 1.2])
+	var preset: Array = PRESETS.get(model, [0.7, 1.2]).duplicate()
+	if args.size() > 6: # креативность и защита от повторов вручную (подбор настроек)
+		preset = [float(args[5]), float(args[6])]
 	lm.modelName = model
 	lm.creativity = preset[0]
 	lm.repetitionGuard = preset[1]

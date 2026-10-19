@@ -60,6 +60,7 @@ const NUM_CTX := 6144
 const NUM_CTX_BY_MODEL := {
 	"qwen3-vl:8b-instruct": 6144,
 	"ministral-3:14b": 9216,
+	"gemma3:12b": 8192, # 054.999: третья рекомендованная (решение Alex)
 }
 func numCtx() -> int:
 	return int(NUM_CTX_BY_MODEL.get(modelName, 8192))
