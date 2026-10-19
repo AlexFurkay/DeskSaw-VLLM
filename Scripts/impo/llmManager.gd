@@ -2142,7 +2142,8 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 	# Сколько токенов занял промпт: если он упрётся в NUM_CTX, Ollama молча
 	# отрежет НАЧАЛО (правила и лор) - в логе это видно как CONTEXT_FULL.
 	var promptTokens: int = int(parsed.get("prompt_eval_count", 0))
-	_logDebugLine(_currentTag, "TOKENS", "prompt=%d answer=%d of %d%s" % [promptTokens, int(parsed.get("eval_count", 0)), numCtx(), "  CONTEXT_FULL" if promptTokens >= numCtx() - 300 else ""])
+	var tps := _noteSpeed(parsed)
+	_logDebugLine(_currentTag, "TOKENS", "prompt=%d answer=%d of %d  speed=%.1f tok/s%s" % [promptTokens, int(parsed.get("eval_count", 0)), numCtx(), tps, "  CONTEXT_FULL" if promptTokens >= numCtx() - 300 else ""])
 
 	var text: String = ""
 	if parsed.has("response") and String(parsed["response"]).strip_edges() != "":
@@ -2442,6 +2443,56 @@ func fetchModels(callback: Callable) -> void:
 	if http.request("http://127.0.0.1:11434/api/tags") != OK:
 		http.queue_free()
 		callback.call([], false)
+
+
+## 054.999: скорость генерации. Во время стрима в Discord пакет фраз шёл 100 сек
+## вместо 10 (отчёт Alex 20.10). Две разные причины: модель не влезла в
+## видеопамять (часть ушла в обычную - в 5-10 раз медленнее) или влезла, но
+## видеокарту делит кодировщик стрима. Два медленных ответа подряд - спрашиваем
+## Ollama (/api/ps: size и size_vram) и пишем в консоль, что именно и что делать.
+const SLOW_TPS := 8.0                # qwen 8b на 8 ГБ даёт ~30 ток/с
+const SLOW_WARN_GAP_MS := 1800000    # не чаще раза в 30 минут
+var _slowStreak := 0
+var _lastSlowWarnMs := -SLOW_WARN_GAP_MS
+
+func _noteSpeed(parsed: Dictionary) -> float:
+	var count := int(parsed.get("eval_count", 0))
+	var dur := float(parsed.get("eval_duration", 0)) / 1e9
+	if count < 10 or dur <= 0.0:
+		return 0.0 # короткий ответ - скорость по нему не понять
+	var tps := count / dur
+	_slowStreak = _slowStreak + 1 if tps < SLOW_TPS else 0
+	var now := Time.get_ticks_msec()
+	if _slowStreak >= 2 and now - _lastSlowWarnMs >= SLOW_WARN_GAP_MS:
+		_lastSlowWarnMs = now
+		_explainSlow(tps)
+	return tps
+
+
+func _explainSlow(tps: float) -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		http.queue_free()
+		var share := -1.0
+		if response_code == 200:
+			var parsed = JSON.parse_string(body.get_string_from_utf8())
+			if parsed is Dictionary:
+				for m in parsed.get("models", []):
+					if String(m.get("name", "")) == modelName and float(m.get("size", 0)) > 0.0:
+						share = float(m.get("size_vram", 0)) / float(m["size"])
+		var msg := ""
+		if share >= 0.0 and share < 0.97:
+			msg = "ИИ отвечает медленно (%.0f ток/с): модель не влезла в видеопамять - на видеокарте только %d%%, остальное в обычной памяти. Видеопамять заняли другие программы: стрим или звонок в Discord, браузер, видеоплеер, игры. В Discord выключи аппаратное ускорение (Настройки - Расширенные), закрой лишнее и перезапусти DeskSaw - модель загрузится заново." % [tps, int(share * 100)]
+		elif share >= 0.97:
+			msg = "ИИ отвечает медленно (%.0f ток/с), хотя модель целиком в видеопамяти: видеокарту делит что-то ещё - стрим, запись видео, игра. Помогает выключить в Discord аппаратное ускорение (Настройки - Расширенные) или стримить с меньшим разрешением и FPS." % tps
+		else:
+			msg = "ИИ отвечает медленно (%.0f ток/с). Если идёт стрим или звонок в Discord - выключи в нём аппаратное ускорение (Настройки - Расширенные) и закрой лишние программы на видеокарте." % tps
+		_logDebugLine("system", "SLOW", "%.1f tok/s, vram share %s" % [tps, ("%.0f%%" % (share * 100)) if share >= 0.0 else "?"])
+		Console.print("[color=YELLOW]" + msg + "[/color]")
+	)
+	if http.request("http://127.0.0.1:11434/api/ps") != OK:
+		http.queue_free()
 
 
 func listAvailableModels() -> void:

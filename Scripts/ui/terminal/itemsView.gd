@@ -193,6 +193,10 @@ func _buildCustomUi() -> void:
 
 	_form = PanelContainer.new()
 	_form.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# непрозрачный фон - иначе сквозь форму видны карточки предметов (скрин Alex)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.09, 0.09, 0.1, 1.0)
+	_form.add_theme_stylebox_override("panel", bg)
 	_form.hide()
 	add_child(_form)
 	var margin := MarginContainer.new()
