@@ -76,8 +76,27 @@ func getVoiceSet(skinName: String) -> Dictionary:
 		"bark": _load_sounds(voicePath + "bark/"),
 		"speech": load(speechPath) if ResourceLoader.exists(speechPath) else load("res://assets/sounds/expie/speech.ogg"),
 	}
+	# 054.999: выравниваем громкость голосов по Вояджер (замер RMS, test-stand/loudness.py):
+	# у Вельвет "злые" звуки были громче на 3 дБ, у Липи все - на 3,5-4 дБ.
+	var gains: Dictionary = VOICE_GAIN_DB.get(voicePath.trim_suffix("/").get_file().to_lower(), {})
+	for kind in ["whine", "bark"]:
+		for st in voiceSet[kind]:
+			_streamGainDb[st] = float(gains.get(kind, 0.0))
 	_voiceSetCache[skinName] = voiceSet
 	return voiceSet
+
+
+## Поправка громкости голосов, дБ (папка звуков -> набор). Эталон - Вояджер (~-21.7 дБ RMS).
+const VOICE_GAIN_DB := {
+	"dune": {"bark": -2.0, "whine": -2.5},
+	"leapy": {"bark": -3.5, "whine": -4.0},
+	"milky": {"bark": -1.0, "whine": -1.5},
+	"orange": {"bark": -1.0, "whine": -1.5},
+	"roza": {"bark": -1.0, "whine": -1.5},
+	"velvet": {"bark": -3.0, "whine": 3.5},
+	"expie": {"bark": 0.0, "whine": -2.5},
+}
+var _streamGainDb: Dictionary = {} # AudioStream -> поправка дБ
 
 
 ## Loads all sounds from this folder into an array.
@@ -139,7 +158,7 @@ func play_sfx(stream: AudioStream,
 
 	var player := AudioStreamPlayer.new()
 	player.stream = stream
-	player.volume_db = volume_db + linear_to_db(soundMult)
+	player.volume_db = volume_db + linear_to_db(soundMult) + float(_streamGainDb.get(stream, 0.0))
 	player.pitch_scale = pitch_scale
 	player.bus = audio_bus
 	player.finished.connect(player.queue_free)

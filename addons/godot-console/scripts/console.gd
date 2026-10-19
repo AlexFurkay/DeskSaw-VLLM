@@ -14,6 +14,8 @@ signal cleared()
 ## после неё ничего не печаталось (replace = true).
 signal progress_line(string: String, replace: bool)
 var _lastWasProgress := false
+## 054.999: команды, которые работают, но не показываются в help (старые имена).
+var hidden_commands: Array = []
 
 
 var _commands: Dictionary[StringName, Dictionary] = {}
@@ -237,6 +239,8 @@ func _command_help() -> void:
 	var output: String = "[table=2]"
 
 	for cmd: String in get_command_list():
+		if hidden_commands.has(cmd):
+			continue
 		output += TEMPLATE.format([cmd, get_command_description(cmd)])
 
 	self.print(output + "[/table]")

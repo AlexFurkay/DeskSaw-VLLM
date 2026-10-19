@@ -291,6 +291,7 @@ func _ready():
 	Console.create_command("ai_repetition_guard", _cmd_aiRepetitionGuard, "1.0-2.0, выше = меньше шанс повторять одну и ту же фразу снова и снова (стандартно 1.2 для qwen3-vl:8b-instruct)")
 	Console.create_command("model_manager", _openModelManager, "менеджер моделей Ollama: все скачанные модели (размер, подходит ли, настройки), выбрать, удалить или скачать новую")
 	Console.create_command("ai_model", _cmd_aiModel, "то же, что model_manager; ai_model <имя> - сразу скачать и выбрать модель")
+	Console.hidden_commands.append("ai_model") # 054.999: работает, но в help не путает
 	Console.create_command("ban_words", _cmd_banwords, "список слов/фраз, которые ИИ никогда не должен использовать: после списка вводи номер (удалить), слово (добавить) или 0 (выход)")
 	Console.create_command("reload_lore", LLMManager.reloadLore, "перечитывает лор и паспорта всех персонажей (lore.txt, character.json) без перезапуска - наборы фраз создадутся заново")
 	Console.create_command("resize_console", resize, "размер окна консоли: resize_console <ширина> <высота> (проще растянуть уголок справа снизу)")

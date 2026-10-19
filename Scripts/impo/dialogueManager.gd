@@ -1,6 +1,9 @@
 extends Node
 class_name Dialogue
 
+## 054.999: звук печатания текста на 20% тише у всех (просьба Alex).
+const SPEECH_GAIN_DB := -1.94 # linear_to_db(0.8)
+
 var data
 @onready var dialogueTimer = $dialogueTimer
 @export var richtextlabel: RichTextLabel
@@ -69,7 +72,7 @@ func typeOut(string: String, speed_multiplier: float = 1.0):
 			wait *= 8
 
 		var speechSound: AudioStream = get_parent().voiceSet.get("speech", AudioManager.speech)
-		AudioManager.play_sfx(speechSound, 0.75, base_db + randf_range(-variance_db, variance_db), 1 + randf_range(-.2, .2), false, 0.5, "", "Text")
+		AudioManager.play_sfx(speechSound, 0.75, base_db + SPEECH_GAIN_DB + randf_range(-variance_db, variance_db), 1 + randf_range(-.2, .2), false, 0.5, "", "Text")
 		await get_tree().create_timer(wait).timeout
 		i += 1
 

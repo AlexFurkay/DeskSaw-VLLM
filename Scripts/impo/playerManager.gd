@@ -76,12 +76,18 @@ static func displayNameFor(skinName: String) -> String:
 	if skinName == "" or skinName == "Body" or skinName == "Default":
 		return "Experiment"
 	# имя из паспорта (VoyagerAlt -> Voyager), иначе название папки
+	# 054.999: сначала displayName - русское имя для речи ("Orange" модель звала
+	# "Оранжевый"); у игрока со старым паспортом его нет - берём из сборки
+	var fallback := skinName
 	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
 		if FileAccess.file_exists(path):
 			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
-			if data is Dictionary and String(data.get("name", "")) != "":
-				return String(data["name"])
-	return skinName
+			if data is Dictionary:
+				if String(data.get("displayName", "")) != "":
+					return String(data["displayName"])
+				if fallback == skinName and String(data.get("name", "")) != "":
+					fallback = String(data["name"])
+	return fallback
 
 
 func spawnPlayer(skinPath: String, skinName: String) -> void:
@@ -251,6 +257,8 @@ func _submitChat() -> void:
 	# всех, и Voyager "помнила" то, что игрок говорил Expie.
 	var key: String = String(listener.petId)
 	_remember(key, playerName, text)
+	# 054.999: реплики игрока - тоже в ИИ-лог, иначе по логу не видно, о чём спросили
+	LLMManager._logDebugLine(listener._skinTag() + ":chat", "PLAYER", text)
 	var listenerName := displayNameFor(listener._skinTag())
 	listener.replyToPlayer(playerName, (histories[key] as Array).duplicate(), func(reply: String): _remember(key, listenerName, reply))
 

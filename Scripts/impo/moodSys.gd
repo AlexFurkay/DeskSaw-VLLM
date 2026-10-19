@@ -95,11 +95,16 @@ func moodCheck(delta: float = 1.0) -> float:
 ## 054.998, реабилитация: пока раны серьёзные, настроение выше потолка не
 ## поднимается (аптечками хп вылечить можно, а настроение - только лаской и едой).
 ## Потолок касается базового настроения; приход от фентанила идёт поверх.
-const WOUND_CAP_HEAVY := 20.0 # здоровье ниже 30
-const WOUND_CAP_LIGHT := 60.0 # здоровье ниже 60
+## 054.999: под шкалу -100..100 (Alex: потолок 20 при 30 хп - это ещё 120 из 200).
+## Ниже 30 хп - уже грустные фразы (LowPassive с -10), ниже 15 - VeryLowPassive (с -30).
+const WOUND_CAP_CRITICAL := -30.0 # здоровье ниже 15
+const WOUND_CAP_HEAVY := -10.0 # здоровье ниже 30
+const WOUND_CAP_LIGHT := 30.0 # здоровье ниже 60
 
 func woundMoodCap() -> float:
 	var hp: float = _health()
+	if hp < 15.0:
+		return WOUND_CAP_CRITICAL
 	if hp < 30.0:
 		return WOUND_CAP_HEAVY
 	if hp < 60.0:

@@ -645,10 +645,16 @@ func checker():
 			#update
 			if not isUnconscious:
 				faceSys.setEmotion(emotionz.keys()[currentEmotion])
-		statUpd.stat.mood = moodN
-		statUpd.stat.hunger = hungerHandler.hungry
-		statUpd.stat.health = healthHandler.health
-		statUpd.stat.sleep = snapped(sleepN, 0.1) # ???? why was it like that before?
+		# 054.999: окошко по Ctrl - по-русски, целыми числами; зависимость - если есть.
+		# Ломку не показываем (решение Alex: ломает погружение).
+		statUpd.stat = {
+			"Настроение": int(round(moodN)),
+			"Сытость": int(round(hungerHandler.hungry)),
+			"Усталость": int(round(sleepN)),
+			"Здоровье": int(round(healthHandler.health)),
+		}
+		if addiction >= 1.0:
+			statUpd.stat["Зависимость"] = int(round(addiction))
 		statUpd.upd(statUpd.stat)
 
 		await get_tree().create_timer(tick).timeout
