@@ -9,7 +9,7 @@ class_name CustomItems
 
 const DIR := "user://items/"
 const KEY_PREFIX := "custom:"
-const MAX_SIDE := 32 # пикселей до увеличения x4 - как самые крупные встроенные (ящики 24-32)
+const MAX_SIDE := 64 # пикселей до увеличения x4; меньше - свой размер. Было 32 - иконки 64x64 (Тарков) размывало (Alex 20.10)
 const SCALE := 4.0
 const FOOD_REPLENISH := 15.0
 
