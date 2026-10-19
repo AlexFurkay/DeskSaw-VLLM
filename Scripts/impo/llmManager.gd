@@ -1416,9 +1416,12 @@ func _saveSecret(petId: String) -> void:
 
 ## Свои слова-ключи у каждой тайны (паспорт secretAsk): у Милки - Вояджер,
 ## у Вельвет - сны, у Розы - обиды. Нет поля - общие (прошлое, лаборатория).
+## Прямой вопрос о тайне (SECRET_ASK_ANY) засчитывается у всех: у Експи свой
+## список заменял общий, "ты что-то скрываешь?" не считалось (стенд sec3, 20.10).
+const SECRET_ASK_ANY := ["тайн", "секрет", "скрываешь", "скрывает", "прячешь", "расскажи о себе"]
 func _asksAboutSecret(skin: String, text: String) -> bool:
 	var low := text.to_lower()
-	var stems: Array = passport(skin).get("secretAsk", SECRET_ASK_STEMS)
+	var stems: Array = SECRET_ASK_ANY + passport(skin).get("secretAsk", SECRET_ASK_STEMS)
 	for st in stems:
 		if low.contains(st):
 			return true
