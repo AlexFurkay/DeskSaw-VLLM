@@ -1397,9 +1397,12 @@ func _secretState(skin: String) -> Dictionary:
 	return keep["secrets"][skin]
 
 
-func _asksAboutSecret(text: String) -> bool:
+## Свои слова-ключи у каждой тайны (паспорт secretAsk): у Милки - Вояджер,
+## у Вельвет - сны, у Розы - обиды. Нет поля - общие (прошлое, лаборатория).
+func _asksAboutSecret(skin: String, text: String) -> bool:
 	var low := text.to_lower()
-	for st in SECRET_ASK_STEMS:
+	var stems: Array = passport(skin).get("secretAsk", SECRET_ASK_STEMS)
+	for st in stems:
 		if low.contains(st):
 			return true
 	return false
@@ -1411,10 +1414,13 @@ func secretBlock(skin: String, lastText: String) -> String:
 	var secret := String(p.get("secret", ""))
 	if secret == "":
 		return ""
+	# флирт выключен - романтическая тайна (Вояджер) раскрывается как сильная привязанность
+	if not gbData.settings.get("llmFlirtEnabled", false) and String(p.get("secretSafe", "")) != "":
+		secret = String(p["secretSafe"])
 	var st := _secretState(skin)
 	if st.get("revealed", false):
-		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if _asksAboutSecret(lastText) else ""
-	if not _asksAboutSecret(lastText):
+		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if _asksAboutSecret(skin, lastText) else ""
+	if not _asksAboutSecret(skin, lastText):
 		return ""
 	var hint := String(p.get("secretHint", SECRET_HINT_DEFAULT))
 	var now := Time.get_ticks_msec()
