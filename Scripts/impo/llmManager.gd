@@ -1432,7 +1432,9 @@ func secretBlock(skin: String, lastText: String) -> String:
 	if step >= SECRET_STEPS:
 		st["revealed"] = true
 		gbData.savetodisk("user://SAVE.json", gbData.data)
-		return "\n" + hint + "\nСейчас ты наконец решаешься рассказать человеку свою тайну - сбивчиво, со страхом, своими словами: " + secret
+		# без secretHint ("ты её не выдаёшь") - иначе противоречие, и на стенде
+		# Вояджер, Роза, Милки и Вельвет на последнем шаге всё равно отнекивались
+		return "\nТвоя тайна: " + secret + "\nСейчас ты наконец решаешься рассказать её человеку - прямо, но сбивчиво и со страхом, своими словами. Не уходи от ответа: это тот самый момент."
 	return "\n" + hint + "\n" + SECRET_STAGES[clampi(step, 0, SECRET_STAGES.size() - 1)]
 
 
