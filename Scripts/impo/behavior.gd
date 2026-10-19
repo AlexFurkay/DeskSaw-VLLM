@@ -1079,6 +1079,7 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 		var php: float = PlayerManager.player.healthHandler.health
 		playerState = "здоровье %.0f из 100%s" % [php, ", тяжёлые раны" if php <= 30.0 else (", есть раны" if php <= 60.0 else "")]
 	LLMManager.chatMood = moodSys.mood + moodSys.drugOffset # для тайны (secretBlock)
+	LLMManager.chatPetId = petId
 	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), _recentSpoken(), func(text: String):
 		var action := ""
 		if text.begins_with("<act:"):

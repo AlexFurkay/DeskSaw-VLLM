@@ -1373,8 +1373,10 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 ## Маленькая модель тайну не удержит, поэтому она её просто НЕ ВИДИТ, пока тайну
 ## не заслужили: игрок расспрашивает о прошлом, когда у персонажа настроение
 ## от SECRET_MOOD, несколько раз в разных разговорах (SECRET_STEPS шагов, не
-## чаще раза в SECRET_GAP_MS). Удар откатывает шаг (secretSetback). Раскрытая
-## тайна сохраняется между запусками (SAVE.json, everPresentAcrossSaves.secrets).
+## чаще раза в SECRET_GAP_MS). Удар откатывает шаг (secretSetback).
+## Прогресс у КАЖДОГО созданного персонажа свой (две Дюны - два прогресса), лежит
+## в SAVE.json -> saw[petId].secret и пропадает вместе с персонажем: удалить и
+## создать заново, full_reset - тайну надо заслужить снова (решение Alex 19.10).
 const SECRET_ASK_STEMS := ["лаборатор", "прошл", "откуда ты", "тайн", "секрет", "клетк", "тест", "делали с тобой", "с тобой делали", "корпорац", "расскажи о себе", "скрываешь", "что с тобой было"]
 const SECRET_MOOD := 60.0
 const SECRET_STEPS := 4
@@ -1387,14 +1389,25 @@ const SECRET_STAGES := [
 	"Сейчас ты на грани: начинаешь рассказывать и обрываешь себя на полуслове.",
 ]
 var chatMood := 0.0 # настроение того, кто сейчас отвечает игроку (behavior.replyToPlayer)
+var chatPetId := "" # и его petId - прогресс тайны у каждого персонажа свой
+var _secretTemp := {} # для petId, которых нет в сейве (стенд) - только в памяти
 
-func _secretState(skin: String) -> Dictionary:
+func _secretState(petId: String) -> Dictionary:
 	var keep: Dictionary = gbData.data.get("everPresentAcrossSaves", {})
-	if not keep.has("secrets"):
-		keep["secrets"] = {}
-	if not keep["secrets"].has(skin):
-		keep["secrets"][skin] = {"progress": 0, "revealed": false, "last": 0}
-	return keep["secrets"][skin]
+	keep.erase("secrets") # до 19.10 прогресс был общим на скин - больше не нужен
+	var saw: Dictionary = gbData.data.get("saw", {})
+	if not saw.has(petId):
+		if not _secretTemp.has(petId):
+			_secretTemp[petId] = {"progress": 0, "revealed": false, "last": 0}
+		return _secretTemp[petId]
+	if not saw[petId].has("secret"):
+		saw[petId]["secret"] = {"progress": 0, "revealed": false, "last": 0}
+	return saw[petId]["secret"]
+
+
+func _saveSecret(petId: String) -> void:
+	if gbData.data.get("saw", {}).has(petId):
+		gbData.savetodisk("user://SAVE.json", gbData.data)
 
 
 ## Свои слова-ключи у каждой тайны (паспорт secretAsk): у Милки - Вояджер,
@@ -1417,7 +1430,7 @@ func secretBlock(skin: String, lastText: String) -> String:
 	# флирт выключен - романтическая тайна (Вояджер) раскрывается как сильная привязанность
 	if not gbData.settings.get("llmFlirtEnabled", false) and String(p.get("secretSafe", "")) != "":
 		secret = String(p["secretSafe"])
-	var st := _secretState(skin)
+	var st := _secretState(chatPetId)
 	if st.get("revealed", false):
 		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if _asksAboutSecret(skin, lastText) else ""
 	if not _asksAboutSecret(skin, lastText):
@@ -1427,11 +1440,11 @@ func secretBlock(skin: String, lastText: String) -> String:
 	if chatMood >= SECRET_MOOD and now - int(st.get("last", 0)) >= SECRET_GAP_MS:
 		st["progress"] = int(st.get("progress", 0)) + 1
 		st["last"] = now
-		gbData.savetodisk("user://SAVE.json", gbData.data)
+		_saveSecret(chatPetId)
 	var step := int(st.get("progress", 0))
 	if step >= SECRET_STEPS:
 		st["revealed"] = true
-		gbData.savetodisk("user://SAVE.json", gbData.data)
+		_saveSecret(chatPetId)
 		# без secretHint ("ты её не выдаёшь") - иначе противоречие, и на стенде
 		# Вояджер, Роза, Милки и Вельвет на последнем шаге всё равно отнекивались
 		return "\nТвоя тайна: " + secret + "\nСейчас ты наконец решаешься рассказать её человеку - прямо, но сбивчиво и со страхом, своими словами. Не уходи от ответа: это тот самый момент."
@@ -1439,13 +1452,13 @@ func secretBlock(skin: String, lastText: String) -> String:
 
 
 ## Удар или грубость - доверие падает, шаг к тайне назад.
-func secretSetback(skin: String) -> void:
+func secretSetback(skin: String, petId: String) -> void:
 	if String(passport(skin).get("secret", "")) == "":
 		return
-	var st := _secretState(skin)
+	var st := _secretState(petId)
 	if not st.get("revealed", false) and int(st.get("progress", 0)) > 0:
 		st["progress"] = int(st["progress"]) - 1
-		gbData.savetodisk("user://SAVE.json", gbData.data)
+		_saveSecret(petId)
 
 
 ## Собеседник спрашивает о прошлых словах ("что ты сказала", "почему", "помнишь").

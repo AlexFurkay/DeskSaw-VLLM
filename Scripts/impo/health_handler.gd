@@ -118,7 +118,7 @@ func applyDamage(amount: float) -> void:
 		return
 	var wasAlive: bool = health > 0.0
 	if amount >= LIGHT_DAMAGE_THRESHOLD:
-		LLMManager.secretSetback(get_parent()._skinTag()) # 054.999: ударили - доверие к тайне падает
+		LLMManager.secretSetback(get_parent()._skinTag(), petId) # 054.999: ударили - доверие к тайне падает
 	health = clamp(health - amount, minhealth, maxhealth)
 	pet.health = health
 	# 054.998: удар бьёт и по настроению - по силе удара (5 урона -> -5).
