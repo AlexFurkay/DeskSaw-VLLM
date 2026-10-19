@@ -41,7 +41,8 @@ func _ready() -> void:
 	# ходу (список скинов, предметы), их ловим через node_added
 	_scaleFontsUnder(self)
 	get_tree().node_added.connect(_on_node_added)
-	_fitCloseButton()
+	if windowControl and windowControl.CloseButton:
+		_fitCloseButton(windowControl.CloseButton)
 
 	CommandsGlobal.runInitialCommands.emit()
 
@@ -71,6 +72,10 @@ func _scaleFont(c: Control) -> void:
 	elif c is RichTextLabel:
 		for key in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size", "mono_font_size"]:
 			c.add_theme_font_size_override(key, maxi(6, int(round(c.get_theme_font_size(key) * k))))
+	# 054.999: все крестики "X" (второй - в карточке предмета, вкладка Items) -
+	# та же беда, что у крестика закрытия в 054.995
+	if c is Button and c.text == "X" and c.clip_text:
+		_fitCloseButton(c)
 
 
 ## 054.995: вкладка «Фразы» - последние фразы всех персонажей (и игрока) с
@@ -126,10 +131,7 @@ func _onPhraseLogged(line: String) -> void:
 ## 054.995: крестик закрытия - кнопка фиксированного размера 27x28 с обрезкой
 ## текста; после увеличения шрифта "X" перестал влезать и пропал. Растим кнопку
 ## вместе с текстом и отключаем обрезку.
-func _fitCloseButton() -> void:
-	var close: Button = windowControl.CloseButton if windowControl else null
-	if close == null:
-		return
+func _fitCloseButton(close: Button) -> void:
 	close.clip_text = false
 	close.autowrap_mode = TextServer.AUTOWRAP_OFF
 	close.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
