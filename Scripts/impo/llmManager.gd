@@ -853,7 +853,9 @@ func _closingBlock(category: String, lines: int = 1) -> String:
 		out += "\n" + obsession.strip_edges()
 	var speech := _speechFor(skin)
 	if speech != "":
-		out += "\nГлавное - говори так, как говоришь всегда: " + speech
+		# "(это описание, а не слова для фразы)": лор Вельвет начинается с "Медленно, мягко,
+		# ласково" - и она стала начинать фразы словом "Медленно..." (лог 19.10)
+		out += "\nГлавное - говори так, как говоришь всегда (это описание твоей манеры, а не слова для фразы): " + speech
 	# 054.999: без этого речь стала суше - у Вояджер восклицаний 32 -> 9 из ~430
 	# ("тон спокойный" из лора модель поняла буквально)
 	out += "\nГовори живо и с интонацией: где-то восклицание, где-то многоточие или пауза - будь {интересной и живой|интересным и живым}, а не сухой справкой."
@@ -1210,8 +1212,11 @@ func buildPlayerOpenerPrompt(skinTag: String, playerSkin: String, stateText: Str
 	prompt += "\nТвоё состояние: " + stateText.strip_edges()
 	if playerState != "":
 		prompt += "\nСостояние его персонажа: " + playerState.strip_edges() + "."
-	prompt += tastesText(skinTag)
-	prompt += "\nЗаговори с ним первым. Повод: " + PET_TOPICS[randi() % PET_TOPICS.size()] + " Если кто-то из вас ранен или ему плохо - начни с этого."
+	# вкусы - только когда речь о еде (иначе Вельвет сравнивала всё с бургером)
+	var topic: String = PET_TOPICS[randi() % PET_TOPICS.size()]
+	if topic.begins_with("еда"):
+		prompt += tastesText(skinTag)
+	prompt += "\nЗаговори с ним первым. Повод: " + topic + " Если кто-то из вас ранен или ему плохо - начни с этого."
 	prompt += _memoriesRule()
 	prompt += _closingBlock(tag)
 	prompt += "\nТвоя реплика:"
@@ -1270,7 +1275,10 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	if speakerState != "":
 		prompt += "\nСостояние собеседника: " + speakerState.strip_edges() + "."
 	prompt += "\nЕсли кто-то из вас ранен или ему плохо - это должно чувствоваться: не болтай беззаботно."
-	prompt += tastesText(skinTag)
+	# 054.999: вкусы - только когда в последней реплике речь о еде: с ними в
+	# каждом разговоре Вельвет сравнивала всё подряд с бургером (лог 19.10)
+	if chatHistory.size() > 0 and _aboutFood(String(chatHistory[chatHistory.size() - 1].get("text", ""))):
+		prompt += tastesText(skinTag)
 	# Общая память: что персонаж сам говорил вслух вне разговора (экран,
 	# состояние, предметы) - чтобы понимать вопросы вроде "почему ты так сказала?"
 	var inChat := {}
@@ -1313,6 +1321,17 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 			prompt += " Если спрашивают о том, что ты {говорила|говорил} раньше или о чём шла речь, - найди это выше (в разговоре или в своих словах до него) и ответь именно об этом, конкретно."
 	prompt += "\nТвой ответ:"
 	return prompt
+
+
+## Речь о еде в реплике собеседника (тогда в запрос - вкусы персонажа).
+const FOOD_STEMS := ["ед", "еду", "есть", "поесть", "куша", "голод", "корм", "жра", "плот", "бургер", "пицц", "хлеб", "банан", "сок", "фрукт", "вкус", "мяс", "перекус", "обед", "ужин", "завтрак"]
+
+func _aboutFood(text: String) -> bool:
+	for w in _normWords(text):
+		for st in FOOD_STEMS:
+			if w.begins_with(st) and (st.length() > 2 or w.length() <= 4):
+				return true
+	return false
 
 
 ## Просьба что-то сделать (подойти, лечь, сесть, встать, прыгнуть, отойти).
