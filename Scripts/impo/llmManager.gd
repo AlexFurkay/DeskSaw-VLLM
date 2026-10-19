@@ -897,7 +897,7 @@ func tastesText(skin: String) -> String:
 func _pickScreenSpeaker() -> Node:
 	var candidates: Array = []
 	for pet in get_tree().get_nodes_in_group("pets"):
-		if not (pet.isPlayer or pet.isSleeping or pet.isUnconscious or pet.beingDragged or pet.shocked):
+		if not (pet.isPlayer or pet.isSleeping or pet.isUnconscious or pet.beingDragged or pet.shocked or pet.isQuiet()):
 			candidates.append(pet)
 	return null if candidates.is_empty() else candidates[randi() % candidates.size()]
 

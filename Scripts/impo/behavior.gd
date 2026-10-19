@@ -245,6 +245,7 @@ func _ready() -> void:
 
 		#setup For spawn
 	_spawnGraceUntil = Time.get_ticks_msec() + 2000 # 2 сек. неприкосновенности сразу после спавна
+	_quietUntil = Time.get_ticks_msec() + SPAWN_QUIET_MS
 	_initalSpawn()
 	LLMManager.llmReaction.connect(_on_llm_reaction)
 	LLMManager.aiEnabledChanged.connect(func(enabled): if enabled and not isPlayer: _prewarmMyCategories())
@@ -1141,12 +1142,23 @@ static func petTalkRange() -> Vector2:
 	return Vector2(lo, hi)
 
 
+## 054.999: только что появившийся персонаж первую минуту не заводит разговоров,
+## не комментирует предметы и экран и не болтает "сам по себе" - только фраза
+## появления и реакции на действия. Раньше всё срабатывало разом (Вельвет:
+## предметы рядом + игрок + Вояджер + фраза состояния - в первые секунды).
+const SPAWN_QUIET_MS := 60000
+var _quietUntil := 0
+
+func isQuiet() -> bool:
+	return Time.get_ticks_msec() < _quietUntil
+
+
 func petTalkLoop() -> void:
 	if _nextPetTalkMsec < 0: # первый разговор - не раньше минимума после запуска
 		_nextPetTalkMsec = Time.get_ticks_msec() + int(petTalkRange().x * 1000.0)
 	while get_tree():
 		await get_tree().create_timer(randf_range(15.0, 30.0)).timeout
-		if isPlayer or isUnconscious or isSleeping or beingDragged or ragdolled or shocked:
+		if isPlayer or isUnconscious or isSleeping or beingDragged or ragdolled or shocked or isQuiet():
 			continue
 		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
 			continue
@@ -1199,7 +1211,7 @@ func notePetLine(other: Node, who: String, text: String) -> void:
 func _nearestTalkPartner() -> Node:
 	var maxDist: float = PET_TALK_DISTANCE * float(gbData.settings.get("petScale", 4.0)) / 4.0
 	for pet in get_tree().get_nodes_in_group("pets"):
-		if pet == self or pet.isPlayer or pet.isUnconscious or pet.isSleeping:
+		if pet == self or pet.isPlayer or pet.isUnconscious or pet.isSleeping or pet.isQuiet():
 			continue
 		if moveSys.rigidtorso.global_position.distance_to(pet.moveSys.rigidtorso.global_position) < maxDist:
 			return pet
@@ -1254,7 +1266,7 @@ func _petStats() -> String:
 const PET_TALK_TURNS_MIN := 2
 const PET_TALK_TURNS_MAX := 6
 func replyToPet(speaker: Node, line: String, turnsLeft: int = 1) -> void:
-	if turnsLeft < 1 or isPlayer or isUnconscious or isSleeping or not is_instance_valid(speaker):
+	if turnsLeft < 1 or isPlayer or isUnconscious or isSleeping or isQuiet() or not is_instance_valid(speaker):
 		return
 	# разговор обрывается, если кого-то схватили, уронили или он отошёл
 	if beingDragged or ragdolled or shocked or _nearestTalkPartnerIs(speaker) == false:
@@ -1551,7 +1563,7 @@ func itemWatch() -> void:
 			if not firstScan: # то, что уже лежало рядом при появлении персонажа, - не "новое"
 				fresh.append(body)
 		firstScan = false
-		if fresh.is_empty() or isPlayer:
+		if fresh.is_empty() or isPlayer or isQuiet():
 			continue
 		if not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
 			continue
@@ -1634,6 +1646,9 @@ func _aiStateHint() -> String:
 func passivetalk() -> void:
 	while true:
 		if isPlayer:
+			await get_tree().create_timer(5.0).timeout
+			continue
+		if isQuiet():
 			await get_tree().create_timer(5.0).timeout
 			continue
 		if !gbData.settings.get("mutePassive", false):
@@ -2100,7 +2115,7 @@ func _pickWalkTarget() -> float:
 	# ломка - к шприцу с фентанилом (колоть себя сама она НЕ может - только
 	# отбросит шприц к человеку, см. _tryTossSyringe)
 	if _inWithdrawal() and randf() < 0.8 and Time.get_ticks_msec() >= _nextTossMsec:
-		var syringe := _nearestBody(func(body, key): return key == "fentanyl")
+		var syringe := _nearestFentanylAnywhere()
 		if syringe:
 			_tossTarget = syringe
 			return syringe.global_position.x
@@ -2166,6 +2181,56 @@ func _stopBeforeDanger(x: float, targetX: float) -> float:
 
 
 ## Пила прямо по курсу ближе безопасного расстояния.
+## 054.999: в ломке шприц ищется по всему экрану (раньше - только в радиусе
+## "зрения" персонажа, и далёкий шприц он просто не замечал). Из нескольких -
+## тот, до которого меньше всего мешает: расстояние + штраф за каждый
+## предмет на прямой линии между персонажем и шприцем.
+func _nearestFentanylAnywhere() -> Node2D:
+	var me: Vector2 = moveSys.rigidtorso.global_position
+	var best: Node2D = null
+	var bestCost := INF
+	for body in _allItemBodies():
+		if _itemKey(body) != "fentanyl":
+			continue
+		var cost: float = absf(body.global_position.x - me.x) + 400.0 * _obstaclesOnLine(me, body.global_position, body)
+		if cost < bestCost:
+			bestCost = cost
+			best = body
+	return best
+
+
+## Все предметы на экране (RigidBody2D с properties), не только рядом.
+func _allItemBodies() -> Array:
+	var out: Array = []
+	var stack: Array = [get_tree().current_scene]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children():
+			if c is RigidBody2D and c.has_node("properties"):
+				out.append(c)
+			elif not (c is RigidBody2D):
+				stack.append(c)
+	return out
+
+
+## Сколько предметов пересекает прямая от персонажа до цели (лучом физики).
+func _obstaclesOnLine(from: Vector2, to: Vector2, target: Node) -> int:
+	var space: PhysicsDirectSpaceState2D = moveSys.rigidtorso.get_world_2d().direct_space_state
+	var exclude: Array = [target.get_rid()]
+	var hits := 0
+	for i in 6:
+		var q := PhysicsRayQueryParameters2D.create(from, to)
+		q.exclude = exclude
+		q.collision_mask = 1
+		var r: Dictionary = space.intersect_ray(q)
+		if r.is_empty():
+			break
+		if r["collider"] is RigidBody2D and r["collider"].has_node("properties"):
+			hits += 1
+		exclude.append(r["rid"])
+	return hits
+
+
 ## Рядом летит предмет (бросили) - значит, перса сбило им, а не он сам споткнулся.
 const FLYING_OBJECT_SPEED := 450.0
 
