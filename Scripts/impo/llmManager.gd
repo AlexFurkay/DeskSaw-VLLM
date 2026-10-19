@@ -1350,6 +1350,8 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# 054.998: метка действия - только если о чём-то попросили. Раньше правило
 	# было в каждом ответе, и модель дописывала "[ДЕЙСТВИЕ: подойти]" к ответу
 	# на "ты сегодня странный" - перс шёл невпопад (стенд, 19.10).
+	if speakerSkin == "":
+		prompt += secretBlock(skinTag, last) # тайна - только в разговоре с игроком
 	if _asksForAction(last):
 		prompt += "\nСобеседник просит тебя что-то сделать. Реши по характеру и настроению, согласиться или нет, и скажи это. ТОЛЬКО если соглашаешься, в самом конце допиши одну метку: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]."
 	prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
@@ -1364,6 +1366,78 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 			prompt += " Если спрашивают о том, что ты {говорила|говорил} раньше или о чём шла речь, - найди это выше (в разговоре или в своих словах до него) и ответь именно об этом, конкретно."
 	prompt += "\nТвой ответ:"
 	return prompt
+
+
+## 054.999: ТАЙНЫ ПЕРСОНАЖЕЙ (идея Alex). В паспорте: secret - сама тайна,
+## secretHint - что персонаж знает "снаружи" (есть тайна, он уходит от ответа).
+## Маленькая модель тайну не удержит, поэтому она её просто НЕ ВИДИТ, пока тайну
+## не заслужили: игрок расспрашивает о прошлом, когда у персонажа настроение
+## от SECRET_MOOD, несколько раз в разных разговорах (SECRET_STEPS шагов, не
+## чаще раза в SECRET_GAP_MS). Удар откатывает шаг (secretSetback). Раскрытая
+## тайна сохраняется между запусками (SAVE.json, everPresentAcrossSaves.secrets).
+const SECRET_ASK_STEMS := ["лаборатор", "прошл", "откуда ты", "тайн", "секрет", "клетк", "тест", "делали с тобой", "с тобой делали", "корпорац", "расскажи о себе", "скрываешь", "что с тобой было"]
+const SECRET_MOOD := 60.0
+const SECRET_STEPS := 4
+const SECRET_GAP_MS := 120000
+const SECRET_HINT_DEFAULT := "У тебя есть тайна о прошлом. Ты о ней не рассказываешь: уходишь от ответа, отшучиваешься, нервничаешь или меняешь тему."
+const SECRET_STAGES := [
+	"Сейчас ты резко уходишь от этой темы.",
+	"Сейчас ты уходишь от темы, но заметно нервничаешь.",
+	"Сейчас ты почти проговариваешься - бросаешь туманный намёк и тут же замолкаешь.",
+	"Сейчас ты на грани: начинаешь рассказывать и обрываешь себя на полуслове.",
+]
+var chatMood := 0.0 # настроение того, кто сейчас отвечает игроку (behavior.replyToPlayer)
+
+func _secretState(skin: String) -> Dictionary:
+	var keep: Dictionary = gbData.data.get("everPresentAcrossSaves", {})
+	if not keep.has("secrets"):
+		keep["secrets"] = {}
+	if not keep["secrets"].has(skin):
+		keep["secrets"][skin] = {"progress": 0, "revealed": false, "last": 0}
+	return keep["secrets"][skin]
+
+
+func _asksAboutSecret(text: String) -> bool:
+	var low := text.to_lower()
+	for st in SECRET_ASK_STEMS:
+		if low.contains(st):
+			return true
+	return false
+
+
+## Кусок запроса о тайне для ответа игроку (пусто, если о ней не спрашивают).
+func secretBlock(skin: String, lastText: String) -> String:
+	var p := passport(skin)
+	var secret := String(p.get("secret", ""))
+	if secret == "":
+		return ""
+	var st := _secretState(skin)
+	if st.get("revealed", false):
+		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if _asksAboutSecret(lastText) else ""
+	if not _asksAboutSecret(lastText):
+		return ""
+	var hint := String(p.get("secretHint", SECRET_HINT_DEFAULT))
+	var now := Time.get_ticks_msec()
+	if chatMood >= SECRET_MOOD and now - int(st.get("last", 0)) >= SECRET_GAP_MS:
+		st["progress"] = int(st.get("progress", 0)) + 1
+		st["last"] = now
+		gbData.savetodisk("user://SAVE.json", gbData.data)
+	var step := int(st.get("progress", 0))
+	if step >= SECRET_STEPS:
+		st["revealed"] = true
+		gbData.savetodisk("user://SAVE.json", gbData.data)
+		return "\n" + hint + "\nСейчас ты наконец решаешься рассказать человеку свою тайну - сбивчиво, со страхом, своими словами: " + secret
+	return "\n" + hint + "\n" + SECRET_STAGES[clampi(step, 0, SECRET_STAGES.size() - 1)]
+
+
+## Удар или грубость - доверие падает, шаг к тайне назад.
+func secretSetback(skin: String) -> void:
+	if String(passport(skin).get("secret", "")) == "":
+		return
+	var st := _secretState(skin)
+	if not st.get("revealed", false) and int(st.get("progress", 0)) > 0:
+		st["progress"] = int(st["progress"]) - 1
+		gbData.savetodisk("user://SAVE.json", gbData.data)
 
 
 ## Собеседник спрашивает о прошлых словах ("что ты сказала", "почему", "помнишь").
