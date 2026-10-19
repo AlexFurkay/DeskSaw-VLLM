@@ -205,16 +205,50 @@ func _lorePathForSkin(skinName: String) -> String:
 ## defaultSkin - второй персонаж на экране говорил бы с чужой биографией).
 var _loreBySkin: Dictionary = {} # имя скина -> текст лора
 
+## 054.999 (идея Alex): два лора - lore.txt (полный, для моделей от 10b) и
+## lore_lite.txt (короче и проще, для моделей до 10b: 8b путается в длинном
+## лоре, а 14b, наоборот, раскрывает его детали). Нет lore_lite.txt - берётся
+## обычный. Настройка loreMode: "auto" (по размеру модели), "full", "lite".
+## lore_lite ищется у игрока, потом в сборке (у старых игроков его ещё нет).
+func useLiteLore() -> bool:
+	match String(gbData.settings.get("loreMode", "auto")):
+		"lite":
+			return true
+		"full":
+			return false
+	return modelBillions() < 10.0
+
+
+## Размер модели в миллиардах параметров - из имени ("qwen3-vl:8b-instruct" -> 8,
+## "ministral-3:14b" -> 14). Не понять - считаем маленькой (8).
+var _sizeRegex := RegEx.create_from_string("(\\d+(?:\\.\\d+)?)b(?![a-z])")
+func modelBillions() -> float:
+	var m := _sizeRegex.search(modelName.to_lower().get_slice(":", 1) if modelName.contains(":") else modelName.to_lower())
+	return float(m.get_string(1)) if m else 8.0
+
+
+func _readText(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var f := FileAccess.open(path, FileAccess.READ)
+	var t := f.get_as_text().strip_edges()
+	f.close()
+	return t
+
+
 func _loreFor(skinName: String) -> String:
-	if not _loreBySkin.has(skinName):
-		var path := _lorePathForSkin(skinName)
+	var lite := useLiteLore()
+	var key := skinName + ("|lite" if lite else "")
+	if not _loreBySkin.has(key):
 		var text := ""
-		if FileAccess.file_exists(path):
-			var f := FileAccess.open(path, FileAccess.READ)
-			text = f.get_as_text().strip_edges()
-			f.close()
-		_loreBySkin[skinName] = text
-	return _loreBySkin[skinName]
+		if lite:
+			text = _readText("user://skin/%s/lore_lite.txt" % skinName)
+			if text == "":
+				text = _readText("res://defaults/skins/%s/lore_lite.txt" % skinName)
+		if text == "":
+			text = _readText(_lorePathForSkin(skinName))
+		_loreBySkin[key] = text
+	return _loreBySkin[key]
 
 
 ## 054.998: паспорт скина (character.json) целиком - для новых полей
@@ -867,7 +901,7 @@ func _closingBlock(category: String, lines: int = 1) -> String:
 var _speechBySkin: Dictionary = {}
 
 func _speechFor(skin: String) -> String:
-	if not _speechBySkin.has(skin):
+	if not _speechBySkin.has(skin + str(useLiteLore())):
 		var text := ""
 		var lore := _loreFor(skin)
 		for head in ["Как ты говоришь:", "Тон речи:"]:
@@ -877,8 +911,8 @@ func _speechFor(skin: String) -> String:
 				var end := rest.find("\n\n")
 				text = (rest if end < 0 else rest.substr(0, end)).replace("\n", " ").strip_edges()
 				break
-		_speechBySkin[skin] = text
-	return _speechBySkin[skin]
+		_speechBySkin[skin + str(useLiteLore())] = text
+	return _speechBySkin[skin + str(useLiteLore())]
 
 
 ## Вкусы персонажа словами (из паспорта) - для чата, предметов и фраз о еде.
