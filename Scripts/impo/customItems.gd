@@ -162,11 +162,11 @@ static func build(id: String) -> RigidBody2D:
 			rect.size = Vector2(img.get_size()) * SCALE
 			cs.shape = rect
 			parent.add_child(cs)
-	var drag = preload("res://Scripts/impo/dragObj.gd").new()
+	var drag = load("res://Scripts/impo/dragObj.gd").new() # load, не preload: класс компилируется раньше автозагрузок
 	drag.name = "draggable"
 	drag.sprite = spr
 	body.add_child(drag)
-	var props = preload("res://Scripts/nimpo/properties.gd").new()
+	var props = load("res://Scripts/nimpo/properties.gd").new()
 	props.name = "properties"
 	props.propertyTable = {
 		"object": true, "interest": 2, "danger": 0,
