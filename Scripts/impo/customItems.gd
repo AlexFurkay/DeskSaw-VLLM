@@ -177,4 +177,8 @@ static func build(id: String) -> RigidBody2D:
 		"healIfConsumable": 0.0,
 	}
 	body.add_child(props)
+	# owner у всех частей: dragObj ищет Detector через find_child, а он без
+	# owner узел не видит - предмет нельзя было взять мышью (тест Alex 20.10)
+	for n in body.find_children("*", "", true, false):
+		n.owner = body
 	return body
