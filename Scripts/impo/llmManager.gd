@@ -1320,6 +1320,12 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	for entry in chatHistory:
 		inChat[String(entry.get("text", ""))] = true
 	var own: Array = []
+	# 054.999: свои слова до разговора - только когда о них спрашивают. Если давать
+	# их всегда и рядом с разговором, Вояджер в каждом ответе повторяла
+	# "убирай рекламу" из своей фразы про экран (стенд talk2, 19.10).
+	var lastText: String = String(chatHistory[chatHistory.size() - 1].get("text", "")) if chatHistory.size() > 0 else ""
+	if not _asksAboutPast(lastText):
+		ownRecent = []
 	for e in ownRecent:
 		if not inChat.has(String(e["text"])):
 			var ago: int = int(e["minutesAgo"])
@@ -1356,6 +1362,17 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 			prompt += " Если спрашивают о том, что ты {говорила|говорил} раньше или о чём шла речь, - найди это выше (в разговоре или в своих словах до него) и ответь именно об этом, конкретно."
 	prompt += "\nТвой ответ:"
 	return prompt
+
+
+## Собеседник спрашивает о прошлых словах ("что ты сказала", "почему", "помнишь").
+const PAST_STEMS := ["сказал", "говорил", "имел в виду", "имела в виду", "почему", "зачем ты", "помнишь", "о чём", "о чем", "что это было", "про экран", "что ты там"]
+
+func _asksAboutPast(text: String) -> bool:
+	var low := text.to_lower()
+	for st in PAST_STEMS:
+		if low.contains(st):
+			return true
+	return false
 
 
 ## Речь о еде в реплике собеседника (тогда в запрос - вкусы персонажа).
@@ -2351,6 +2368,7 @@ func listAvailableModels() -> void:
 ## Для модели не из списка текущие значения не трогаем.
 const MODEL_PRESETS := {
 	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
+	"gemma3:12b": [0.8, 1.1], # 054.999: стенд talk 6 вариантов - 1.0 грубит ("псина"), 0.6 суше; 0.8/1.1 живее и связнее
 	"ministral-3:14b": [0.5, 1.1], # 054.99: было 0.6 - тест: 0.6 путала род, 0.45-0.5 точнее отвечает на вопрос
 }
 
