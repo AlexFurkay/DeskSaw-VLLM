@@ -1264,7 +1264,9 @@ func buildPlayerOpenerPrompt(skinTag: String, playerSkin: String, stateText: Str
 func _playerFormRule(skinTag: String, playerSkin: String) -> String:
 	if playerSkin == "":
 		return ""
-	var out := ""
+	# 054.999: gemma на стенде говорила о собеседнике "он пытался...", будто человек
+	# и его персонаж - два разных существа
+	var out := "\nЭтот персонаж и есть твой человек - говори с ним на 'ты', а не о нём в третьем лице."
 	var rel := relationTo(skinTag, playerSkin)
 	if rel != "" and rel != "своя" and rel != "свой":
 		out += "\nК его виду ты относишься так: " + rel + ". Но внутри - твой человек, и к нему ты относишься как всегда: вид можешь подколоть, человека - нет."
