@@ -709,7 +709,11 @@ func _physics_process(_delta: float) -> void:
 			if hit >= IMPACT_LIGHT:
 				_bodyPrevValid = false
 				print("KNOCK[%s] landing hit=%.0f prev=%s now=%s state=%s" % [_skinTag(), hit, _prevBodyVel, bodyVel, moveSys.states.keys()[moveSys.currstate]])
-				tempRagdoll(true, false, hit)
+				# 054.9992: своё неудачное приземление (подскочил на предмете, упал с ящика) -
+				# без урона, как спотыкание; урон - только если прилетел брошенный предмет
+				var thrown := _hitByFlyingObject()
+				_tripped = not thrown
+				tempRagdoll(thrown, false, hit)
 				return
 		_prevBodyVel = bodyVel
 		_bodyPrevValid = true
@@ -755,6 +759,8 @@ func _registerImpact(speed: float) -> void:
 		return
 	if isSleeping and Time.get_ticks_msec() < _sleepGraceUntil:
 		return # приземление после подскока при засыпании - не удар
+	if _tripped:
+		return # 054.9992: сам споткнулся - удар об пол при падении не ранит (Alex: "получают урон, споткнувшись")
 	var now := Time.get_ticks_msec()
 	if now - _lastImpactMsec < IMPACT_COOLDOWN_MS:
 		return
