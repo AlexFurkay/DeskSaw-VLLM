@@ -991,6 +991,7 @@ func buildScreenPrompt(tag: String, stateHintText: String) -> String:
 	prompt += "\n\nСейчас: ты смотришь на скриншот рабочего стола своего человека. Самого человека на нём нет - это просто его экран. Маленькие пиксельные существа поверх окон - ты и твои соседи. Люди, звери и персонажи в видео, стримах, звонках и на фото - просто картинки, они тебя не видят."
 	prompt += "\nНе описывай экран ('Это окно...', 'На экране видно...') - человек и сам его видит. Отреагируй на увиденное как живой персонаж: своими словами и со своим отношением."
 	prompt += "\nПодход на этот раз: " + _pickScreenAngle()
+	prompt += "\nГоворишь ты с самим человеком - обращайся к нему на 'ты'." # 054.9992: Роза - "у него столько программ открыто"
 	prompt += _closingBlock(tag)
 	# самочувствие - в самом конце, рядом с ответом: в середине модель его
 	# не замечала (раненый Дюна на стенде говорил только "Дюна голодный")
@@ -1009,7 +1010,7 @@ func buildScreenPrompt(tag: String, stateHintText: String) -> String:
 ## 054.998: без "строгого совета" и "оцени, как справляется" - это голос
 ## Вояджер, и Дюна по ним говорил её словами ("Ты снова гонишь видеокарту?").
 const SCREEN_ANGLES := [
-	"подколи или похвали человека за то, чем он занят, - по-своему.",
+	"обратись к человеку на 'ты': подколи или похвали за то, что видишь на экране, - по-своему.", # 054.9992: было "...за то, чем ОН занят" - модель повторяла "он"
 	"свяжи увиденное со своим характером или прошлым.",
 	"выскажи личное мнение - нравится тебе это или нет.",
 	"зацепись за одну мелкую деталь.",
@@ -1309,6 +1310,9 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 	_processQueue()
 
 
+const OWN_RECENT_MAX := 3   # 054.9992: сколько своих недавних фраз видит чат всегда
+const OWN_RECENT_MIN := 5   # ...и за сколько минут
+
 func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> String:
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
@@ -1340,14 +1344,17 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# их всегда и рядом с разговором, Вояджер в каждом ответе повторяла
 	# "убирай рекламу" из своей фразы про экран (стенд talk2, 19.10).
 	var lastText: String = String(chatHistory[chatHistory.size() - 1].get("text", "")) if chatHistory.size() > 0 else ""
-	# 054.9992: но свою СВЕЖУЮ фразу (меньше минуты назад) - всегда: Роза сказала
-	# "мне совсем нехорошо", на "Что случилось?" ответила "Ты меня напугал!", а на
-	# "Ты его хочешь?" (про банан из её же фразы) - про лепестки сакуры (тест 20.10)
-	var justSaid := ""
+	# 054.9992: но последние OWN_RECENT_MAX своих фраз за OWN_RECENT_MIN минут - всегда:
+	# Роза сказала "мне совсем нехорошо", на "Что случилось?" ответила "Ты меня
+	# напугал!", а на "Ты его хочешь?" (про банан из её же фразы) - про лепестки
+	# сакуры (тест 20.10). Человек может ответить и на пред-предыдущую фразу (Alex).
+	# Подаются как "уже сказанное, не повторяй" - против зацикливания на них.
+	var recentOwn: Array = []
 	if not _asksAboutPast(lastText):
 		for e in ownRecent:
-			if int(e["minutesAgo"]) == 0 and not inChat.has(String(e["text"])):
-				justSaid = String(e["text"])
+			if int(e["minutesAgo"]) <= OWN_RECENT_MIN and not inChat.has(String(e["text"])):
+				recentOwn.append(e)
+		recentOwn = recentOwn.slice(maxi(0, recentOwn.size() - OWN_RECENT_MAX))
 		ownRecent = []
 	for e in ownRecent:
 		if not inChat.has(String(e["text"])):
@@ -1360,11 +1367,15 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# не вспомнив свою же фразу (стенд talk, 19.10)
 	if own.size() > 0:
 		prompt += "\nЧто ты {сама|сам} {сказала|сказал} вслух незадолго до этого разговора (в том числе про экран):\n- " + "\n- ".join(own)
-	elif justSaid != "":
-		prompt += "\nТы только что {сказала|сказал} вслух: \"" + justSaid + "\" - собеседник, скорее всего, отвечает именно на это."
 	var last := ""
 	if chatHistory.size() > 0:
 		var lines: Array = []
+		# свежие свои фразы - в начало переписки, как реплики вслух: так "Ты его
+		# хочешь?" стоит сразу после "Банан бы сейчас кстати" (отдельным списком перед
+		# разговором gemma не связывала "его" с бананом - стенд reply, 20.10)
+		for e in recentOwn:
+			var ago: int = int(e["minutesAgo"])
+			lines.append("Ты (%s, вслух): %s" % ["только что" if ago == 0 else "%d мин назад" % ago, e["text"]])
 		for entry in chatHistory:
 			var who: String = String(entry.get("who", ""))
 			lines.append(("Ты" if who == myName else who) + ": " + String(entry.get("text", "")))
