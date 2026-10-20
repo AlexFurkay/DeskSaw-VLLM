@@ -56,10 +56,29 @@ func refresh() -> void:
 	_update_label()
 	_update_state()
 
+## 054.9992: в "Игровом режиме" поля интервалов серые и показывают "x2";
+## при выключении - снова сохранённые значения (их режим не трогает).
+const PACE_KEYS := ["minDialogueTime", "maxDialogueTime", "llmMinInterval", "llmMaxInterval", "petTalkMin", "petTalkMax"]
+
+func _applyGameMode() -> void:
+	if not PACE_KEYS.has(key):
+		return
+	var on: bool = gbData.settings.get("gameMode", false)
+	if on and _textEdit.editable:
+		_textEdit.editable = false
+		_textEdit.modulate = Color(1, 1, 1, 0.45)
+		_textEdit.text = "x2"
+	elif not on and not _textEdit.editable:
+		_textEdit.editable = true
+		_textEdit.modulate = Color(1, 1, 1, 1)
+		_textEdit.text = str(gbData.settings.get(key, defaultValue))
+
 func _ready() -> void:
 	if not Engine.is_editor_hint():
 		refresh()
 		_textEdit.text_changed.connect(_on_text_edit_changed)
+		gbData.SettingsChanged.connect(_applyGameMode)
+		_applyGameMode()
 		GlobalVariable.dataNuked.connect(_read_refresh)
 		if choicesFromSkins:
 			_setupSkinChoices()
@@ -115,6 +134,8 @@ func _on_text_edit_changed() -> void:
 		_ignore_next_change = false
 		return
 
+	if not _textEdit.editable:
+		return # "x2" игрового режима - не значение, в настройки не пишем
 	var v = _textEdit.text
 	gbData.settings.set(key, v)
 	print("Key '%s' [%s] set to '%s'" % [label, key, v])

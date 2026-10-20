@@ -309,6 +309,12 @@ layout_mode = 2
 label = "Отключить фоновую речь (фразы о состоянии, разговоры персов, комментарии к предметам)"
 key = "mutePassive"
 
+[node name="GameMode" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227199 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Игровой режим: все фразы вдвое реже, чтобы не мешать в играх (интервалы ниже не меняются - при выключении вернутся)"
+key = "gameMode"
+defaultValue = false
+
 [node name="MinDialogue" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/BehaviorPanel/ScrollContainer/VBoxContainer" unique_id=1077227112 instance=ExtResource("12_qw8t2")]
 layout_mode = 2
 label = "Мин. время между фразами состояний (сек)"

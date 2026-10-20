@@ -8,6 +8,20 @@ const BUILD := "054.9991Pru"
 ## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
 ## видеть, что персонажи говорили, - фраза над головой быстро исчезает).
 signal phraseLogged(line: String)
+
+## 054.9992: "Игровой режим" (Alex) - все фоновые фразы вдвое РЕЖЕ (40-80 с вместо 20-40), чтобы не мешать в играх. Сохранённые
+## интервалы не меняются: множитель берётся при каждом ожидании, поэтому при
+## выключении сами собой возвращаются прежние значения.
+func pace() -> float:
+	return 2.0 if gbData.settings.get("gameMode", false) else 1.0
+
+## 054.9992: идёт разговор (игрок с ИИ или ИИ между собой) - фоновые фразы
+## (состояние, экран) немного откладываются, чтобы не перебивать (Alex).
+const DIALOGUE_QUIET_MS := 45000
+var lastDialogueMsec := -1000000
+
+func inDialogue() -> bool:
+	return Time.get_ticks_msec() - lastDialogueMsec < DIALOGUE_QUIET_MS
 const PHRASE_LOG_MAX := 200
 var phraseLog: Array[String] = []
 

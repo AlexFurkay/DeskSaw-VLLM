@@ -1149,8 +1149,8 @@ const PET_REPLY_PAUSE_MAX := 6.3
 static var _nextPetTalkMsec := -1
 
 static func petTalkRange() -> Vector2:
-	var lo: float = maxf(20.0, float(GlobalVariable.getNumFromString(str(gbData.settings.get("petTalkMin", "180")))))
-	var hi: float = maxf(lo, float(GlobalVariable.getNumFromString(str(gbData.settings.get("petTalkMax", "360")))))
+	var lo: float = maxf(20.0, float(GlobalVariable.getNumFromString(str(gbData.settings.get("petTalkMin", "180")))) * GlobalVariable.pace())
+	var hi: float = maxf(lo, float(GlobalVariable.getNumFromString(str(gbData.settings.get("petTalkMax", "360")))) * GlobalVariable.pace())
 	return Vector2(lo, hi)
 
 
@@ -1680,7 +1680,10 @@ func passivetalk() -> void:
 			var hp: float = healthHandler.health
 			var woundTier := _woundTier(hp)
 			var pace: float = [1.0, 0.8, 0.55, 0.35][woundTier]
-			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum)) * pace).timeout
+			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum)) * pace * GlobalVariable.pace()).timeout
+			# 054.9992: идёт разговор - фраза о состоянии подождёт ещё 15-30 с (один раз)
+			if GlobalVariable.inDialogue():
+				await get_tree().create_timer(randf_range(15.0, 30.0)).timeout
 			if not beingDragged and not isSleeping and not shocked:
 				dialogueSys.pool = dialogueSys.data.get("Passive", [])
 				match currentEmotion:

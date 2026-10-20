@@ -181,7 +181,7 @@ func _scheduleScreenTick(overrideSeconds: float = -1.0) -> void:
 	if wait < 0.0:
 		if gbData.settings.get("llmVisionEnabled", true):
 			_refreshScreenInterval()
-			wait = randf_range(minScreenInterval, maxScreenInterval)
+			wait = randf_range(minScreenInterval, maxScreenInterval) * GlobalVariable.pace()
 		else:
 			wait = 5.0
 	screenTimer.start(wait)
@@ -950,6 +950,8 @@ func _pickScreenSpeaker() -> Node:
 	return null if candidates.is_empty() else candidates[randi() % candidates.size()]
 
 
+var _screenDeferred := false
+
 func _on_screen_tick() -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		_scheduleScreenTick()
@@ -958,6 +960,12 @@ func _on_screen_tick() -> void:
 	# Реакцию на экран говорит ОДИН случайный ИИ-персонаж - своим лором, родом
 	# и состоянием. Раньше одна фраза (с лором defaultSkin) рассылалась всем,
 	# и Expie говорил "я бы сделала точнее" голосом Voyager.
+	# 054.9992: идёт разговор - реакцию на экран один раз откладываем на 20-40 с
+	if GlobalVariable.inDialogue() and not _screenDeferred:
+		_screenDeferred = true
+		_scheduleScreenTick(randf_range(20.0, 40.0))
+		return
+	_screenDeferred = false
 	var speaker: Node = _pickScreenSpeaker()
 	_scheduleScreenTick()
 	if speaker == null:
@@ -1283,6 +1291,7 @@ func _playerFormRule(skinTag: String, playerSkin: String) -> String:
 ## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
 ## playerSkin - скин перса-игрока; speakerState - здоровье/настроение собеседника.
 func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> void:
+	GlobalVariable.lastDialogueMsec = Time.get_ticks_msec() # идёт разговор - фоновые фразы подождут
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":chat"
