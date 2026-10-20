@@ -115,6 +115,10 @@ var _prevBodyVel := Vector2.ZERO
 var _impactPrevValid := false
 var _bodyPrevValid := false
 var _lastImpactMsec := -100000
+## 054.9992: споткнулся сам - при подъёме своя фраза: обычная "встаю после
+## падения" звучала так, будто его сбил человек (тест Alex 20.10)
+var _tripped := false
+const TRIP_SITUATION := "Ты {сама споткнулась|сам споткнулся} о предмет на полу и {упала|упал} - никто тебя не трогал и не толкал. Ты встаёшь, немного смущённо или с досадой на этот предмет."
 var _impactThisRagdoll := false # был ли настоящий удар за этот цикл рэгдолла - тогда при подъёме реплика "fell", а не "getUp"
 ## Бессмертие при спавне: персонаж появляется высоко за экраном и
 ## гарантированно падает - до тех пор, пока он впервые не встанет на ноги
@@ -689,6 +693,7 @@ func _physics_process(_delta: float) -> void:
 		# 054.998: упёрся в ящик и споткнулся - падает, но без урона и крика.
 		# Урон - только если сбил брошенный/летящий предмет.
 		var hardFall: bool = not beingDragged and _hitByFlyingObject()
+		_tripped = not beingDragged and not hardFall # сам споткнулся, никто не сбивал
 		tempRagdoll(hardFall, false, abs(moveSys.rigid.linear_velocity.x))
 	elif not ragdolled:
 		# Стоит на ногах: ловим жёсткое приземление (падение вертикально,
@@ -857,12 +862,12 @@ func _spawnDroppedItem(scenePath: String, pos: Vector2, key: String) -> void:
 		return
 	var item = scene.instantiate()
 	var parentScene := get_tree().current_scene
+	item.position = pos # 054.9992: ДО add_child - Rapier не переносит уже добавленное тело
 	parentScene.add_child(item)
 	# owner обязателен: dragObj при захвате мышью добавляет свой захват в
 	# get_parent().owner - без owner там null, и взять вещь было нельзя
 	# (у предметов из вкладки Items/команды spawn owner выставляется так же).
 	item.owner = parentScene
-	item.global_position = pos
 	item.set_meta("itemName", key)
 	_seenItems[item.get_instance_id()] = true # уже прозвучит clothesOff - отдельная реакция "предмет рядом" не нужна
 	if item is RigidBody2D:
@@ -1517,8 +1522,11 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		# start can otherwise land mid-launch alongside passivetalk() etc.
 		if dialogueSys.data.get("start", []).size() > 0 and not isPlayer:
 			_queueMessage(dialogueSys.data.get("start", []).pick_random(), dialogueSys.speedMod)
+	elif _upCategory == "getUp" and _tripped:
+		_say("getUp", 0.0, true, TRIP_SITUATION, "trip")
 	else:
 		_say(_upCategory)
+	_tripped = false
 	if not silent:
 		AudioManager.play_random(voiceSet["whine"], 1.0, 0, 1, false, 0.5, "", "whine")
 	launchflag = true
@@ -1680,7 +1688,9 @@ func passivetalk() -> void:
 			var hp: float = healthHandler.health
 			var woundTier := _woundTier(hp)
 			var pace: float = [1.0, 0.8, 0.55, 0.35][woundTier]
-			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum)) * pace * GlobalVariable.pace()).timeout
+			# 054.9992: двое на столе говорили вдвое чаще - интервал умножается на число
+			# ИИ-персонажей, общая частота фраз как у одного (Alex)
+			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum)) * pace * GlobalVariable.pace() * _aiPetCount()).timeout
 			# 054.9992: идёт разговор - фраза о состоянии подождёт ещё 15-30 с (один раз)
 			if GlobalVariable.inDialogue():
 				await get_tree().create_timer(randf_range(15.0, 30.0)).timeout
@@ -2166,6 +2176,14 @@ func _pickWalkTarget() -> float:
 	elif x > w * 0.75:
 		dir = -1.0
 	return _stopBeforeDanger(x, clampf(x + dir * dist, margin, w - margin))
+
+
+func _aiPetCount() -> int:
+	var n := 0
+	for p in get_tree().get_nodes_in_group("pets"):
+		if not p.isPlayer and not p.isUnconscious:
+			n += 1
+	return maxi(1, n)
 
 
 ## 054.9991: фентанил интересен только тому, у кого есть зависимость, и никогда -

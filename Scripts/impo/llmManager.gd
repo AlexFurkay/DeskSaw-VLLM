@@ -1340,7 +1340,14 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# их всегда и рядом с разговором, Вояджер в каждом ответе повторяла
 	# "убирай рекламу" из своей фразы про экран (стенд talk2, 19.10).
 	var lastText: String = String(chatHistory[chatHistory.size() - 1].get("text", "")) if chatHistory.size() > 0 else ""
+	# 054.9992: но свою СВЕЖУЮ фразу (меньше минуты назад) - всегда: Роза сказала
+	# "мне совсем нехорошо", на "Что случилось?" ответила "Ты меня напугал!", а на
+	# "Ты его хочешь?" (про банан из её же фразы) - про лепестки сакуры (тест 20.10)
+	var justSaid := ""
 	if not _asksAboutPast(lastText):
+		for e in ownRecent:
+			if int(e["minutesAgo"]) == 0 and not inChat.has(String(e["text"])):
+				justSaid = String(e["text"])
 		ownRecent = []
 	for e in ownRecent:
 		if not inChat.has(String(e["text"])):
@@ -1353,6 +1360,8 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# не вспомнив свою же фразу (стенд talk, 19.10)
 	if own.size() > 0:
 		prompt += "\nЧто ты {сама|сам} {сказала|сказал} вслух незадолго до этого разговора (в том числе про экран):\n- " + "\n- ".join(own)
+	elif justSaid != "":
+		prompt += "\nТы только что {сказала|сказал} вслух: \"" + justSaid + "\" - собеседник, скорее всего, отвечает именно на это."
 	var last := ""
 	if chatHistory.size() > 0:
 		var lines: Array = []
@@ -1368,6 +1377,10 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# случайного тона: "ответь с подколкой/иронией" после "расскажи тайну" - и qwen
 	# отшучивалась на каждом шаге (стенд sec2, 20.10)
 	var secretPart := secretBlock(skinTag, last) if speakerSkin == "" else ""
+	# 054.9992: облик игрока - в самый конец. gemma всё равно говорила Експи-игроку
+	# "пойдём посмотрим, что человек там надумал" и звала человека "он" (тест 20.10)
+	if speakerSkin == "" and playerSkin != "":
+		secretPart = "\nПомни: %s перед тобой - это и есть твой человек, просто в облике персонажа. Других людей рядом нет: не говори о человеке \"он\" или \"человек\" - обращайся к нему на \"ты\"." % PlayerManager.displayNameFor(playerSkin) + secretPart
 	if _asksForAction(last):
 		prompt += "\nСобеседник просит тебя что-то сделать. Реши по характеру и настроению, согласиться или нет, и скажи это. ТОЛЬКО если соглашаешься, в самом конце допиши одну метку: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]."
 	if secretPart == "":
@@ -2580,6 +2593,8 @@ func _explainSlow(tps: float) -> void:
 ## большая установленная модель со зрением (решение Alex - точнее; у него 14b).
 ## Если она не основная - Ollama на время подгрузит её вместо основной.
 const ITEM_DESCRIBE_PROMPT := "Это картинка предмета для игры. Назови предмет и коротко опиши то, что на картинке точно видно: одна фраза до 10 слов, только русскими словами, без вступлений, без кавычек и без точки в конце."
+## 054.9992: для картинок, положенных в папку руками, - ещё и название (было имя файла)
+const ITEM_NAME_PROMPT := "Это картинка предмета для игры. Ответь ровно двумя строками, только русскими словами, без кавычек:\nНазвание: 1-3 слова\nОписание: что на картинке точно видно, до 10 слов"
 var _describeModel := ""
 
 func _ollamaJson(path: String, body = null):
@@ -2615,10 +2630,10 @@ func _largestVisionModel() -> String:
 	return ""
 
 
-func describeItemImage(path: String, cb: Callable) -> void:
+func describeItemImage(path: String, withName: bool, cb: Callable) -> void:
 	var img := Image.load_from_file(ProjectSettings.globalize_path(path))
 	if img == null or img.is_empty():
-		cb.call("")
+		cb.call("", "")
 		return
 	var side := maxi(img.get_width(), img.get_height())
 	if side > 512:
@@ -2631,16 +2646,31 @@ func describeItemImage(path: String, cb: Callable) -> void:
 	var model := await _largestVisionModel()
 	if model == "":
 		_logDebugLine("items", "DESCRIBE", "нет установленной модели со зрением")
-		cb.call("")
+		cb.call("", "")
 		return
-	var payload := {"model": model, "prompt": ITEM_DESCRIBE_PROMPT, "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
+	var payload := {"model": model, "prompt": ITEM_NAME_PROMPT if withName else ITEM_DESCRIBE_PROMPT, "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
 		"stream": false, "keep_alive": "1m", "options": {"temperature": 0.2, "num_predict": 40, "num_ctx": 4096}}
 	var parsed = await _ollamaJson("/api/generate", payload)
 	var desc := ""
+	var name := ""
 	if parsed is Dictionary:
-		desc = _cleanItemDescription(String(parsed.get("response", "")))
-	_logDebugLine("items", "DESCRIBE", "%s -> %s (%s)" % [path.get_file(), desc if desc != "" else "(пусто)", model])
-	cb.call(desc)
+		var raw := String(parsed.get("response", ""))
+		if withName:
+			for line in raw.split("\n", false):
+				var l := line.strip_edges()
+				if l.to_lower().begins_with("название"):
+					name = _cleanItemDescription(l.get_slice(":", 1)) if l.contains(":") else ""
+				elif l.to_lower().begins_with("описание"):
+					desc = _cleanItemDescription(l.get_slice(":", 1)) if l.contains(":") else ""
+			name = name.get_slice("/", 0).get_slice("(", 0).strip_edges() # "Гном/Предмет игры" -> "Гном"
+			if name.split(" ", false).size() > 4:
+				name = " ".join(name.split(" ", false).slice(0, 4))
+			if name != "":
+				name = name.substr(0, 1).to_upper() + name.substr(1)
+		else:
+			desc = _cleanItemDescription(raw)
+	_logDebugLine("items", "DESCRIBE", "%s -> %s / %s (%s)" % [path.get_file(), name if name != "" else "-", desc if desc != "" else "(пусто)", model])
+	cb.call(desc, name)
 
 
 func _cleanItemDescription(text: String) -> String:

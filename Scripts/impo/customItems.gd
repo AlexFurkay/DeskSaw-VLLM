@@ -11,7 +11,17 @@ class_name CustomItems
 
 const DIR := "user://items/"
 const KEY_PREFIX := "custom:"
-const MAX_SIDE := 64 # пикселей; меньше - свой размер. Было 32 - иконки 64x64 (Тарков) размывало (Alex 20.10)
+const MAX_SIDE := 64 # больше 64 пикселей арта не бывает (огромное фото - не больше 256 px на экране)
+## 054.9992: ЕДИНЫЙ масштаб для всех картинок. Раньше каждая картинка ужималась
+## до 64 px и увеличивалась под ~128 px на экране - сгущёнка 64x64 и АК 316x127
+## выходили одного размера (большая сторона 128 px), реальная разница стиралась.
+## У иконок Таркова размер честный (клетка ~63 px: сгущёнка 1x1, АК 5x2), поэтому
+## все картинки уменьшаются в одно число раз (до BLOCK пикселей картинки в один
+## пиксель арта) и показываются x4, как встроенные: на экране ~0,7 от картинки.
+## Сгущёнка -> ~50 px (бургер 48), АК -> ~210 px (рост персонажа ~200).
+const BLOCK := 6
+const PIXEL_ART_MAX := 32 # до 32 px - уже пиксель-арт: не уменьшаем, x4
+const IMAGE_EXT := ["png", "jpg", "jpeg", "webp", "bmp", "tga"] # GIF движок не открывает
 const FOOD_REPLENISH := 15.0
 const PRE_SHRINK := 512 # огромные фото сначала грубо уменьшаем - блочный перебор по пикселям в GDScript небыстрый
 
@@ -36,9 +46,11 @@ static func reload() -> void:
 	if d == null:
 		return
 	for f in d.get_files():
-		if f.get_extension().to_lower() != "png":
+		if not IMAGE_EXT.has(f.get_extension().to_lower()):
 			continue
 		var id := f.get_basename()
+		if _cache.has(id):
+			continue # одно имя в двух форматах - берём первое
 		var e := {"id": id, "name": id, "description": "", "food": false, "taste": 5}
 		var jp := DIR + id + ".json"
 		if FileAccess.file_exists(jp):
@@ -49,6 +61,7 @@ static func reload() -> void:
 						e[k] = parsed[k]
 		e["taste"] = clampi(int(e["taste"]), 0, 10)
 		e["food"] = bool(e["food"])
+		e["file"] = f
 		_cache[id] = e
 
 
@@ -80,6 +93,12 @@ static func isFood(key: String) -> bool:
 	return not e.is_empty() and bool(e["food"])
 
 
+## Путь к картинке предмета (png, jpg, webp...).
+static func imagePath(id: String) -> String:
+	var e: Dictionary = _cache.get(id, {})
+	return DIR + String(e.get("file", id + ".png"))
+
+
 ## Нужно ли ИИ-описание (пустое и в этом запуске ещё не пробовали).
 static func needsDescription(id: String) -> bool:
 	var e := entry(KEY_PREFIX + id)
@@ -107,7 +126,7 @@ static func save(id: String, name: String, description: String, food: bool, tast
 
 
 static func remove(id: String) -> void:
-	for ext in [".png", ".json"]:
+	for ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga", ".json"]:
 		if FileAccess.file_exists(DIR + id + ext):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(DIR + id + ext))
 	_imgCache.erase(id)
@@ -119,7 +138,7 @@ static func remove(id: String) -> void:
 ## пикселем среднего цвета, полупрозрачное - либо видно, либо нет. Ровная
 ## пиксельная сетка без мыла (винтовка 300x200 при сглаживании шла неровно).
 static func image(id: String) -> Image:
-	var path := ProjectSettings.globalize_path(DIR + id + ".png")
+	var path := ProjectSettings.globalize_path(imagePath(id))
 	var mtime := FileAccess.get_modified_time(path)
 	if _imgCache.has(id) and int(_imgCache[id]["mtime"]) == mtime:
 		return _imgCache[id]["img"]
@@ -135,14 +154,17 @@ static func image(id: String) -> Image:
 
 static func pixelize(img: Image) -> Image:
 	var side := maxi(img.get_width(), img.get_height())
-	if side <= MAX_SIDE:
+	if side <= PIXEL_ART_MAX:
 		return img
 	if side > PRE_SHRINK:
 		var q := float(PRE_SHRINK) / side
 		img = img.duplicate()
 		img.resize(maxi(1, int(img.get_width() * q)), maxi(1, int(img.get_height() * q)), Image.INTERPOLATE_BILINEAR)
 		side = maxi(img.get_width(), img.get_height())
-	var k := int(ceil(float(side) / MAX_SIDE))
+	# единый блок; маленькие (33-71 px) - помягче, чтобы не стать точкой; огромные - до 64 px арта
+	var k := maxi(clampi(int(side / 12.0), 1, BLOCK), int(ceil(float(side) / MAX_SIDE)))
+	if k <= 1:
+		return img
 	var w := img.get_width()
 	var h := img.get_height()
 	var w2 := int(ceil(float(w) / k))
@@ -170,16 +192,10 @@ static func pixelize(img: Image) -> Image:
 	return out
 
 
-## Увеличение на экране - только целое, чтобы пиксели были ровные, и не больше
-## ~128 px (решение Alex 20.10): до 32 - x4, 33-42 - x3, 43-64 - x2.
-## Поверх этого properties.gd масштабирует под petSize, как встроенные предметы.
-static func screenScale(img: Image) -> float:
-	var side := maxi(img.get_width(), img.get_height())
-	if side <= 32:
-		return 4.0
-	if side <= 42:
-		return 3.0
-	return 2.0
+## На экране - x4, как встроенные (пиксель арта = 4 пикселя экрана); размер
+## задаёт pixelize. Поверх этого properties.gd масштабирует под petSize.
+static func screenScale(_img: Image) -> float:
+	return 4.0
 
 
 static func icon(id: String) -> Texture2D:

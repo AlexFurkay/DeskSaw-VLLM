@@ -1,6 +1,7 @@
 extends Node
 class_name Dialogue
 
+const ORIGINAL_TEXT_COLOR := Color(0.97141486, 0.76168233, 0, 1)
 ## 054.999: звук печатания текста на 20% тише у всех (просьба Alex).
 const SPEECH_GAIN_DB := -1.94 # linear_to_db(0.8)
 
@@ -47,11 +48,15 @@ func typeOut(string: String, speed_multiplier: float = 1.0):
 	# 054.9991: галочка "Цветной текст у фраз" (Настройки - Общее); во вкладке Фразы - всегда цветной
 	if owner_beh and owner_beh.has_method("_skinTag") and gbData.settings.get("phraseColorOnDesk", true):
 		richtextlabel.add_theme_color_override("default_color", GlobalVariable.phraseColor(owner_beh._skinTag(), owner_beh.isPlayer, 0.575))
+	elif owner_beh and owner_beh.has_method("_skinTag") and owner_beh.isPlayer:
+		richtextlabel.add_theme_color_override("default_color", GlobalVariable.phraseColor(owner_beh._skinTag(), true, 0.575))
 	else:
-		richtextlabel.remove_theme_color_override("default_color")
+		# исходный жёлто-оранжевый DeskSaw (без override брался синий цвет темы)
+		richtextlabel.add_theme_color_override("default_color", ORIGINAL_TEXT_COLOR)
 	isTyping = true
 	richtextlabel.text = string
 	richtextlabel.visible_characters = 0
+	_avoidOverlap()
 
 	starttalking.emit()
 
@@ -173,6 +178,36 @@ func setDia(stra: String, speed: float, cooldown: float = 0.0, ignoreCooldown: b
 
 	if cooldown > 0.0:
 		dialogueTimer.start(cooldown)
+
+## 054.9992: две фразы рядом налезали друг на друга (скрин Alex) - новая фраза
+## поднимается над чужой, которая ещё на экране.
+var _baseY := INF
+
+func isShowing() -> bool:
+	return richtextlabel.visible and richtextlabel.text.strip_edges() != "" and (isTyping or not dialogueTimer.is_stopped())
+
+func _avoidOverlap() -> void:
+	if _baseY == INF:
+		_baseY = richtextlabel.position.y
+	richtextlabel.position.y = _baseY
+	await get_tree().process_frame
+	if not is_instance_valid(richtextlabel):
+		return
+	for _pass in 3:
+		var mine := richtextlabel.get_global_rect()
+		var moved := false
+		for pet in get_tree().get_nodes_in_group("pets"):
+			var other = pet.get("dialogueSys")
+			if other == null or other == self or not is_instance_valid(other) or not other.isShowing():
+				continue
+			var r: Rect2 = other.richtextlabel.get_global_rect()
+			if r.intersects(mine):
+				richtextlabel.global_position.y = r.position.y - mine.size.y - 4.0
+				moved = true
+				break
+		if not moved:
+			break
+
 
 func is_dialogue_playing() -> bool:
 	return isTyping

@@ -118,21 +118,21 @@ func _on_item_button_press(item: ItemEntry) -> void:
 		if body == null:
 			_hint.text = "Не получилось открыть картинку предмета - проверь файл в папке."
 			return
+		body.position = _spawnPos() # ДО add_child: Rapier не переносит уже добавленное тело - оно оставалось в (0,0)
 		get_tree().current_scene.add_child(body)
-		body.global_position = _spawnPos()
 		body.owner = get_tree().current_scene
 		return
 	# TODO: directly connect this to the command, maybe?
 	var scene = load(item.scene_path)
 	var instance = scene.instantiate()
+	instance.position = _spawnPos() # ДО add_child (см. выше) - раньше все предметы падали в левый верхний угол
 	get_tree().current_scene.add_child(instance)
-	instance.global_position = _spawnPos()
 	instance.owner = get_tree().current_scene
 	instance.set_meta("itemName", item.name) # было item (объект ItemEntry) - код, ждущий строку, на этом падал
 
 ## 054.9991: около курсора, но не у самого края экрана (CustomItems.spawnPosition).
 func _spawnPos() -> Vector2:
-	return CustomItems.spawnPosition(get_tree().root.get_visible_rect().size, float(gbData.settings.get("petScale", 4.0)))
+	return CommandsGlobal.itemSpawnPosition()
 
 ## Recalculate item list columns using our root width
 func _recalculate_columns() -> void:
@@ -184,7 +184,8 @@ func _buildCustomUi() -> void:
 	for b in [["Добавить свой предмет", func(): _openForm("")],
 			["Изменить свой", func(): _setMode("edit")],
 			["Удалить свой", func(): _setMode("delete")],
-			["Открыть папку", func(): OS.shell_open(CustomItems.folder())]]:
+			["Открыть папку", func(): OS.shell_open(CustomItems.folder())],
+			["Обновить", _reloadItems]]:
 		var btn := Button.new()
 		btn.text = b[0]
 		btn.pressed.connect(b[1])
@@ -255,7 +256,7 @@ func _buildCustomUi() -> void:
 	_tasteSpin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_tasteRow.add_child(_tasteSpin)
 	_fields.add_child(_tasteRow)
-	var info := _label("Картинка - лучше с прозрачным фоном. Взять предмет можно за любую видимую часть картинки. Картинка больше 64 пикселей уменьшится до 64, меньше - останется своего размера.")
+	var info := _label("PNG, JPG или WEBP (GIF не подходит), лучше с прозрачным фоном. Можно и просто положить много картинок в папку и нажать «Обновить» - компьютер сам назовёт и опишет каждую. Взять предмет можно за любую видимую часть картинки. Размер на экране - примерно как у картинки (иконки предметов из игр сохраняют свои пропорции), огромное фото - не больше двух ящиков.")
 	info.modulate = Color(1, 1, 1, 0.7)
 	_fields.add_child(info)
 
@@ -395,12 +396,13 @@ func _describeNext() -> void:
 		_hint.text = "Компьютер описывает «%s»..." % String(e["name"])
 		if _form.visible and _editId == id:
 			_descEdit.placeholder_text = DESCRIBING_TEXT
-		LLMManager.describeItemImage(CustomItems.DIR + id + ".png", func(desc: String):
+		var autoName: bool = String(e["name"]) == id # положили в папку руками - имя тоже придумает компьютер
+		LLMManager.describeItemImage(CustomItems.imagePath(id), autoName, func(desc: String, newName: String):
 			CustomItems.describing.erase(id)
 			_describingNow = false
 			var cur := CustomItems.entry(CustomItems.KEY_PREFIX + id)
 			if desc != "" and not cur.is_empty() and String(cur["description"]).strip_edges() == "":
-				CustomItems.save(id, String(cur["name"]), desc, bool(cur["food"]), int(cur["taste"]), "")
+				CustomItems.save(id, newName if newName != "" else String(cur["name"]), desc, bool(cur["food"]), int(cur["taste"]), "")
 				if _form.visible and _editId == id and _descEdit.text.strip_edges() == "":
 					_descEdit.text = desc
 				_hint.text = "«%s»: %s" % [String(cur["name"]), desc]
@@ -410,3 +412,10 @@ func _describeNext() -> void:
 				_descEdit.placeholder_text = DESC_PLACEHOLDER
 			_describeNext())
 		return
+
+
+## 054.9992: кнопка "Обновить" - перечитать папку (положил картинки - нажал)
+func _reloadItems() -> void:
+	CustomItems.reload()
+	_refresh()
+	_describeNext()

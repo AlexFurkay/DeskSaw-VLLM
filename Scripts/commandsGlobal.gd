@@ -73,10 +73,32 @@ func _additem(item: String = "containercrate"):
 		return
 	var scene = load(path)
 	var instance = scene.instantiate()
+	instance.position = itemSpawnPosition() # до add_child
 	get_tree().current_scene.add_child(instance)
-	instance.global_position = CustomItems.spawnPosition(get_tree().root.get_visible_rect().size, float(gbData.settings.get("petScale", 4.0)))
 	instance.owner = get_tree().current_scene
 	instance.set_meta("itemName", item)
+
+
+## 054.9992: где появиться предмету. Курсор над рабочим столом - около курсора
+## (CustomItems.spawnPosition). Курсор над консолью (нажали кнопку во вкладке
+## Предметы) - рядом со случайным ИИ-персонажем, чуть выше, чтобы упал к нему:
+## раньше предмет падал у консоли - в левом верхнем углу экрана (тест Alex 20.10).
+func itemSpawnPosition() -> Vector2:
+	var view: Vector2 = get_tree().root.get_visible_rect().size
+	var petScale := float(gbData.settings.get("petScale", 4.0))
+	var mouse := DisplayServer.mouse_get_position()
+	if DisplayServer.get_window_at_screen_position(mouse) == DisplayServer.MAIN_WINDOW_ID:
+		return CustomItems.spawnPosition(view, petScale)
+	var pets: Array = get_tree().get_nodes_in_group("pets").filter(func(p): return not p.isPlayer and not p.isUnconscious)
+	if pets.is_empty():
+		pets = get_tree().get_nodes_in_group("pets")
+	var crate := 32.0 * petScale
+	var m := minf(2.5 * crate, minf(view.x, view.y) * 0.25)
+	if pets.is_empty():
+		return Vector2(view.x * 0.5 + randf_range(-3.0, 3.0) * crate, view.y * 0.4)
+	var at: Vector2 = pets.pick_random().moveSys.rigidtorso.global_position
+	var x := at.x + (1.0 if randf() < 0.5 else -1.0) * randf_range(1.0, 4.5) * crate
+	return Vector2(clampf(x, m, view.x - m), clampf(at.y - 3.0 * crate, m, view.y - m))
 
 
 func _cmd_changePlayerMode(combo: String = "") -> void:
@@ -412,6 +434,8 @@ func _showModelMenu(names: Array, ok: bool) -> void:
 	if not ok:
 		Console.print("[color=RED]Ollama не ответила - проверь, что она запущена (значок в трее).[/color]")
 		return
+	# 054.9992: от меньшей к большей (8b - 1, 12b - 2, 14b - 3)
+	names.sort_custom(func(a, b): return float(LLMManager.modelSizes.get(a, 0.0)) < float(LLMManager.modelSizes.get(b, 0.0)))
 	var problems := {}
 	for n in names:
 		problems[n] = await _checkModelAsync(String(n))
