@@ -29,7 +29,8 @@ func  _ready() -> void:
 	visibility_changed.connect(func():
 		if is_visible_in_tree():
 			CustomItems.reload()
-			_refresh())
+			_refresh()
+			_describeNext())
 
 func _refresh() -> void:
 	_generate_item_list()
@@ -118,16 +119,20 @@ func _on_item_button_press(item: ItemEntry) -> void:
 			_hint.text = "Не получилось открыть картинку предмета - проверь файл в папке."
 			return
 		get_tree().current_scene.add_child(body)
-		body.global_position = body.get_global_mouse_position()
+		body.global_position = _spawnPos()
 		body.owner = get_tree().current_scene
 		return
 	# TODO: directly connect this to the command, maybe?
 	var scene = load(item.scene_path)
 	var instance = scene.instantiate()
 	get_tree().current_scene.add_child(instance)
-	instance.global_position = instance.get_global_mouse_position()
+	instance.global_position = _spawnPos()
 	instance.owner = get_tree().current_scene
 	instance.set_meta("itemName", item.name) # было item (объект ItemEntry) - код, ждущий строку, на этом падал
+
+## 054.9991: около курсора, но не у самого края экрана (CustomItems.spawnPosition).
+func _spawnPos() -> Vector2:
+	return CustomItems.spawnPosition(get_tree().root.get_visible_rect().size, float(gbData.settings.get("petScale", 4.0)))
 
 ## Recalculate item list columns using our root width
 func _recalculate_columns() -> void:
@@ -161,7 +166,7 @@ var _nameEdit: LineEdit
 var _descEdit: LineEdit
 var _foodCheck: CheckBox
 var _tasteSpin: SpinBox
-var _tasteRow: HBoxContainer
+var _tasteRow: VBoxContainer
 var _preview: TextureRect
 var _pngLabel: Label
 var _saveButton: Button
@@ -234,19 +239,20 @@ func _buildCustomUi() -> void:
 	_fields.add_child(_nameEdit)
 	_fields.add_child(_label("Что это - описание для персонажей (о нём они и будут говорить):"))
 	_descEdit = LineEdit.new()
-	_descEdit.placeholder_text = "например: плюшевый заяц с оторванным ухом"
+	_descEdit.placeholder_text = DESC_PLACEHOLDER
 	_descEdit.max_length = 160
 	_fields.add_child(_descEdit)
 	_foodCheck = CheckBox.new()
 	_foodCheck.text = "Это еда"
 	_foodCheck.toggled.connect(func(on: bool): _tasteRow.visible = on)
 	_fields.add_child(_foodCheck)
-	_tasteRow = HBoxContainer.new()
+	_tasteRow = VBoxContainer.new() # подпись НАД полем: в одной строке она переносилась по буквам
 	_tasteRow.add_child(_label("Вкус для всех персонажей (0 - есть не станут, 10 - объедение):"))
 	_tasteSpin = SpinBox.new()
 	_tasteSpin.min_value = 0
 	_tasteSpin.max_value = 10
 	_tasteSpin.step = 1
+	_tasteSpin.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_tasteRow.add_child(_tasteSpin)
 	_fields.add_child(_tasteRow)
 	var info := _label("Картинка - лучше с прозрачным фоном. Взять предмет можно за любую видимую часть картинки. Картинка больше 64 пикселей уменьшится до 64, меньше - останется своего размера.")
@@ -298,6 +304,7 @@ func _openForm(id: String) -> void:
 	_saveButton.text = "Сохранить"
 	_nameEdit.text = String(e.get("name", ""))
 	_descEdit.text = String(e.get("description", ""))
+	_descEdit.placeholder_text = DESCRIBING_TEXT if CustomItems.describing.has(id) else DESC_PLACEHOLDER
 	_foodCheck.button_pressed = bool(e.get("food", false))
 	_tasteRow.visible = _foodCheck.button_pressed
 	_tasteSpin.value = int(e.get("taste", 5))
@@ -343,6 +350,10 @@ func _onPngPicked(path: String) -> void:
 func _onFormSave() -> void:
 	if _deleting:
 		CustomItems.remove(_editId)
+		# 054.9991: и все его копии с рабочего стола
+		for n in get_tree().current_scene.get_children():
+			if String(n.get_meta("itemName", "")) == CustomItems.KEY_PREFIX + _editId:
+				n.queue_free()
 		_form.hide()
 		_refresh()
 		return
@@ -360,3 +371,42 @@ func _onFormSave() -> void:
 	_form.hide()
 	_hint.text = "Готово. Щёлкни по «★ %s», чтобы предмет появился у курсора." % name
 	_refresh()
+	_describeNext() # описание пустое - его напишет компьютер
+
+
+# ---------------- 054.9991: ИИ-описание предметов ----------------
+# Пустое описание (PNG положили в папку руками или не заполнили поле) пишет
+# компьютер: самая большая установленная модель со зрением смотрит на картинку
+# и называет предмет до 10 слов (решение Alex). По одному предмету за раз.
+const DESC_PLACEHOLDER := "например: плюшевый заяц с оторванным ухом"
+const DESCRIBING_TEXT := "Компьютер создаёт описание, подожди немного, потом его можно будет изменить"
+var _describingNow := false
+
+func _describeNext() -> void:
+	if _describingNow or not is_instance_valid(LLMManager):
+		return
+	for e in CustomItems.all():
+		var id := String(e["id"])
+		if not CustomItems.needsDescription(id):
+			continue
+		CustomItems.describeTried[id] = true
+		CustomItems.describing[id] = true
+		_describingNow = true
+		_hint.text = "Компьютер описывает «%s»..." % String(e["name"])
+		if _form.visible and _editId == id:
+			_descEdit.placeholder_text = DESCRIBING_TEXT
+		LLMManager.describeItemImage(CustomItems.DIR + id + ".png", func(desc: String):
+			CustomItems.describing.erase(id)
+			_describingNow = false
+			var cur := CustomItems.entry(CustomItems.KEY_PREFIX + id)
+			if desc != "" and not cur.is_empty() and String(cur["description"]).strip_edges() == "":
+				CustomItems.save(id, String(cur["name"]), desc, bool(cur["food"]), int(cur["taste"]), "")
+				if _form.visible and _editId == id and _descEdit.text.strip_edges() == "":
+					_descEdit.text = desc
+				_hint.text = "«%s»: %s" % [String(cur["name"]), desc]
+			elif desc == "":
+				_hint.text = "Не получилось описать «%s» - напиши описание сам (кнопка «Изменить свой»)." % String(cur.get("name", id))
+			if _form.visible and _editId == id:
+				_descEdit.placeholder_text = DESC_PLACEHOLDER
+			_describeNext())
+		return

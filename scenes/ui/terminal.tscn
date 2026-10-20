@@ -464,6 +464,12 @@ label = "Снижать FPS до 35, пока ИИ отвечает (помог�
 key = "aiFpsSave"
 defaultValue = true
 
+[node name="PhraseColor" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967777 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Цветной текст у фраз над головой"
+key = "phraseColorOnDesk"
+defaultValue = true
+
 [node name="UpdateNotif" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210967685 instance=ExtResource("5_hils5")]
 layout_mode = 2
 label = "Уведомление об обновлениях"

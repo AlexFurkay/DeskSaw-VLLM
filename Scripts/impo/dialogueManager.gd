@@ -44,8 +44,11 @@ func typeOut(string: String, speed_multiplier: float = 1.0):
 	richtextlabel.add_theme_font_size_override("normal_font_size", gbData.settings.expieDialogueSize)
 	# 054.997: цвет персонажа над головой (как во вкладке «Фразы», на 15% насыщеннее)
 	var owner_beh = get_parent()
-	if owner_beh and owner_beh.has_method("_skinTag"):
+	# 054.9991: галочка "Цветной текст у фраз" (Настройки - Общее); во вкладке Фразы - всегда цветной
+	if owner_beh and owner_beh.has_method("_skinTag") and gbData.settings.get("phraseColorOnDesk", true):
 		richtextlabel.add_theme_color_override("default_color", GlobalVariable.phraseColor(owner_beh._skinTag(), owner_beh.isPlayer, 0.575))
+	else:
+		richtextlabel.remove_theme_color_override("default_color")
 	isTyping = true
 	richtextlabel.text = string
 	richtextlabel.visible_characters = 0

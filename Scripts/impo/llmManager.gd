@@ -1031,7 +1031,9 @@ func stateHint(mood: float, health: float, drugLevel: int) -> String:
 		2:
 			drug = "\nТы сильно под фентанилом: {рассеянна, расслаблена и слишком довольна|рассеян, расслаблен и слишком доволен} - передавай это тоном и простыми словами, не описывая ощущения ('плывёт', 'волна', 'тепло')."
 		-1:
-			drug = "\nУ тебя ломка без фентанила: знобит, всё ломит и раздражает - это сквозит в реакции."
+			# 054.9991: было "...- это сквозит в реакции" - 12b так и делала: только намекала,
+			# ломку было не понять без дрожащего текста (тест Alex 20.10)
+			drug = "\nУ тебя ломка без фентанила: трясёт и знобит, ломит кости, мутит, мысли только о дозе. Тебе по-настоящему плохо, и это слышно прямо в словах."
 	return _moodHealthHint(mood, health) + drug
 
 
@@ -1387,7 +1389,8 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 const SECRET_ASK_STEMS := ["лаборатор", "прошл", "откуда ты", "тайн", "секрет", "клетк", "тест", "делали с тобой", "с тобой делали", "корпорац", "расскажи о себе", "скрываешь", "что с тобой было"]
 const SECRET_MOOD := 60.0
 const SECRET_STEPS := 4
-const SECRET_GAP_MS := 120000
+const SECRET_GAP_MS := 60000   # 054.9991: шаг - через минуту ИЛИ через SECRET_GAP_MSGS реплик о другом (Alex)
+const SECRET_GAP_MSGS := 3
 const SECRET_HINT_DEFAULT := "У тебя есть тайна о прошлом. Ты о ней не рассказываешь: уходишь от ответа, отшучиваешься, нервничаешь или меняешь тему."
 const SECRET_STAGES := [
 	"Сейчас ты резко уходишь от этой темы.",
@@ -1421,7 +1424,7 @@ func _saveSecret(petId: String) -> void:
 ## у Вельвет - сны, у Розы - обиды. Нет поля - общие (прошлое, лаборатория).
 ## Прямой вопрос о тайне (SECRET_ASK_ANY) засчитывается у всех: у Експи свой
 ## список заменял общий, "ты что-то скрываешь?" не считалось (стенд sec3, 20.10).
-const SECRET_ASK_ANY := ["тайн", "секрет", "скрываешь", "скрывает", "прячешь", "расскажи о себе"]
+const SECRET_ASK_ANY := ["тайн", "секрет", "скрываешь", "скрывает", "скрыва", "прячешь", "утаива", "правду", "расскажи о себе"]
 func _asksAboutSecret(skin: String, text: String) -> bool:
 	var low := text.to_lower()
 	var stems: Array = SECRET_ASK_ANY + passport(skin).get("secretAsk", SECRET_ASK_STEMS)
@@ -1441,24 +1444,79 @@ func secretBlock(skin: String, lastText: String) -> String:
 	if not gbData.settings.get("llmFlirtEnabled", false) and String(p.get("secretSafe", "")) != "":
 		secret = String(p["secretSafe"])
 	var st := _secretState(chatPetId)
+	var asked := _asksAboutSecret(skin, lastText)
 	if st.get("revealed", false):
-		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if _asksAboutSecret(skin, lastText) else ""
-	if not _asksAboutSecret(skin, lastText):
+		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if asked else ""
+	if not asked:
+		st["msgs"] = int(st.get("msgs", 0)) + 1 # разговор о другом между расспросами
 		return ""
 	var hint := String(p.get("secretHint", SECRET_HINT_DEFAULT))
-	var now := Time.get_ticks_msec()
-	if chatMood >= SECRET_MOOD and now - int(st.get("last", 0)) >= SECRET_GAP_MS:
-		st["progress"] = int(st.get("progress", 0)) + 1
-		st["last"] = now
-		_saveSecret(chatPetId)
+	# 054.9991: время - по часам системы, не с запуска игры (после перезапуска
+	# старое "last" из сейва было больше нового счётчика - шаги вставали)
+	var now := int(Time.get_unix_time_from_system() * 1000.0)
 	var step := int(st.get("progress", 0))
-	if step >= SECRET_STEPS:
-		st["revealed"] = true
+	var gapOk: bool = now - int(st.get("last", 0)) >= SECRET_GAP_MS or int(st.get("msgs", 0)) >= SECRET_GAP_MSGS
+	if step < SECRET_STEPS and chatMood >= SECRET_MOOD and gapOk:
+		step += 1
+		st["progress"] = step
+		st["last"] = now
+		st["msgs"] = 0
 		_saveSecret(chatPetId)
+		_logDebugLine(skin + ":secret", "SECRET", "step=%d" % step)
+	if step >= SECRET_STEPS:
+		# тайна считается рассказанной, только когда в ответе есть её слова
+		# (secretCheckReply). Увильнул - на следующий вопрос приказ жёстче:
+		# gemma на последнем шаге у Розы ответила "я просто люблю гладить шипы" (тест 20.10)
+		var tries := int(st.get("tries", 0))
+		st["tries"] = tries + 1
 		# без secretHint ("ты её не выдаёшь") - иначе противоречие, и на стенде
 		# Вояджер, Роза, Милки и Вельвет на последнем шаге всё равно отнекивались
-		return "\nТвоя тайна: " + secret + "\nСейчас ты наконец решаешься рассказать её человеку - прямо, но сбивчиво и со страхом, своими словами. Не уходи от ответа: это тот самый момент."
+		if tries == 0:
+			return "\nТвоя тайна: " + secret + "\nСейчас ты наконец решаешься рассказать её человеку - прямо, но сбивчиво и со страхом, своими словами. Не уходи от ответа: это тот самый момент."
+		return "\nТвоя тайна: " + secret + "\nТы уже {начала|начал} признаваться и {увильнула|увильнул}. Теперь скажи её прямо, с первых слов ответа: о чём она, своими словами. Без шуток и без смены темы."
 	return "\n" + hint + "\n" + SECRET_STAGES[clampi(step, 0, SECRET_STAGES.size() - 1)]
+
+
+## Тайна персонажа с учётом флирта (выключен - вариант без романтики).
+func _secretTextFor(skin: String) -> String:
+	var p := passport(skin)
+	if not gbData.settings.get("llmFlirtEnabled", false) and String(p.get("secretSafe", "")) != "":
+		return String(p["secretSafe"])
+	return String(p.get("secret", ""))
+
+
+## Слова тайны для проверки ответа: основы от 5 букв без общих слов.
+const _SECRET_STEM_STOP := ["челов", "котор", "никог", "всегд", "тольк", "потом", "очень", "когда", "своих", "этого",
+	"здесь", "больш", "сейча", "может", "чтобы", "почем", "сразу", "такие", "такой", "обрат", "иногд", "никто", "никем"]
+
+func _secretStems(secret: String) -> Array:
+	var stems: Array = []
+	for w in _normWords(secret):
+		if w.length() < 5:
+			continue
+		var stem := w.substr(0, 5)
+		if not _SECRET_STEM_STOP.has(stem) and not stems.has(stem):
+			stems.append(stem)
+	return stems
+
+
+## Ответ игроку на последнем шаге: есть слова тайны - рассказана (behavior.replyToPlayer).
+func secretCheckReply(skin: String, petId: String, text: String) -> void:
+	var secret := _secretTextFor(skin)
+	if secret == "":
+		return
+	var st := _secretState(petId)
+	if st.get("revealed", false) or int(st.get("progress", 0)) < SECRET_STEPS or int(st.get("tries", 0)) == 0:
+		return
+	var stems := _secretStems(secret)
+	for w in _normWords(text):
+		for stem in stems:
+			if w.begins_with(stem):
+				st["revealed"] = true
+				_saveSecret(petId)
+				_logDebugLine(skin + ":secret", "SECRET", "revealed (слово: %s)" % w)
+				return
+	_logDebugLine(skin + ":secret", "SECRET", "dodged - тайна не прозвучала, на следующий вопрос - жёстче")
 
 
 ## Удар или грубость - доверие падает, шаг к тайне назад.
@@ -2483,11 +2541,11 @@ func _explainSlow(tps: float) -> void:
 						share = float(m.get("size_vram", 0)) / float(m["size"])
 		var msg := ""
 		if share >= 0.0 and share < 0.97:
-			msg = "ИИ отвечает медленно (%.0f ток/с): модель не влезла в видеопамять - на видеокарте только %d%%, остальное в обычной памяти. Видеопамять заняли другие программы: стрим или звонок в Discord, браузер, видеоплеер, игры. В Discord выключи аппаратное ускорение (Настройки - Расширенные), закрой лишнее и перезапусти DeskSaw - модель загрузится заново." % [tps, int(share * 100)]
+			msg = "ИИ отвечает медленно (%.0f ток/с): модель не влезла в видеопамять - на видеокарте только %d%%, остальное в обычной памяти. Видеопамять заняли другие программы: стрим или звонок в Discord, браузер, видеоплеер, игры. В Discord выключи аппаратное ускорение (Настройки - Расширенные), закрой лишнее и перезапусти DeskSaw - модель загрузится заново. Или выбери модель поменьше в model_manager (qwen3-vl:8b-instruct влезает в 8 ГБ)." % [tps, int(share * 100)]
 		elif share >= 0.97:
 			# Ollama видит 100%, но на Windows драйвер NVIDIA при нехватке видеопамяти тихо
 			# переносит часть в общую память - и тогда тоже в разы медленнее (20.10)
-			msg = "ИИ отвечает медленно (%.0f ток/с). Ollama считает, что модель целиком в видеопамяти, но, скорее всего, видеопамяти впритык и драйвер тихо перенёс часть в обычную память. Проверь: Диспетчер задач - Производительность - GPU - \"Общая память графического процессора\": если там больше 0,3 ГБ, видеопамяти не хватает. Помогает закрыть или свернуть то, что держит видеокарту (браузер, плеер, второй стрим), выключить в Discord аппаратное ускорение и перезапустить DeskSaw." % tps
+			msg = "ИИ отвечает медленно (%.0f ток/с). Ollama считает, что модель целиком в видеопамяти, но, скорее всего, видеопамяти впритык и драйвер тихо перенёс часть в обычную память. Проверь: Диспетчер задач - Производительность - GPU - \"Общая память графического процессора\": если там больше 0,3 ГБ, видеопамяти не хватает. Помогает закрыть или свернуть то, что держит видеокарту (браузер, плеер, второй стрим), выключить в Discord аппаратное ускорение и перезапустить DeskSaw. Или выбери модель поменьше в model_manager." % tps
 		else:
 			msg = "ИИ отвечает медленно (%.0f ток/с). Если идёт стрим или звонок в Discord - выключи в нём аппаратное ускорение (Настройки - Расширенные) и закрой лишние программы на видеокарте." % tps
 		_logDebugLine("system", "SLOW", "%.1f tok/s, vram share %s" % [tps, ("%.0f%%" % (share * 100)) if share >= 0.0 else "?"])
@@ -2495,6 +2553,84 @@ func _explainSlow(tps: float) -> void:
 	)
 	if http.request("http://127.0.0.1:11434/api/ps") != OK:
 		http.queue_free()
+
+
+## 054.9991: ИИ-описание своего предмета (вкладка Предметы). Без лора, самая
+## большая установленная модель со зрением (решение Alex - точнее; у него 14b).
+## Если она не основная - Ollama на время подгрузит её вместо основной.
+const ITEM_DESCRIBE_PROMPT := "Это картинка предмета для игры. Назови предмет по-русски и коротко опиши его: одна фраза до 10 слов, без вступлений, без кавычек и без точки в конце."
+var _describeModel := ""
+
+func _ollamaJson(path: String, body = null):
+	var http := HTTPRequest.new()
+	http.timeout = 240.0
+	add_child(http)
+	var err := http.request("http://127.0.0.1:11434" + path, ["Content-Type: application/json"],
+		HTTPClient.METHOD_POST if body != null else HTTPClient.METHOD_GET, JSON.stringify(body) if body != null else "")
+	if err != OK:
+		http.queue_free()
+		return null
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return null
+	return JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+
+
+func _largestVisionModel() -> String:
+	if _describeModel != "":
+		return _describeModel
+	var tags = await _ollamaJson("/api/tags")
+	if not (tags is Dictionary):
+		return ""
+	var models: Array = tags.get("models", [])
+	models.sort_custom(func(a, b): return float(a.get("size", 0)) > float(b.get("size", 0)))
+	for m in models:
+		var name := String(m.get("name", ""))
+		var info = await _ollamaJson("/api/show", {"model": name})
+		if info is Dictionary and (info.get("capabilities", []) as Array).has("vision"):
+			_describeModel = name
+			return name
+	return ""
+
+
+func describeItemImage(path: String, cb: Callable) -> void:
+	var img := Image.load_from_file(ProjectSettings.globalize_path(path))
+	if img == null or img.is_empty():
+		cb.call("")
+		return
+	var side := maxi(img.get_width(), img.get_height())
+	if side > 512:
+		var q := 512.0 / side
+		img.resize(maxi(1, int(img.get_width() * q)), maxi(1, int(img.get_height() * q)), Image.INTERPOLATE_BILINEAR)
+	elif side < 192:
+		# иконка 30x30 для модели - пара пикселей; увеличиваем без сглаживания
+		var k := int(ceil(256.0 / side))
+		img.resize(img.get_width() * k, img.get_height() * k, Image.INTERPOLATE_NEAREST)
+	var model := await _largestVisionModel()
+	if model == "":
+		_logDebugLine("items", "DESCRIBE", "нет установленной модели со зрением")
+		cb.call("")
+		return
+	var payload := {"model": model, "prompt": ITEM_DESCRIBE_PROMPT, "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
+		"stream": false, "keep_alive": "1m", "options": {"temperature": 0.2, "num_predict": 40, "num_ctx": 4096}}
+	var parsed = await _ollamaJson("/api/generate", payload)
+	var desc := ""
+	if parsed is Dictionary:
+		desc = _cleanItemDescription(String(parsed.get("response", "")))
+	_logDebugLine("items", "DESCRIBE", "%s -> %s (%s)" % [path.get_file(), desc if desc != "" else "(пусто)", model])
+	cb.call(desc)
+
+
+func _cleanItemDescription(text: String) -> String:
+	var t := _fixOutputQuirks(text.strip_edges()).get_slice("\n", 0).strip_edges()
+	for q in ["\"", "«", "»", "*"]:
+		t = t.replace(q, "")
+	t = t.strip_edges().trim_suffix(".").strip_edges()
+	var words := t.split(" ", false)
+	if words.size() > 12:
+		t = " ".join(words.slice(0, 12))
+	return t
 
 
 func listAvailableModels() -> void:
@@ -2543,6 +2679,8 @@ func setModel(name: String, pull: bool = true) -> void:
 		gbData.settings["llmRepetitionGuard"] = repetitionGuard
 		Console.print("Настройки под модель: креативность [color=CYAN]%s[/color], защита от повторов [color=CYAN]%s[/color]" % [creativity, repetitionGuard])
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	# 054.9991: смена модели видна в ИИ-логе (в отчёте 054.999 её угадывали по окну 8192)
+	_logDebugLine("SESSION", "MODEL", "model=%s creativity=%.2f repetitionGuard=%.2f" % [modelName, creativity, repetitionGuard])
 	# Раньше тут был _clearPrefetchPools() - специально убрал: часть тестеров
 	# и разработчик хотят прогреть пулы на одной модели, потом переключиться
 	# на другую (например для более живых screen-реакций) и НЕ терять уже

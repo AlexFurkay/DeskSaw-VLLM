@@ -779,8 +779,8 @@ func _registerImpact(speed: float) -> void:
 ## макушка ~ y -6.5, глаз ~ (0, 2). Для нового предмета без своей строки
 ## берётся позиция по слоту.
 const WEAR_OFFSETS := {
-	"hat": Vector2(-1.5, -7.0),
-	"beret": Vector2(-1.5, -5.5),
+	"hat": Vector2(-1.5, -6.0), # 054.9991: на пиксель ниже - сидели слишком высоко (Alex)
+	"beret": Vector2(-1.5, -4.5),
 	"glasses": Vector2(-1.5, 3.0),
 }
 const WEAR_SLOT_DEFAULT := {"head": "hat", "eyes": "glasses"}
@@ -909,10 +909,12 @@ const WITHDRAWAL_END := 7.0
 const HEAVY_ADDICTION := 70.0         # тяжёлая ломка: еда радует вдвое меньше, ласку отвергает чаще
 const DOSE_CHAIN_MS := 300000         # дозы ближе друг к другу, чем это, считаются "подряд"
 const OVERDOSE_DOSES := 4
-const WITHDRAWAL_LINE_MIN_MS := 480000  # отдельная фраза о ломке - раз в 8-12 мин
-const WITHDRAWAL_LINE_MAX_MS := 720000
-const WITHDRAWAL_ANY_GAP_MS := 120000   # между ЛЮБЫМИ фразами о ломке - не меньше 2 мин
-const WITHDRAWAL_MENTION_CHANCE := 0.25 # ломка в фразах о состоянии и на экран - в каждой четвёртой
+# 054.9991 (тест 054.999: "слишком мало, перс будто забывает о зависимости"):
+const WITHDRAWAL_LINE_MIN_MS := 180000  # отдельная фраза о ломке - раз в 3-6 мин (было 8-12)
+const WITHDRAWAL_LINE_MAX_MS := 360000
+const WITHDRAWAL_ANY_GAP_MS := 90000    # между ЛЮБЫМИ фразами о ломке - не меньше 1,5 мин (было 2)
+const WITHDRAWAL_MENTION_CHANCE := 0.4  # ломка в фразах о состоянии и на экран (было 0.25)
+const WITHDRAWAL_ASK_SITUATION := "У тебя ломка, а шприца с фентанилом нигде не видно. Ты прямо просишь человека принести и дать тебе дозу."
 const TOSS_MIN_MS := 60000              # толкнуть шприц к человеку - раз в 1-2 мин
 const TOSS_MAX_MS := 120000
 const TOSS_LINE_GAP_MS := 180000        # фраза при толчке - не чаще раза в 3 мин
@@ -946,8 +948,10 @@ func _updateWithdrawalState() -> void:
 	if not _withdrawalActive and addiction >= WITHDRAWAL_START and not _isHigh():
 		_withdrawalActive = true
 		_hadWithdrawal = true
+		LLMManager._logDebugLine(_skinTag() + ":drug", "WITHDRAWAL", "началась, зависимость=%.0f" % addiction)
 	elif _withdrawalActive and addiction < WITHDRAWAL_END:
 		_withdrawalActive = false
+		LLMManager._logDebugLine(_skinTag() + ":drug", "WITHDRAWAL", "прошла")
 
 
 ## Можно ли сейчас сказать фразу о ломке (общая пауза между всеми такими фразами).
@@ -970,6 +974,7 @@ func takeFentanyl() -> void:
 	_dosesInRow += 1
 	var duringWithdrawal := _inWithdrawal()
 
+	LLMManager._logDebugLine(_skinTag() + ":drug", "DOSE", "доза подряд=%d зависимость до=%.0f ломка=%s" % [_dosesInRow, addiction, "да" if duringWithdrawal else "нет"])
 	if _dosesInRow >= OVERDOSE_DOSES:
 		_lastDoseMsec = now
 		dialogueSys.speedMod = 0.8
@@ -1025,7 +1030,11 @@ func drugLoop() -> void:
 		moodSys.mood = clampf(moodSys.mood - drain, moodSys.minmood, moodSys.maxmood)
 		if now >= _nextWithdrawalLineMsec and _withdrawalLineAllowed() and not isSleeping and not beingDragged and not shocked:
 			_nextWithdrawalLineMsec = now + randi_range(WITHDRAWAL_LINE_MIN_MS, WITHDRAWAL_LINE_MAX_MS)
-			_sayWithdrawal()
+			# шприца нигде нет - через раз прямо просит дозу у человека
+			if _nearestFentanylAnywhere() == null and randf() < 0.5:
+				_sayWithdrawal(WITHDRAWAL_ASK_SITUATION, "ask")
+			else:
+				_sayWithdrawal()
 
 
 # ---------------- Игрок ----------------
@@ -1081,6 +1090,7 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 	LLMManager.chatMood = moodSys.mood + moodSys.drugOffset # для тайны (secretBlock)
 	LLMManager.chatPetId = petId
 	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), _recentSpoken(), func(text: String):
+		LLMManager.secretCheckReply(_skinTag(), petId, text)
 		var action := ""
 		if text.begins_with("<act:"):
 			var close := text.find(">")
@@ -1826,7 +1836,7 @@ const CATEGORY_SITUATION := {
 	"HardDamage": "Тебе только что было ОЧЕНЬ больно - тяжёлый удар, здоровье на исходе, это серьёзно и страшно.",
 	"healed": "Тебе только что помогли вылечиться, тебе физически стало лучше, но ты всё ещё в невесёлом настроении.",
 	"fentanyl": "Тебе только что вкололи фентанил. Накрывает тёплой волной - боль и тревога уходят, всё плывёт, тебе слишком хорошо.",
-	"withdrawal": "У тебя ломка - давно не было фентанила. Тебя знобит, всё ломит, ты {раздражена|раздражён} и тебе очень плохо, ты хочешь ещё дозу и просишь человека дать её тебе.",
+	"withdrawal": "У тебя ломка - давно не было фентанила, и тело его требует. Тебя трясёт и знобит, ломит кости и мышцы, мутит, ты не находишь себе места и думаешь только о дозе. Ты {раздражена|раздражён}, тебе по-настоящему плохо, ты говоришь об этом прямо и просишь человека дать тебе дозу.",
 	"overdose": "Тебе вкололи слишком много фентанила подряд - передозировка. Ты проваливаешься в тяжёлую темноту, это последние слова перед тем, как ты отключишься.",
 }
 
@@ -2142,7 +2152,7 @@ func _pickWalkTarget() -> float:
 			return mx - signf(mx - x) * 120.0
 	# любопытство - к интересному предмету (но не к пиле)
 	if randf() < 0.2:
-		var thing := _nearestBody(func(body, key): return _itemDesc(key) != "" and not DANGER_ITEMS.has(key))
+		var thing := _nearestBody(func(body, key): return _itemDesc(key) != "" and not DANGER_ITEMS.has(key) and _curiousAbout(key))
 		if thing:
 			return _stopBeforeDanger(x, thing.global_position.x + randf_range(-60.0, 60.0))
 	# случайная точка: от 150 до 700 пикс, у края - разворот к центру
@@ -2153,6 +2163,12 @@ func _pickWalkTarget() -> float:
 	elif x > w * 0.75:
 		dir = -1.0
 	return _stopBeforeDanger(x, clampf(x + dir * dist, margin, w - margin))
+
+
+## 054.9991: фентанил интересен только тому, у кого есть зависимость, и никогда -
+## игроку (Експи-игрок "подозрительно часто" ходил к шприцу из любопытства).
+func _curiousAbout(key: String) -> bool:
+	return key != "fentanyl" or (addiction > 0.0 and not isPlayer)
 
 
 ## 054.97: опасные предметы. Раньше персы шли прямо на пилу (в том числе

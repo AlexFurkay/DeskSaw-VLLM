@@ -74,7 +74,7 @@ func _additem(item: String = "containercrate"):
 	var scene = load(path)
 	var instance = scene.instantiate()
 	get_tree().current_scene.add_child(instance)
-	instance.global_position = instance.get_global_mouse_position()
+	instance.global_position = CustomItems.spawnPosition(get_tree().root.get_visible_rect().size, float(gbData.settings.get("petScale", 4.0)))
 	instance.owner = get_tree().current_scene
 	instance.set_meta("itemName", item)
 
