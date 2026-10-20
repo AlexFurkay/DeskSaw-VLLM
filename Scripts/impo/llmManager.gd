@@ -1517,7 +1517,19 @@ func secretCheckReply(skin: String, petId: String, text: String) -> void:
 	var st := _secretState(petId)
 	if st.get("revealed", false) or int(st.get("progress", 0)) < SECRET_STEPS or int(st.get("tries", 0)) == 0:
 		return
-	var stems := _secretStems(secret)
+	# 054.9992: свои слова-признаки тайны (паспорт secretReveal, подстроки) -
+	# по первым 5 буквам "Я помню все обиды" не совпадало с "обидел", а
+	# "ничего плохого" ложно совпадало с "ничего не забываешь" (стенд sec4).
+	# Нет поля (персонаж игрока) - по основам слов самой тайны.
+	var keys: Array = passport(skin).get("secretReveal", [])
+	var low := text.to_lower()
+	for k in keys:
+		if low.contains(String(k)):
+			st["revealed"] = true
+			_saveSecret(petId)
+			_logDebugLine(skin + ":secret", "SECRET", "revealed (признак: %s)" % k)
+			return
+	var stems := _secretStems(secret) if keys.is_empty() else []
 	for w in _normWords(text):
 		for stem in stems:
 			if w.begins_with(stem):
