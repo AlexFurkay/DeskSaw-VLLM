@@ -2141,9 +2141,23 @@ func dropSkinJobs(skin: String) -> void:
 			_backgroundQueue.erase(j)
 			_prefetchPending[tag.trim_prefix("prefetch:")] = false
 			removed += 1
+	# 054.9995: прогрев лежит в ОСНОВНОЙ очереди с меткой "prefetch:Скин:..." - раньше
+	# здесь искали только "Скин:", и задания удалённого персонажа доделывались, а счётчик
+	# прогрева складывался с новым ("9/18", тест Alex 21.10)
 	for j in _queue.duplicate():
-		if String(j.get("tag", "")).begins_with(skin + ":"):
+		var qtag := String(j.get("tag", ""))
+		if qtag.begins_with(skin + ":") or qtag.begins_with("prefetch:" + skin + ":"):
 			_queue.erase(j)
+			if qtag.begins_with("prefetch:"):
+				_prefetchPending[qtag.trim_prefix("prefetch:")] = false
+				removed += 1
+	if busy and (_currentTag.begins_with("prefetch:" + skin + ":") or _currentTag.begins_with(skin + ":")):
+		http.cancel_request()
+		_watchdogTimer.stop()
+		busy = false
+		_currentJob = {}
+		TransparentWindow.call("SetAiBusy", false)
+		_processQueue.call_deferred()
 	if removed > 0 and _prewarmTotal > 0:
 		_prewarmTotal = maxi(_prewarmDone, _prewarmTotal - removed)
 		if _prewarmDone >= _prewarmTotal:

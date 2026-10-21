@@ -118,7 +118,13 @@ func _fillSkinChoices() -> void:
 
 
 func _on_choice_selected(index: int) -> void:
-	_textEdit.text = _choices.get_item_text(index) # дальше как при ручном вводе
+	# 054.9995: программная подстановка в поле не вызывает его обработчик - выбор не
+	# сохранялся, всегда появлялась Вояджер (тест Alex 21.10). Сохраняем сами.
+	var v := _choices.get_item_text(index)
+	_textEdit.text = v
+	gbData.settings.set(key, v)
+	gbData.savetodisk(gbData.conPath, gbData.settings)
+	gbData.SettingsChanged.emit()
 
 var _ignore_next_change: bool = false
 func _read_refresh() -> void:
