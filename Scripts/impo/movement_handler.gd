@@ -114,9 +114,10 @@ func headIKf():
 
 	if dist <= 750.0:
 		lookback = dirx != facing
-		if dirx != facing:
-			mouse_pos.x = rigidtorso.global_position.x - (mouse_pos.x - rigidtorso.global_position.x)
-			mouse_pos.y = (rigidtorso.global_position.y - 300) - (mouse_pos.y - rigidtorso.global_position.y)
+		# 055.0001: цель за спиной - голова не поворачивается (раньше запрокидывалась),
+		# назад косятся только глаза (lookback -> спрайт "back" в faceSys).
+		if lookback:
+			mouse_pos = defheadnose.global_position
 
 		headIk.global_position = headIk.global_position.lerp(mouse_pos, .05)
 	else:

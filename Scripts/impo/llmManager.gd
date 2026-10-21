@@ -106,7 +106,7 @@ var _watchdogTimer: Timer
 
 func _ready() -> void:
 	http = HTTPRequest.new()
-	http.timeout = 60.0 # give up on a truly dead connection instead of hanging forever
+	http.timeout = 75.0 # 055.0001: 60 -> 75 (холодный старт модели на ПК брата не укладывался в минуту)
 	add_child(http)
 	http.request_completed.connect(_on_request_completed)
 
@@ -122,7 +122,7 @@ func _ready() -> void:
 	# else happens to nudge it.
 	_watchdogTimer = Timer.new()
 	_watchdogTimer.one_shot = true
-	_watchdogTimer.wait_time = 75.0
+	_watchdogTimer.wait_time = 90.0 # дольше, чем http.timeout
 	add_child(_watchdogTimer)
 	_watchdogTimer.timeout.connect(_onWatchdogTimeout)
 
