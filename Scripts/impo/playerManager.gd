@@ -20,7 +20,7 @@ const LEFT_KEYS := [0x41, 0x25]       # A, стрелка влево
 const RIGHT_KEYS := [0x44, 0x27]      # D, стрелка вправо
 const JUMP_KEYS := [0x57, 0x26, 0x20] # W, стрелка вверх, пробел
 const SIT_KEYS := [0x53, 0x28]        # S, стрелка вниз - сесть / встать
-const CHAT_MEMORY := 32 # реплик в памяти разговора с КАЖДЫМ ИИ-персом (~16 обменов)
+const CHAT_MEMORY := 40 # реплик в памяти разговора с КАЖДЫМ ИИ-персом; модель видит 24 (до 10b) или 40 (LLMManager.memoryProfile)
 const CHAT_MAX_LENGTH := 200
 const CHAT_REPLY_DISTANCE := 1600.0 # пикс экрана при petSize 4 - кто "рядом" и ответит
 

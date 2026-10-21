@@ -1386,6 +1386,8 @@ PLEASE FUCKING RECODE BOTH OF THESE
 
 """
 func shock() -> void:
+	if _tripped:
+		return # 054.9993: сам споткнулся - не вскрик "меня ударили" (Вояджер: "отпусти, я же не кукла"), фраза при подъёме - своя
 	if isUnconscious or beingDragged or isSleeping or Time.get_ticks_msec() < _spawnGraceUntil:
 		# screamBIG - только настоящий удар/падение, не обычное хватание мышкой
 		# и не самый первый спавн. isSleeping: засыпая, sleep() сам переводит
@@ -1673,6 +1675,7 @@ func _drugLevel() -> int:
 
 
 func _aiStateHint() -> String:
+	LLMManager.chatMood = moodSys.mood + moodSys.drugOffset # 054.9993: для порога флирта и тайны
 	return LLMManager.stateHint(moodSys.mood + moodSys.drugOffset, healthHandler.health, _drugLevel())
 
 

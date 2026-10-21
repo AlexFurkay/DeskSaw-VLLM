@@ -11,7 +11,7 @@ class_name CustomItems
 
 const DIR := "user://items/"
 const KEY_PREFIX := "custom:"
-const MAX_SIDE := 64 # больше 64 пикселей арта не бывает (огромное фото - не больше 256 px на экране)
+const MAX_SIDE := 96 # 054.9993: больше 96 пикселей арта не бывает (огромное фото - не больше ~384 px на экране)
 ## 054.9992: ЕДИНЫЙ масштаб для всех картинок. Раньше каждая картинка ужималась
 ## до 64 px и увеличивалась под ~128 px на экране - сгущёнка 64x64 и АК 316x127
 ## выходили одного размера (большая сторона 128 px), реальная разница стиралась.
@@ -19,7 +19,7 @@ const MAX_SIDE := 64 # больше 64 пикселей арта не бывае
 ## все картинки уменьшаются в одно число раз (до BLOCK пикселей картинки в один
 ## пиксель арта) и показываются x4, как встроенные: на экране ~0,7 от картинки.
 ## Сгущёнка -> ~50 px (бургер 48), АК -> ~210 px (рост персонажа ~200).
-const BLOCK := 6
+const BLOCK := 4 # 054.9993: было 6 - Alex: все свои предметы в 1,5 раза больше, сгущёнка была "месивом" из 13 пикселей
 const PIXEL_ART_MAX := 32 # до 32 px - уже пиксель-арт: не уменьшаем, x4
 const IMAGE_EXT := ["png", "jpg", "jpeg", "webp", "bmp", "tga"] # GIF движок не открывает
 const FOOD_REPLENISH := 15.0
@@ -162,7 +162,7 @@ static func pixelize(img: Image) -> Image:
 		img.resize(maxi(1, int(img.get_width() * q)), maxi(1, int(img.get_height() * q)), Image.INTERPOLATE_BILINEAR)
 		side = maxi(img.get_width(), img.get_height())
 	# единый блок; маленькие (33-71 px) - помягче, чтобы не стать точкой; огромные - до 64 px арта
-	var k := maxi(clampi(int(side / 12.0), 1, BLOCK), int(ceil(float(side) / MAX_SIDE)))
+	var k := maxi(clampi(int(round(side / 21.0)), 1, BLOCK), int(ceil(float(side) / MAX_SIDE))) # 64 px -> k=3 (сгущёнка ~84 px), 316 -> k=4 (автомат ~316 px)
 	if k <= 1:
 		return img
 	var w := img.get_width()

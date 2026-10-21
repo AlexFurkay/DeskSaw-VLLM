@@ -802,6 +802,12 @@ func _chatLooksStuck(tag: String, text: String) -> bool:
 func _looksLikeRepeat(category: String, text: String) -> bool:
 	if _isFuzzyDuplicateOf(text, _recentLinesByCategory.get(category, [])):
 		return true
+	# 054.9993: Експи ответил в чате "я парень, хоть и выгляжу как мышь с пёсом", и через
+	# 23 с реакция на экран повторила это слово в слово - проверка шла только внутри "screen"
+	if not category.ends_with(":chat"):
+		var chatLines: Array = _recentLinesByCategory.get(_skinFromTag(category) + ":chat", [])
+		if _isFuzzyDuplicateOf(text, chatLines.slice(maxi(0, chatLines.size() - 6))):
+			return true
 	return _sameOpener(category, text) or _hitsObsession(category, text)
 
 
@@ -841,6 +847,18 @@ func _buildBasePrompt(category: String = "") -> String:
 
 ## Правила + что персонаж уже говорил + напоминание о манере речи.
 ## lines > 1 - пакет фраз для пула (каждая с новой строки).
+const FLIRT_MOOD := 70.0 # 054.9993: флирт - только при настроении от 70 (решение Alex)
+
+## Откровенная пошлость в реплике человека (про секс и части тела).
+const _CRUDE_STEMS := ["раздвин", "ножки разв", "секс", "трах", "переспа", "член", "сиськ", "сись", "грудь покаж", "голая", "голый", "разденься", "раздевайся", "минет", "отсос", "кончи", "возбужд", "в постел", "интим", "жопк", "попк", "пизд", "ебат", "выеб", "сосать"]
+
+func _isCrude(text: String) -> bool:
+	var low := text.to_lower()
+	for st in _CRUDE_STEMS:
+		if low.contains(st):
+			return true
+	return false
+
 func _closingBlock(category: String, lines: int = 1) -> String:
 	var skin := _skinFromTag(category)
 	var r: Array[String] = []
@@ -865,15 +883,20 @@ func _closingBlock(category: String, lines: int = 1) -> String:
 		r.append("- мат можно, но примерно в каждой третьей фразе: только в злых, резких или когда больно; в спокойных и ласковых - без него. Ругательство в середину или конец фразы, не в начало; настоящие слова и их формы (блять, сука, хуй, пиздец, нахер, ебать), разные; не выдумывай и не искажай их;")
 	else:
 		r.append("- мат и ругательства запрещены, даже если ты злишься;")
-	if gbData.settings.get("llmFlirtEnabled", false):
-		# 054.999: флирт по роду (просьба Alex и тестеров): персонажу-девушке - смелее
-		# и чаще, персонажу-парню - без романтики к человеку-парню, по-приятельски
-		if isFemale(skin):
-			r.append("- в хорошем настроении можешь кокетничать с человеком-парнем: игривые комплименты, поддразнивания, лёгкие намёки на симпатию - тепло и смело, но без пошлости;")
-		else:
-			r.append("- с человеком-парнем ты как с близким другом: можешь по-приятельски хвалить и подкалывать, но без романтики и намёков;")
+	# 054.9993 (Alex): флирт - только в живой реплике (чат, экран, состояние) и при
+	# настроении от FLIRT_MOOD (фентанил тоже считается - расслабляет); в заготовках
+	# фраз про запас - нет, они звучат потом при любом настроении. Смелее, но без
+	# откровенных описаний секса: на них модели отказываются и ломают роль.
+	var flirtNow: bool = gbData.settings.get("llmFlirtEnabled", false) and lines <= 1 and chatMood >= FLIRT_MOOD
+	if flirtNow and isFemale(skin):
+		r.append("- ты в отличном настроении и можешь смело флиртовать с человеком-парнем: игривые комплименты ему и его рукам, двусмысленности, флирт с подтекстом, намёки на близость и прикосновения - уверенно и в своём характере; без откровенных описаний секса;")
+	elif flirtNow:
+		r.append("- с человеком-парнем ты как с близким другом: можешь по-приятельски хвалить и подкалывать, но без романтики и намёков;")
 	else:
 		r.append("- без флирта и романтики - только дружеское отношение;")
+	# пошлость от человека: не подхватывать и не обижаться всерьёз - сбавить до своей границы (идея Alex)
+	if lines == 0:
+		r.append("- если человек пишет откровенно пошло (про секс, части тела) - не отвечай в том же тоне и не обижайся всерьёз: сбавь градус - поддразни, осади или переведи в игривый намёк, в своём характере;")
 	if banWords.size() > 0:
 		r.append("- никогда не используй эти слова: " + ", ".join(banWords) + ";")
 	var out := "\nПравила ответа:\n" + "\n".join(r)
@@ -1310,13 +1333,23 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 	_processQueue()
 
 
-const OWN_RECENT_MAX := 3   # 054.9992: сколько своих недавних фраз видит чат всегда
-const OWN_RECENT_MIN := 5   # ...и за сколько минут
+## 054.9993: память по размеру модели (идея Alex, как облегчённые лоры): маленькой
+## модели много памяти мешает (зацикливается, путается), большой - помогает.
+## own - свои фразы вслух всегда (за ownMin минут), ownAsked - когда переспрашивают,
+## chat - сколько последних реплик разговора видит модель.
+const MEMORY_SMALL := {"own": 3, "ownMin": 5, "ownAsked": 8, "chat": 24}
+const MEMORY_LARGE := {"own": 6, "ownMin": 15, "ownAsked": 20, "chat": 40}
+
+func memoryProfile() -> Dictionary:
+	return MEMORY_SMALL if modelBillions() < 10.0 else MEMORY_LARGE
 
 func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> String:
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
+	var chatCap: int = int(memoryProfile()["chat"])
+	if chatHistory.size() > chatCap:
+		chatHistory = chatHistory.slice(chatHistory.size() - chatCap)
 	if speakerSkin == "":
 		prompt += "\n\nСейчас: с тобой разговаривает %s - персонаж на рабочем столе, которым управляет твой человек." % (aboutCharacter(playerSkin, false) if playerSkin != "" else speaker)
 		prompt += _playerFormRule(skinTag, playerSkin)
@@ -1349,13 +1382,20 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	# напугал!", а на "Ты его хочешь?" (про банан из её же фразы) - про лепестки
 	# сакуры (тест 20.10). Человек может ответить и на пред-предыдущую фразу (Alex).
 	# Подаются как "уже сказанное, не повторяй" - против зацикливания на них.
+	# 054.9993: память по размеру модели (memoryProfile) и ВСЕГДА в переписке - в том
+	# числе когда переспрашивают ("Повтори, что ты сказал?" - раньше свои слова шли
+	# отдельным списком, и qwen-Експи отвечал невпопад, тест 21.10).
+	var prof := memoryProfile()
+	var asked := _asksAboutPast(lastText)
 	var recentOwn: Array = []
-	if not _asksAboutPast(lastText):
-		for e in ownRecent:
-			if int(e["minutesAgo"]) <= OWN_RECENT_MIN and not inChat.has(String(e["text"])):
-				recentOwn.append(e)
-		recentOwn = recentOwn.slice(maxi(0, recentOwn.size() - OWN_RECENT_MAX))
-		ownRecent = []
+	for e in ownRecent:
+		if inChat.has(String(e["text"])):
+			continue
+		if asked or int(e["minutesAgo"]) <= int(prof["ownMin"]):
+			recentOwn.append(e)
+	var ownCap: int = int(prof["ownAsked"]) if asked else int(prof["own"])
+	recentOwn = recentOwn.slice(maxi(0, recentOwn.size() - ownCap))
+	ownRecent = []
 	for e in ownRecent:
 		if not inChat.has(String(e["text"])):
 			var ago: int = int(e["minutesAgo"])
@@ -1390,6 +1430,10 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	var secretPart := secretBlock(skinTag, last) if speakerSkin == "" else ""
 	# 054.9992: облик игрока - в самый конец. gemma всё равно говорила Експи-игроку
 	# "пойдём посмотрим, что человек там надумал" и звала человека "он" (тест 20.10)
+	# 054.9993: откровенная пошлость от человека - прямое указание в самый конец
+	# (qwen правило из середины пропускал: "я бы за три рыбки открыла тебе...")
+	if speakerSkin == "" and _isCrude(last):
+		secretPart += "\nСобеседник сказал пошлость. Не подыгрывай, не называй цену и не соглашайся - осади, поддразни или отшути в своём характере, без пошлых слов."
 	if speakerSkin == "" and playerSkin != "":
 		secretPart = "\nПомни: %s перед тобой - это и есть твой человек, просто в облике персонажа. Других людей рядом нет: не говори о человеке \"он\" или \"человек\" - обращайся к нему на \"ты\"." % PlayerManager.displayNameFor(playerSkin) + secretPart
 	if _asksForAction(last):
@@ -1502,11 +1546,15 @@ func secretBlock(skin: String, lastText: String) -> String:
 		# gemma на последнем шаге у Розы ответила "я просто люблю гладить шипы" (тест 20.10)
 		var tries := int(st.get("tries", 0))
 		st["tries"] = tries + 1
+		st["pending"] = true # проверить именно этот ответ (secretCheckReply)
 		# без secretHint ("ты её не выдаёшь") - иначе противоречие, и на стенде
 		# Вояджер, Роза, Милки и Вельвет на последнем шаге всё равно отнекивались
 		if tries == 0:
 			return "\nТвоя тайна: " + secret + "\nСейчас ты наконец решаешься рассказать её человеку - прямо, но сбивчиво и со страхом, своими словами. Не уходи от ответа: это тот самый момент."
-		return "\nТвоя тайна: " + secret + "\nТы уже {начала|начал} признаваться и {увильнула|увильнул}. Теперь скажи её прямо, с первых слов ответа: о чём она, своими словами. Без шуток и без смены темы."
+		if tries == 1:
+			return "\nТвоя тайна: " + secret + "\nТы уже {начала|начал} признаваться и {увильнула|увильнул}. Теперь скажи её прямо, с первых слов ответа: о чём она, своими словами. Без шуток и без смены темы."
+		# 054.9993: Вояджер на gemma увиливала 10+ раз подряд - теперь задаём начало ответа
+		return "\nТвоя тайна: " + secret + "\nТы уже несколько раз {увиливала|увиливал}. Начни ответ словами \"Ладно... скажу.\" и сразу, в той же реплике, прямо назови свою тайну своими словами."
 	return "\n" + hint + "\n" + SECRET_STAGES[clampi(step, 0, SECRET_STAGES.size() - 1)]
 
 
@@ -1539,8 +1587,9 @@ func secretCheckReply(skin: String, petId: String, text: String) -> void:
 	if secret == "":
 		return
 	var st := _secretState(petId)
-	if st.get("revealed", false) or int(st.get("progress", 0)) < SECRET_STEPS or int(st.get("tries", 0)) == 0:
-		return
+	if st.get("revealed", false) or int(st.get("progress", 0)) < SECRET_STEPS or not st.get("pending", false):
+		return # 054.9993: только ответ на вопрос о тайне (раньше "dodged" писалось после каждого ответа)
+	st["pending"] = false
 	# 054.9992: свои слова-признаки тайны (паспорт secretReveal, подстроки) -
 	# по первым 5 буквам "Я помню все обиды" не совпадало с "обидел", а
 	# "ничего плохого" ложно совпадало с "ничего не забываешь" (стенд sec4).
