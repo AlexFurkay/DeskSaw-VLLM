@@ -179,20 +179,32 @@ func setDia(stra: String, speed: float, cooldown: float = 0.0, ignoreCooldown: b
 	if cooldown > 0.0:
 		dialogueTimer.start(cooldown)
 
-## 054.9992: две фразы рядом налезали друг на друга (скрин Alex) - новая фраза
-## поднимается над чужой, которая ещё на экране.
-var _baseY := INF
+## 054.9992: две фразы рядом налезали друг на друга - новая фраза поднимается над чужой.
+## 055.003 (скрины Alex): 1) налезание вернулось - чужая фраза считалась видимой только
+## пока печаталась, а допечатанная и висящая - нет; 2) длинная фраза уходила вниз под
+## панель задач - высота отсчитывалась от размера ПРЕДЫДУЩЕЙ фразы, «пол» съезжал.
+## Теперь: низ фразы всегда на одном месте над головой (_baseBottom, из сцены), фраза
+## растёт вверх; не вылезает за края окна; проверка идёт всё время, пока фраза видна
+## (персонаж мог упасть/сесть/сдвинуться). Сдвигается только более НОВАЯ фраза.
+var _baseBottom := INF
+var _startedAt := 0
 
 func isShowing() -> bool:
-	return richtextlabel.visible and richtextlabel.text.strip_edges() != "" and (isTyping or not dialogueTimer.is_stopped())
+	return richtextlabel.visible and richtextlabel.text.strip_edges() != "" and (isTyping or richtextlabel.visible_characters != 0)
 
 func _avoidOverlap() -> void:
-	if _baseY == INF:
-		_baseY = richtextlabel.position.y
-	richtextlabel.position.y = _baseY
+	_startedAt = Time.get_ticks_msec()
+	var h := tre
 	await get_tree().process_frame
-	if not is_instance_valid(richtextlabel):
-		return
+	while is_instance_valid(richtextlabel) and tre == h and isShowing():
+		_placeLabel()
+		await get_tree().create_timer(0.1).timeout
+
+
+func _placeLabel() -> void:
+	if _baseBottom == INF:
+		_baseBottom = BASE_LABEL_BOTTOM
+	richtextlabel.position.y = _baseBottom - richtextlabel.size.y
 	for _pass in 3:
 		var mine := richtextlabel.get_global_rect()
 		var moved := false
@@ -200,13 +212,26 @@ func _avoidOverlap() -> void:
 			var other = pet.get("dialogueSys")
 			if other == null or other == self or not is_instance_valid(other) or not other.isShowing():
 				continue
+			if other._startedAt > _startedAt:
+				continue # двигается более новая фраза, не эта
 			var r: Rect2 = other.richtextlabel.get_global_rect()
 			if r.intersects(mine):
-				richtextlabel.global_position.y = r.position.y - mine.size.y - 4.0
+				richtextlabel.global_position.y += r.position.y - mine.end.y - 4.0
 				moved = true
 				break
 		if not moved:
 			break
+	# в пределах окна (окно игры = рабочая область экрана над панелью задач)
+	var view := get_viewport().get_visible_rect()
+	var box := richtextlabel.get_global_rect()
+	if box.end.y > view.end.y - 4.0:
+		richtextlabel.global_position.y -= box.end.y - (view.end.y - 4.0)
+		box = richtextlabel.get_global_rect()
+	if box.position.y < view.position.y + 4.0:
+		richtextlabel.global_position.y += view.position.y + 4.0 - box.position.y
+
+## Низ фразы в textParent - offset_bottom из sawianBase.tscn (RichTextLabel).
+const BASE_LABEL_BOTTOM := -5.2512627
 
 
 func is_dialogue_playing() -> bool:

@@ -1696,7 +1696,8 @@ func passivetalk() -> void:
 			# 054.99: чем сильнее ранен, тем чаще говорит (и чаще - о самочувствии)
 			var hp: float = healthHandler.health
 			var woundTier := _woundTier(hp)
-			var pace: float = [1.0, 0.8, 0.55, 0.35][woundTier]
+			# 055.003: при 38 ХП о боли было слишком часто (Alex) - 0.8/0.55/0.35 -> 0.9/0.75/0.5
+			var pace: float = [1.0, 0.9, 0.75, 0.5][woundTier]
 			# 054.9992: двое на столе говорили вдвое чаще - интервал умножается на число
 			# ИИ-персонажей, общая частота фраз как у одного (Alex)
 			await get_tree().create_timer(randf_range(float(diaTimerMinimum), float(diaTimerMaximum)) * pace * GlobalVariable.pace() * _aiPetCount()).timeout
@@ -1734,8 +1735,13 @@ func passivetalk() -> void:
 					# при ранах - чаще о самочувствии (а примеры - из грустных фраз)
 					var woundFocus := ""
 					woundTier = _woundTier(healthHandler.health)
-					if woundTier > 0 and randf() < [0.0, 0.35, 0.6, 0.85][woundTier]:
+					# 055.003: доля 0.35/0.6/0.85 -> 0.2/0.35/0.6; при ушибах и ранах (не тяжёлых)
+					# две жалобы подряд не идут
+					var repeatBlocked := _lastStateWasWound and woundTier < 3
+					_lastStateWasWound = false
+					if woundTier > 0 and not repeatBlocked and randf() < [0.0, 0.2, 0.35, 0.6][woundTier]:
 						woundFocus = WOUND_FOCUS[woundTier]
+						_lastStateWasWound = true
 						var sadPool: Array = dialogueSys.data.get("VeryLowPassive" if woundTier == 3 else "LowPassive", [])
 						if not sadPool.is_empty():
 							dialogueSys.pool = sadPool
@@ -1751,6 +1757,8 @@ func _on_drag_reaction(text: String) -> void:
 		return
 	_queueMessage(text, 1.0, true)
 
+
+var _lastStateWasWound := false
 
 ## 0 - цел (70+), 1 - лёгкие ушибы (45-70), 2 - ранен (20-45), 3 - тяжело (<20)
 func _woundTier(hp: float) -> int:
