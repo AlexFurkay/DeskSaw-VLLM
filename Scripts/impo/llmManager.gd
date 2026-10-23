@@ -61,6 +61,7 @@ const NUM_CTX_BY_MODEL := {
 	"qwen3-vl:8b-instruct": 6144,
 	"ministral-3:14b": 9216,
 	"gemma3:12b": 8192, # 054.999: третья рекомендованная (решение Alex)
+	"gemma4:12b": 8192, # 055.0002: кандидат на замену gemma3 (стенд border 23.10)
 }
 func numCtx() -> int:
 	return int(NUM_CTX_BY_MODEL.get(modelName, 8192))
@@ -1690,12 +1691,24 @@ func _stripDisplayTags(line: String) -> String:
 ## Мелкие привычки модели, которые проще поправить, чем выбрасывать фразу:
 ## английское "Hey" она пишет как "Гей" ("Гей? Дюна тут...").
 var _heyRegex := RegEx.create_from_string("^(Гей|Хей)(?=[\\s,!?.—-])")
-## 054.999: эмодзи и *описания действий* (*покраснела*, *хвостом махнула*) модель
-## в чате иногда пишет вопреки правилам (стенд flirt, Роза) - вырезаем сами.
+## *Описания действий* (*покраснела*, *хвостом махнула*) модель иногда пишет вопреки
+## правилам. 054.999 их вырезала (и не срабатывало - звёздочки удалялись раньше);
+## 055.0002: ОСТАВЛЯЕМ со звёздочками - погружает в РП (решение Alex 23.10).
+## Убираем только одиночные звёздочки (обрывки после обрезки фразы).
 var _starActionRegex := RegEx.create_from_string("\\*[^*]{1,40}\\*")
 var _emojiRegex := RegEx.create_from_string("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{FE0F}]")
+func _keepStarActions(text: String) -> String:
+	var out := ""
+	var last := 0
+	for m in _starActionRegex.search_all(text):
+		out += text.substr(last, m.get_start() - last).replace("*", "")
+		out += m.get_string()
+		last = m.get_end()
+	out += text.substr(last).replace("*", "")
+	return out.strip_edges()
+
 func _fixOutputQuirks(text: String) -> String:
-	text = _starActionRegex.sub(text, "", true)
+	text = _keepStarActions(text)
 	text = _emojiRegex.sub(text, "", true)
 	text = text.replace("  ", " ").strip_edges()
 	return _heyRegex.sub(text, "Эй")
@@ -2007,7 +2020,7 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 	var skinWorn := _skinOverusedWords(_skinFromTag(category))
 	for i in lines.size():
 		var raw: String = lines[i]
-		var cleaned: String = lines[i].strip_edges().replace("*", "")
+		var cleaned: String = _keepStarActions(lines[i].strip_edges())
 		cleaned = cleaned.lstrip("0123456789.-) ").strip_edges()
 
 		if metaSeen:
@@ -2246,6 +2259,7 @@ func _processQueue() -> void:
 		"keep_alive": "30m",
 		"prompt": job["prompt"],
 		"stream": false,
+		"think": false, # 055.0002: у Gemma 4 и др. размышления отключаемые - выключаем (старым моделям не мешает)
 		"options": {
 			"repeat_penalty": repetitionGuard,
 			"temperature": float(job.get("temperature", creativity)), # повтор ответа в чате идёт чуть "смелее"
@@ -2345,7 +2359,7 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 
 	if not isPrefetchBatch:
 		var rawReply := text
-		text = text.replace("*", "").strip_edges()
+		text = _keepStarActions(text)
 		var rejectReason := ""
 
 		# The model's ENTIRE reply is sometimes meta-commentary instead of a
@@ -2579,8 +2593,13 @@ func checkModel(name: String, callback: Callable) -> void:
 		var problems: Array = []
 		if not caps.has("vision"):
 			problems.append("не умеет видеть картинки (нет vision)")
+		# 055.0002: размышления мешают, только если их нельзя выключить
+		# (Ollama: thinking.values без false). У Gemma 4 - [false, true], подходит.
 		if caps.has("thinking"):
-			problems.append("с режимом размышлений (thinking)")
+			var th = parsed.get("thinking", {})
+			var values: Array = th.get("values", []) if th is Dictionary else []
+			if not values.has(false):
+				problems.append("с режимом размышлений (thinking), который нельзя выключить")
 		callback.call(", ".join(problems))
 	)
 	if http.request("http://127.0.0.1:11434/api/show", ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"model": name})) != OK:
@@ -2728,7 +2747,7 @@ func describeItemImage(path: String, withName: bool, cb: Callable) -> void:
 		cb.call("", "")
 		return
 	var payload := {"model": model, "prompt": ITEM_NAME_PROMPT if withName else ITEM_DESCRIBE_PROMPT, "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
-		"stream": false, "keep_alive": "1m", "options": {"temperature": 0.2, "num_predict": 40, "num_ctx": 4096}}
+		"stream": false, "think": false, "keep_alive": "1m", "options": {"temperature": 0.2, "num_predict": 40, "num_ctx": 4096}}
 	var parsed = await _ollamaJson("/api/generate", payload)
 	var desc := ""
 	var name := ""
@@ -2794,6 +2813,7 @@ func listAvailableModels() -> void:
 ## Для модели не из списка текущие значения не трогаем.
 const MODEL_PRESETS := {
 	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
+	"gemma4:12b": [0.8, 1.1], # 055.0002: пока как у gemma3 - уточнить на стенде
 	"gemma3:12b": [0.8, 1.1], # 054.999: стенд talk 6 вариантов - 1.0 грубит ("псина"), 0.6 суше; 0.8/1.1 живее и связнее
 	"ministral-3:14b": [0.5, 1.1], # 054.99: было 0.6 - тест: 0.6 путала род, 0.45-0.5 точнее отвечает на вопрос
 }
@@ -2957,6 +2977,10 @@ func checkRegistry(name: String) -> Dictionary:
 		thinking = tpl is String and tpl.to_lower().contains("think")
 	var vision := hasProjector or families.has("clip") or VISION_FAMILIES.has(family)
 	var problems: Array = []
+	# 055.0002: по паспорту не видно, выключаются ли размышления (у Gemma 4 - да) -
+	# не отклоняем заранее, а проверяем после скачивания (checkModel).
+	if thinking and vision:
+		return unsure
 	if thinking:
 		problems.append("с режимом размышлений (thinking)")
 	if not vision and TEXT_FAMILIES.has(family):
