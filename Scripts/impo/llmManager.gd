@@ -61,7 +61,7 @@ const NUM_CTX_BY_MODEL := {
 	"qwen3-vl:8b-instruct": 6144,
 	"ministral-3:14b": 9216,
 	"gemma3:12b": 8192, # 054.999: третья рекомендованная (решение Alex)
-	"gemma4:12b": 8192, # 055.0002: кандидат на замену gemma3 (стенд border 23.10)
+	"gemma4:12b": 8192, # 055.002: кандидат на замену gemma3 (стенд border 23.10)
 }
 func numCtx() -> int:
 	return int(NUM_CTX_BY_MODEL.get(modelName, 8192))
@@ -1693,7 +1693,7 @@ func _stripDisplayTags(line: String) -> String:
 var _heyRegex := RegEx.create_from_string("^(Гей|Хей)(?=[\\s,!?.—-])")
 ## *Описания действий* (*покраснела*, *хвостом махнула*) модель иногда пишет вопреки
 ## правилам. 054.999 их вырезала (и не срабатывало - звёздочки удалялись раньше);
-## 055.0002: ОСТАВЛЯЕМ со звёздочками - погружает в РП (решение Alex 23.10).
+## 055.002: ОСТАВЛЯЕМ со звёздочками - погружает в РП (решение Alex 23.10).
 ## Убираем только одиночные звёздочки (обрывки после обрезки фразы).
 var _starActionRegex := RegEx.create_from_string("\\*[^*]{1,40}\\*")
 var _emojiRegex := RegEx.create_from_string("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{FE0F}]")
@@ -2259,7 +2259,7 @@ func _processQueue() -> void:
 		"keep_alive": "30m",
 		"prompt": job["prompt"],
 		"stream": false,
-		"think": false, # 055.0002: у Gemma 4 и др. размышления отключаемые - выключаем (старым моделям не мешает)
+		"think": false, # 055.002: у Gemma 4 и др. размышления отключаемые - выключаем (старым моделям не мешает)
 		"options": {
 			"repeat_penalty": repetitionGuard,
 			"temperature": float(job.get("temperature", creativity)), # повтор ответа в чате идёт чуть "смелее"
@@ -2593,7 +2593,7 @@ func checkModel(name: String, callback: Callable) -> void:
 		var problems: Array = []
 		if not caps.has("vision"):
 			problems.append("не умеет видеть картинки (нет vision)")
-		# 055.0002: размышления мешают, только если их нельзя выключить
+		# 055.002: размышления мешают, только если их нельзя выключить
 		# (Ollama: thinking.values без false). У Gemma 4 - [false, true], подходит.
 		if caps.has("thinking"):
 			var th = parsed.get("thinking", {})
@@ -2813,7 +2813,7 @@ func listAvailableModels() -> void:
 ## Для модели не из списка текущие значения не трогаем.
 const MODEL_PRESETS := {
 	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
-	"gemma4:12b": [0.8, 1.1], # 055.0002: пока как у gemma3 - уточнить на стенде
+	"gemma4:12b": [0.8, 1.1], # 055.002: пока как у gemma3 - уточнить на стенде
 	"gemma3:12b": [0.8, 1.1], # 054.999: стенд talk 6 вариантов - 1.0 грубит ("псина"), 0.6 суше; 0.8/1.1 живее и связнее
 	"ministral-3:14b": [0.5, 1.1], # 054.99: было 0.6 - тест: 0.6 путала род, 0.45-0.5 точнее отвечает на вопрос
 }
@@ -2977,7 +2977,7 @@ func checkRegistry(name: String) -> Dictionary:
 		thinking = tpl is String and tpl.to_lower().contains("think")
 	var vision := hasProjector or families.has("clip") or VISION_FAMILIES.has(family)
 	var problems: Array = []
-	# 055.0002: по паспорту не видно, выключаются ли размышления (у Gemma 4 - да) -
+	# 055.002: по паспорту не видно, выключаются ли размышления (у Gemma 4 - да) -
 	# не отклоняем заранее, а проверяем после скачивания (checkModel).
 	if thinking and vision:
 		return unsure
