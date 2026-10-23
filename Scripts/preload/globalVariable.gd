@@ -3,7 +3,7 @@ extends Node
 #i probably shouldve put these here earlier but better late than never
 
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
-const BUILD := "055.002"
+const BUILD := "055.003"
 
 ## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
 ## видеть, что персонажи говорили, - фраза над головой быстро исчезает).

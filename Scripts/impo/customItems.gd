@@ -157,9 +157,14 @@ static func image(id: String) -> Image:
 ## гамма < 1 по яркости с сохранением оттенка. Тёмное остаётся тёмным, но с деталями,
 ## светлые части не пересвечиваются. Светлые предметы не трогаем. Подобрано на
 ## 28 предметах до/после (растяжка уровней пересвечивала, гамма к 0.40 - серела).
+## 055.003: в 055.002 (гамма к 0.30, не ниже 0.55) на почти чёрном столе - пелена,
+## «пересвет» (Alex, 8 из 28). Мягкий вариант (выбор Alex): тени чуть выше (к 0.20,
+## не ниже 0.75) + контраст внутри предмета x1.35 вокруг средней яркости - почти как
+## исходник, но детали чётче.
 const DARK_MEAN := 0.35
-const DARK_TARGET := 0.30
-const DARK_MIN_GAMMA := 0.55
+const DARK_TARGET := 0.20
+const DARK_MIN_GAMMA := 0.75
+const DARK_CONTRAST := 1.35
 
 static func liftDark(img: Image) -> Image:
 	var w := img.get_width()
@@ -178,6 +183,7 @@ static func liftDark(img: Image) -> Image:
 	if mean >= DARK_MEAN:
 		return img
 	var g := clampf(log(DARK_TARGET) / log(maxf(mean, 0.02)), DARK_MIN_GAMMA, 1.0)
+	var mid := pow(mean, g)
 	var out: Image = img.duplicate()
 	for y in h:
 		for x in w:
@@ -185,7 +191,8 @@ static func liftDark(img: Image) -> Image:
 			if c.a <= 0.0:
 				continue
 			var l := maxf(c.get_luminance(), 0.004)
-			var f := pow(l, g) / l
+			var l2 := clampf(mid + (pow(l, g) - mid) * DARK_CONTRAST, 0.0, 1.0)
+			var f := l2 / l
 			var r := c.r * f
 			var gg := c.g * f
 			var b := c.b * f
