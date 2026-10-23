@@ -147,9 +147,55 @@ static func image(id: String) -> Image:
 		return null
 	if img.get_format() != Image.FORMAT_RGBA8:
 		img.convert(Image.FORMAT_RGBA8)
-	img = pixelize(img)
+	img = liftDark(pixelize(img))
 	_imgCache[id] = {"mtime": mtime, "img": img}
 	return img
+
+
+## 055.002: тёмные предметы (чёрное оружие из Таркова) на тёмном столе почти не
+## различить (Alex). Если средняя яркость ниже DARK_MEAN - «вытягиваем тени»:
+## гамма < 1 по яркости с сохранением оттенка. Тёмное остаётся тёмным, но с деталями,
+## светлые части не пересвечиваются. Светлые предметы не трогаем. Подобрано на
+## 28 предметах до/после (растяжка уровней пересвечивала, гамма к 0.40 - серела).
+const DARK_MEAN := 0.35
+const DARK_TARGET := 0.30
+const DARK_MIN_GAMMA := 0.55
+
+static func liftDark(img: Image) -> Image:
+	var w := img.get_width()
+	var h := img.get_height()
+	var sum := 0.0
+	var n := 0
+	for y in h:
+		for x in w:
+			var c := img.get_pixel(x, y)
+			if c.a > 0.0:
+				sum += c.get_luminance()
+				n += 1
+	if n == 0:
+		return img
+	var mean := sum / n
+	if mean >= DARK_MEAN:
+		return img
+	var g := clampf(log(DARK_TARGET) / log(maxf(mean, 0.02)), DARK_MIN_GAMMA, 1.0)
+	var out: Image = img.duplicate()
+	for y in h:
+		for x in w:
+			var c := out.get_pixel(x, y)
+			if c.a <= 0.0:
+				continue
+			var l := maxf(c.get_luminance(), 0.004)
+			var f := pow(l, g) / l
+			var r := c.r * f
+			var gg := c.g * f
+			var b := c.b * f
+			var mx := maxf(r, maxf(gg, b))
+			if mx > 1.0:
+				r /= mx
+				gg /= mx
+				b /= mx
+			out.set_pixel(x, y, Color(r, gg, b, c.a))
+	return out
 
 
 static func pixelize(img: Image) -> Image:
