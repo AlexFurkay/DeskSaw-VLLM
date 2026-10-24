@@ -2932,7 +2932,7 @@ static func gbText(bytes: float) -> String:
 ## Зрение: отдельный блок зрения (projector), "clip" в семействах или семейство
 ## со встроенным зрением. Размышления: renderer/parser "...thinking" или шаблон
 ## с Think (так помечены qwen3:8b и даже qwen3-vl:8b без -instruct).
-const VISION_FAMILIES := ["qwen3vl", "qwen25vl", "qwen2vl", "mistral3", "gemma3", "mllama", "llava", "llama4", "minicpmv"]
+const VISION_FAMILIES := ["qwen3vl", "qwen25vl", "qwen2vl", "mistral3", "gemma3", "gemma4", "mllama", "llava", "llama4", "minicpmv"]
 const TEXT_FAMILIES := ["llama", "qwen2", "qwen3", "qwen3moe", "gemma2", "gemma", "phi3", "phi4", "mistral", "deepseek2", "gptoss", "granite", "command-r", "starcoder2", "nomic-bert", "bert"]
 const REGISTRY := "https://registry.ollama.ai/v2/"
 
