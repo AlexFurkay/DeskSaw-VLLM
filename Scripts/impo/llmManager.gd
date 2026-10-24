@@ -1232,12 +1232,28 @@ func buildItemPrompt(skinTag: String, itemDescription: String, stateHintText: St
 const CHAT_ACTIONS := {
 	"подойти": "come", "лечь": "lie", "сесть": "sit",
 	"встать": "stand", "прыгнуть": "jump", "отойти": "away",
+	"к предмету": "item", "пойти к предмету": "item", "взять": "item", # 055.005
 }
 const CHAT_ACTIONS_EN := {
 	"come": "come", "come here": "come", "come over": "come", "lie": "lie", "lie down": "lie", "sit": "sit",
 	"sit down": "sit", "stand": "stand", "stand up": "stand", "get up": "stand", "jump": "jump", "away": "away",
 	"go away": "away", "move away": "away", "step away": "away",
+	"go to item": "item", "go to the item": "item", "item": "item", "get item": "item", # 055.005
 }
+
+## 055.005: ИДЕЯ ALEX 2 - «предмет на экране, иди к нему». Человек показывает на
+## предмет на столе («вон банан лежит», «возьми», «съешь») - в запрос идёт, что
+## лежит на столе, и метка [ДЕЙСТВИЕ: к предмету]; персонаж идёт к нему (и ест,
+## если это еда и его об этом просили или он сам её хотел) - behavior._doChatAction.
+var chatItems: Array = [] # что лежит на столе (короткие имена), ставит behavior перед запросом
+const ITEM_REQUEST_STEMS := [" возьми", " бери", " вон он", " вон она", " вон оно", " вон там", " вон же", " иди к ", " подойди к ", " сходи к ", " сходи за", " лежит", " на экране", " на столе", " рядом с тобой", " ешь", " съешь", " кушай", " попробуй", " угощайся"]
+const ITEM_REQUEST_STEMS_EN := [" take it", " grab it", " grab the", " go get", " get it", " right there", " over there", " go to the", " it's on the", " on the screen", " on the desk", " next to you", " eat it", " eat the", " try it", " have it", " help yourself"]
+func asksForItem(text: String) -> bool:
+	var low := " " + text.to_lower() + " "
+	for st in Lang.pick(ITEM_REQUEST_STEMS, ITEM_REQUEST_STEMS_EN):
+		if low.contains(st):
+			return true
+	return false
 var _actionRegexEn := RegEx.create_from_string("\\[\\s*(?:ACTION|Action|action)\\s*:\\s*([^\\]]+)\\]")
 var _actionRegex := RegEx.create_from_string("\\[\\s*(?:ДЕЙСТВИЕ|Действие|действие)\\s*:\\s*([^\\]]+)\\]")
 
@@ -1579,6 +1595,10 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 		secretPart += "\nСобеседник сказал пошлость. Не подыгрывай, не называй цену и не соглашайся - даже в шутку или с условием (\"только если...\"). Осади, поддразни или отшути в своём характере, без пошлых слов."
 	if speakerSkin == "" and playerSkin != "":
 		secretPart = "\nПомни: %s перед тобой - это и есть твой человек, просто в облике персонажа. Других людей рядом нет: не говори о человеке \"он\" или \"человек\" - обращайся к нему на \"ты\"." % PlayerManager.displayNameFor(playerSkin) + secretPart
+	# 055.005: человек показывает на предмет на столе - что там лежит и метка «к предмету»
+	if speakerSkin == "" and not chatItems.is_empty() and asksForItem(last):
+		prompt += "\nНа столе сейчас лежит: %s." % ", ".join(chatItems)
+		prompt += "\nСобеседник говорит о предмете на столе. Реши по характеру, пойдёшь ли к нему; ТОЛЬКО если идёшь, в самом конце допиши метку [ДЕЙСТВИЕ: к предмету]."
 	if _asksForAction(last):
 		prompt += "\nСобеседник просит тебя что-то сделать. Реши по характеру и настроению, согласиться или нет, и скажи это. ТОЛЬКО если соглашаешься, в самом конце допиши одну метку: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]."
 	if secretPart == "":
@@ -2512,7 +2532,15 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 		var actRe: RegEx = _actionRegexEn if Lang.isEn() else _actionRegex
 		var m := actRe.search(text)
 		if m:
-			chatAction = Lang.pick(CHAT_ACTIONS, CHAT_ACTIONS_EN).get(m.get_string(1).strip_edges().to_lower(), "")
+			var label := m.get_string(1).strip_edges().to_lower()
+			chatAction = Lang.pick(CHAT_ACTIONS, CHAT_ACTIONS_EN).get(label, "")
+			# 055.005: gemma пишет сама «к бургеру», «go to the banana» - это «к предмету»,
+			# а название - подсказка, к какому (behavior._goToItem)
+			if chatAction == "":
+				for pre in Lang.pick(["к ", "пойти к ", "подойти к "], ["go to the ", "go to ", "get the ", "take the "]):
+					if label.begins_with(pre):
+						chatAction = "item:" + label.trim_prefix(pre)
+						break
 			text = actRe.sub(text, "", true).strip_edges()
 
 	if not isPrefetchBatch:

@@ -1101,6 +1101,8 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 		playerState = "здоровье %.0f из 100%s" % [php, ", тяжёлые раны" if php <= 30.0 else (", есть раны" if php <= 60.0 else "")]
 	LLMManager.chatMood = moodSys.mood + moodSys.drugOffset # для тайны (secretBlock)
 	LLMManager.chatPetId = petId
+	LLMManager.chatItems = _deskItemNames() # 055.005: «вон банан лежит» - что на столе
+	_lastRequest = String(chatHistory[chatHistory.size() - 1].get("text", "")) if chatHistory.size() > 0 else ""
 	if chatHistory.size() > 0: # 055.005: «держи», «хочешь банан?» - ждём подарок
 		_notePlayerOffer(String(chatHistory[chatHistory.size() - 1].get("text", "")))
 	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), _recentSpoken(), func(text: String):
@@ -1124,6 +1126,7 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 ## Запасной вариант, если в ответе нет метки действия: в реплике игрока есть
 ## просьба, а в ответе - согласие без отказа.
 const CHAT_REQUEST_WORDS := {
+	"item": ["возьми", "бери", "вон он", "вон она", "вон там", "иди к ", "подойди к ", "сходи к", "сходи за", "съешь", "кушай", "попробуй", "угощайся"], # 055.005, первым: «подойди к банану»
 	"come": ["подойди", "иди сюда", "иди ко мне", "ко мне", "сюда", "подходи"],
 	"lie": ["ляг", "ложись", "ляжь", "приляг"],
 	"sit": ["сядь", "садись", "присядь"],
@@ -1135,6 +1138,7 @@ const CHAT_YES_WORDS := ["иду", "бегу", "сейчас", "ладно", "х
 const CHAT_NO_WORDS := ["нет", "не буду", "не хочу", "не пойду", "не стану", "ни за что", "отстань", "сам "]
 
 const CHAT_REQUEST_WORDS_EN := {
+	"item": [" take it", " grab it", " grab the", " go get", " get it", " go to the", " eat it", " eat the", " try it", " help yourself"], # 055.005
 	"come": [" come here", " come to me", " come over", " come closer", "get over here"],
 	"lie": [" lie down", " lay down"],
 	"sit": [" sit"],
@@ -1346,6 +1350,14 @@ func _doChatAction(action: String) -> void:
 		return
 	print("CHAT ACTION[%s]: %s" % [_skinTag(), action])
 	_commandUntil = Time.get_ticks_msec() + 15000
+	# 055.005: «item:бургеру» - к предмету с подсказкой; «подойти» в ответ на
+	# «подойди к Кедру» (gemma так и пишет) - тоже к предмету
+	var itemHint := ""
+	if action.begins_with("item"):
+		itemHint = action.trim_prefix("item").trim_prefix(":")
+		action = "item"
+	elif action == "come" and LLMManager.asksForItem(_lastRequest) and not _deskItemBodies().is_empty():
+		action = "item"
 	match action:
 		"come", "away":
 			if moveSys.currstate == moveSys.states.resting:
@@ -1368,7 +1380,77 @@ func _doChatAction(action: String) -> void:
 				wander = true
 		"jump":
 			moveSys.jump()
+		"item":
+			await _goToItem(itemHint)
 	_commandUntil = 0
+
+
+## 055.005: предметы на столе (тела предметов в сцене, которые ИИ знает).
+func _deskItemBodies() -> Array:
+	var result: Array = []
+	var scene := get_tree().current_scene
+	if scene == null:
+		return result
+	for n in scene.get_children():
+		if n is RigidBody2D and not n.is_queued_for_deletion() and _itemDesc(_itemKey(n)) != "":
+			result.append(n)
+	return result
+
+## Короткие имена для запроса: «банан», «Кедр» (не длинные описания).
+func _deskItemNames() -> Array:
+	var names: Array = []
+	for b in _deskItemBodies():
+		var key := _itemKey(b)
+		var nm := String(CustomItems.entry(key).get("name", "")) if key.begins_with(CustomItems.KEY_PREFIX) else String(ITEM_DESCRIPTIONS.get(key, key))
+		if nm != "" and not names.has(nm):
+			names.append(nm)
+		if names.size() >= 6:
+			break
+	return names
+
+var _lastRequest := "" # последняя реплика человека - к какому предмету звали
+const EAT_WORDS := [" ешь", " съешь", " кушай", " попробуй", " угощайся", " бери", " возьми", " это тебе"]
+const EAT_WORDS_EN := [" eat", " try it", " help yourself", " take it", " grab it", " for you", " have it"]
+
+## Идти к предмету: названный в просьбе, иначе тот, что персонаж хотел, иначе
+## ближайший. Еду - съесть, если просили («ешь», «бери») или сам её хотел.
+func _goToItem(hint: String = "") -> void:
+	var bodies := _deskItemBodies()
+	if bodies.is_empty():
+		return
+	var low := " " + _lastRequest.to_lower() + " "
+	var wantKey: String = _itemMentioned(low)[0]
+	if hint != "": # «к бургеру» - сравниваем начало слова (падежи)
+		var h := hint.to_lower().strip_edges()
+		for b in bodies:
+			var k := _itemKey(b)
+			var nm := (String(CustomItems.entry(k).get("name", "")) if k.begins_with(CustomItems.KEY_PREFIX) else String(ITEM_DESCRIPTIONS.get(k, k))).to_lower()
+			if nm != "" and (h.begins_with(nm.left(4)) or nm.begins_with(h.left(4))):
+				wantKey = k
+				break
+	var target: Node2D = null
+	var best := INF
+	for b in bodies:
+		var key := _itemKey(b)
+		var score: float = absf(b.global_position.x - moveSys.rigid.global_position.x)
+		if wantKey != "" and key == wantKey:
+			score -= 100000.0
+		elif wantKey == "" and _wishKey != "" and (key == _wishKey or (_wishKey == "food" and _isFoodKey(key))):
+			score -= 50000.0
+		if score < best:
+			best = score
+			target = b
+	if target == null:
+		return
+	var key := _itemKey(target)
+	var x: float = target.global_position.x
+	var side: float = signf(moveSys.rigid.global_position.x - x)
+	await _walkTo(clampf(x + (side if side != 0.0 else 1.0) * 40.0, 60.0, float(GlobalVariable.screenWidth) - 60.0), true)
+	if not is_instance_valid(target) or not _isFoodKey(key):
+		return
+	var eat := _hasAny(low, Lang.pick(EAT_WORDS, EAT_WORDS_EN)) or key == _wishKey or (_wishKey == "food" and Time.get_ticks_msec() - _wishAt < GIFT_WINDOW_MS)
+	if eat and target.global_position.distance_to(moveSys.rigid.global_position) < 260.0 * float(gbData.settings.get("petScale", 4.0)) / 4.0:
+		hungerHandler._onItemEnter(target) # как будто еда попала в рот: вкус, «наелся», «не буду»
 
 
 func _forceSleep() -> void:
