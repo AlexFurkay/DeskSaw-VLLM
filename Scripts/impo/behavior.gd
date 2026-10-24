@@ -1131,21 +1131,35 @@ const CHAT_REQUEST_WORDS := {
 const CHAT_YES_WORDS := ["иду", "бегу", "сейчас", "ладно", "хорошо", "так и быть", "давай", "уже", "подойду", "лягу", "сяду", "встаю", "прыгаю", "ок"]
 const CHAT_NO_WORDS := ["нет", "не буду", "не хочу", "не пойду", "не стану", "ни за что", "отстань", "сам "]
 
+const CHAT_REQUEST_WORDS_EN := {
+	"come": [" come here", " come to me", " come over", " come closer", "get over here"],
+	"lie": [" lie down", " lay down"],
+	"sit": [" sit"],
+	"stand": [" stand up", " get up"],
+	"jump": [" jump"],
+	"away": [" go away", " step away", " move away", " back off"],
+}
+const CHAT_YES_WORDS_EN := ["coming", "on my way", "okay", " ok", "fine", "alright", "all right", "sure", "here i come",
+	"i'll come", "lying down", "sitting down", "standing up", "jumping", "if you insist", "as you wish"]
+const CHAT_NO_WORDS_EN := [" no ", " no,", " no!", " no.", "won't", "don't want", "not going", " never", "no way",
+	"leave me alone", "make me", "do it yourself"]
+
 func _guessChatAction(request: String, reply: String) -> String:
-	var req := request.to_lower()
+	var req := " " + request.to_lower() # пробел впереди - начало слова для EN-списков
 	var rep := " " + reply.to_lower() + " "
-	for w in CHAT_NO_WORDS:
+	for w in Lang.pick(CHAT_NO_WORDS, CHAT_NO_WORDS_EN):
 		if rep.contains(w):
 			return ""
 	var agreed := false
-	for w in CHAT_YES_WORDS:
+	for w in Lang.pick(CHAT_YES_WORDS, CHAT_YES_WORDS_EN):
 		if rep.contains(w):
 			agreed = true
 			break
 	if not agreed:
 		return ""
-	for action in CHAT_REQUEST_WORDS.keys():
-		for w in CHAT_REQUEST_WORDS[action]:
+	var requestWords: Dictionary = Lang.pick(CHAT_REQUEST_WORDS, CHAT_REQUEST_WORDS_EN)
+	for action in requestWords.keys():
+		for w in requestWords[action]:
 			if req.contains(w):
 				return action
 	return ""

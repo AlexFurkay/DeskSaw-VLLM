@@ -297,6 +297,7 @@ func isFemale(skinName: String) -> bool:
 var _genderRegex := RegEx.create_from_string("\\{([^{}|]*)\\|([^{}|]*)\\}")
 
 func _g(skinName: String, text: String) -> String:
+	text = Lang.tp(text) # EN: русские куски запроса -> английские (до подстановки рода)
 	return _genderRegex.sub(text, "$1" if isFemale(skinName) else "$2", true)
 
 
@@ -348,7 +349,7 @@ func _loadLore() -> void:
 
 func _createLoreTemplate(path: String, skinName: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_string("Ты %s.\n\nОпиши здесь: происхождение персонажа, характер, как он относится к человеку рядом с собой, тон речи.\nЭтот файл читается заново командой reload_lore в консоли." % skinName)
+	f.store_string(Lang.tp("Ты %s.\n\nОпиши здесь: происхождение персонажа, характер, как он относится к человеку рядом с собой, тон речи.\nЭтот файл читается заново командой reload_lore в консоли." % skinName))
 	f.close()
 
 
@@ -413,6 +414,8 @@ func _cutToFirstSentence(s: String) -> String:
 ## Heuristic: does this look like the model broke character entirely and
 ## started writing in English/meta-language instead of a Russian line?
 func _looksLikeGarbage(text: String) -> bool:
+	if Lang.isEn():
+		return _looksLikeGarbageEn(text)
 	var latinCount := 0
 	var cyrillicCount := 0
 	var upperCyr := 0
@@ -432,6 +435,27 @@ func _looksLikeGarbage(text: String) -> bool:
 	return text.split(" ", false).size() >= 5 and upperCyr * 10 > cyrillicCount * 7
 
 
+## EN: мусор - если не-латинских букв (кириллица, иероглифы) больше 10 и больше
+## латиницы, или длинная фраза почти целиком ЗАГЛАВНЫМИ.
+func _looksLikeGarbageEn(text: String) -> bool:
+	var latin := 0
+	var other := 0
+	var upper := 0
+	for c in text:
+		var code := c.unicode_at(0)
+		if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
+			latin += 1
+			if code <= 90:
+				upper += 1
+		elif (code >= 0x0400 and code <= 0x04FF) or (code >= 0x3000 and code <= 0x9FFF) or (code >= 0xAC00 and code <= 0xD7AF):
+			other += 1
+	if other > 10 and other > latin:
+		return true
+	if other > 0 and other * 4 > latin:
+		return true # заметный кусок не на английском
+	return text.split(" ", false).size() >= 5 and upper * 10 > latin * 7
+
+
 ## Catches the model breaking character to comment on the TASK itself
 ## instead of writing a line (e.g. "Примечание: раз требовалось 7 фраз, я
 ## выдал ровно семь строк.", or a lone leftover header like "Дополнительно").
@@ -449,11 +473,17 @@ const _META_MARKERS := [
 	"исправленный", "вариант:", "дополнительная строка", "по стилю", "в духе твое",
 	"от лица самой", "от лица самого",
 ]
+const _META_MARKERS_EN := [
+	"note:", "p.s.", "as requested", "as you asked", "according to the task", "in the task",
+	"here are", "here is a", " lines:", "lines.", "phrases:", "phrases.", "total:", "check:", "corrected",
+	"version:", "additional line", "in the style", "in your style", "from the perspective",
+	"alternative", "the user", "as an ai", "language model", "i cannot fulfill",
+]
 ## Число + "строк"/"фраз" ("15 строк", "10 фраз") - отчёт модели о задании.
-var _metaCountRegex := RegEx.create_from_string("\\d+\\s*(строк|фраз|реплик)")
+var _metaCountRegex := RegEx.create_from_string(Lang.pick("\\d+\\s*(строк|фраз|реплик)", "\\d+\\s*(lines|phrases|sentences|replies)"))
 func _looksLikeMetaCommentary(text: String) -> bool:
 	var lower := text.to_lower().strip_edges()
-	for marker in _META_MARKERS:
+	for marker in Lang.pick(_META_MARKERS, _META_MARKERS_EN):
 		if lower.contains(marker):
 			return true
 	if _metaCountRegex.search(lower) != null:
@@ -480,11 +510,15 @@ const _ROLE_INVERSION_PATTERNS := [
 	"держать вас", "держу вас", "тебя в руках у меня",
 	"неудобно так держать", "тяжело так держать", "неудобно держать так",
 ]
+const _ROLE_INVERSION_PATTERNS_EN := [
+	"holding you", "hold you up", "held you", "carrying you", "carry you",
+	"you in my hands", "you in my arms", "awkward to hold", "hard to hold", "heavy to hold",
+]
 func _looksLikeRoleInversion(category: String, text: String) -> bool:
 	if not _HELD_CATEGORIES.has(category):
 		return false
 	var lower := text.to_lower()
-	for pattern in _ROLE_INVERSION_PATTERNS:
+	for pattern in Lang.pick(_ROLE_INVERSION_PATTERNS, _ROLE_INVERSION_PATTERNS_EN):
 		if lower.contains(pattern):
 			return true
 	return false
@@ -568,6 +602,14 @@ const _MOTIF_STOP := ["просто", "сейчас", "только", "очен�
 ## подряд "топила лёд" - а слова короче 5 букв раньше не считались). Служебные
 ## короткие слова исключаем.
 const _MOTIF_SHORT_STOP := ["что", "как", "это", "мне", "меня", "тебе", "тебя", "ты", "мы", "вы", "они", "она", "оно", "его", "её", "ещё", "уже", "вот", "так", "там", "тут", "где", "кто", "для", "без", "над", "под", "при", "про", "или", "нет", "даже", "всё", "все", "был", "была", "было", "если", "чем", "тоже", "свой", "твой", "мой", "моя", "твоя", "себя", "себе", "тем", "этот", "эта", "эти", "раз", "ведь", "лишь", "будто", "пока", "надо", "могу", "хочу", "есть", "буду", "иди", "давай", "знаю", "вижу", "хоть", "чуть", "ну", "да", "же", "ли", "бы", "не", "ни", "но", "а", "и"]
+const _MOTIF_STOP_EN := ["really", "about", "because", "maybe", "today", "always", "there", "where", "would", "could",
+	"should", "nothing", "little", "something", "think", "these", "those", "their", "being", "still", "right", "please"]
+const _MOTIF_SHORT_STOP_EN := ["the", "and", "you", "your", "yours", "she", "her", "him", "his", "its", "are", "was",
+	"were", "for", "with", "from", "but", "not", "yes", "did", "does", "have", "has", "had", "can", "will", "just",
+	"that", "this", "what", "how", "who", "why", "when", "then", "than", "too", "very", "all", "some", "any", "out",
+	"off", "over", "here", "now", "hmm", "well", "like", "get", "got", "let", "more", "much", "even", "only", "into",
+	"yet", "also", "each", "they", "them", "our", "ours", "mine", "don", "can", "won", "isn", "aren", "didn", "want",
+	"need", "know", "see", "come", "go", "make", "one", "way", "doing", "it's", "i'm", "you're", "that's"]
 func _obsessiveWords(tag: String) -> Dictionary:
 	var recent: Array = _recentLinesByCategory.get(tag, [])
 	recent = recent.slice(maxi(0, recent.size() - 6))
@@ -581,10 +623,10 @@ func _obsessiveWords(tag: String) -> Dictionary:
 	for line in recent:
 		var seen := {}
 		for w in _normWords(String(line)):
-			if w.length() < 3 or not _isCyrillicWord(w) or (w.length() < 5 and _MOTIF_SHORT_STOP.has(w)) or _isSignatureWord(skin, w):
+			if w.length() < 3 or not _isCyrillicWord(w) or (w.length() < 5 and Lang.pick(_MOTIF_SHORT_STOP, _MOTIF_SHORT_STOP_EN).has(w)) or _isSignatureWord(skin, w):
 				continue
 			var stem := w.substr(0, 5)
-			if _MOTIF_STOP.has(w) or seen.has(stem):
+			if Lang.pick(_MOTIF_STOP, _MOTIF_STOP_EN).has(w) or seen.has(stem):
 				continue
 			seen[stem] = true
 			counts[stem] = int(counts.get(stem, 0)) + 1
@@ -623,6 +665,8 @@ func _isSignatureWord(skin: String, w: String) -> bool:
 
 func _isCyrillicWord(w: String) -> bool:
 	var c := w.unicode_at(0)
+	if Lang.isEn():
+		return c >= 97 and c <= 122 # EN: слово на латинице (имена тоже - их держат signatureWords)
 	return (c >= 0x0430 and c <= 0x044F) or c == 0x0451
 
 
@@ -675,12 +719,18 @@ const _SKIN_STOP := ["тебя", "меня", "тебе", "себя", "хочу",
 	"твоих", "твоим", "свой", "своей", "свою", "нравится", "хочется", "давай", "пожалуйста", "знаешь",
 	"сегодня", "вообще", "равно", "готов", "готова", "рядом", "чувствую", "стало", "стала", "стал", "есть",
 	"всех", "весь", "вся", "лучше", "пусть", "мной", "тобой", "него", "неё", "этой", "этом", "так", "раз"]
+const _SKIN_STOP_EN := ["your", "yours", "just", "want", "need", "thank", "thanks", "good", "very", "only", "right",
+	"when", "then", "maybe", "even", "always", "here", "nothing", "little", "will", "would", "could", "should", "this",
+	"that", "these", "those", "there", "their", "they", "them", "what", "with", "from", "have", "been", "were", "like",
+	"please", "know", "today", "really", "ready", "near", "feel", "better", "much", "more", "still", "some",
+	"something", "about", "over", "into", "make", "come", "going", "back", "time", "it's", "don't", "i'm", "you're",
+	"can't", "won't", "that's", "does", "doing", "done", "said", "say", "tell", "look", "well", "okay"]
 const SKIN_WORN_WINDOW := 15 # последних фраз каждой ситуации скина
 const SKIN_WORN_SHARE := 0.10 # слово в 10%+ этих фраз - перебор
 func _contentStems(text: String, skin: String = "") -> Dictionary:
 	var stems := {}
 	for w in _normWords(text):
-		if w.length() < 4 or not _isCyrillicWord(w) or _SKIN_STOP.has(w) or (skin != "" and _isSignatureWord(skin, w)):
+		if w.length() < 4 or not _isCyrillicWord(w) or Lang.pick(_SKIN_STOP, _SKIN_STOP_EN).has(w) or (skin != "" and _isSignatureWord(skin, w)):
 			continue
 		var st := w.substr(0, 4)
 		if not stems.has(st):
@@ -760,7 +810,7 @@ func _stripRepeatedTail(tag: String, text: String) -> String:
 	if not repeated:
 		return text
 	var cut := -1
-	for sep in [" — ", " - ", ", но ", ": ", ", "]:
+	for sep in Lang.pick([" — ", " - ", ", но ", ": ", ", "], [" — ", " - ", ", but ", ": ", ", "]):
 		cut = maxi(cut, text.rfind(sep))
 	if cut <= 0:
 		return text
@@ -855,8 +905,12 @@ const FLIRT_MOOD := 70.0 # 054.9993: флирт - только при настр
 ## (в списке было "грудь покаж" и "разденься") - основы короче.
 const _CRUDE_STEMS := ["раздвин", "секс", "трах", "переспа", "член", "сиськ", "сись", "грудь", "груди", "голая", "голый", "голой", "раздет", "раздев", "раздень", "разден", "минет", "отсос", "кончи", "возбужд", "в постел", "интим", "жопк", "попк", "пизд", "ебат", "выеб", "сосать", "лифчик", "трусик"]
 
+## EN: по началу слова - "ass", "bra", "sex" как подстроки ловили бы "glass", "brave", "Sussex".
+var _crudeRegexEn := RegEx.create_from_string("(?<![a-z])(sex|fuck|naked|nude|undress|strip for|boob|tits|titties|breast|dick|cock|pussy|blowjob|blow job|horny|panties|bra\\b|booty|ass\\b|asses|butt\\b|make love|sleep with me|in bed with|spread your legs|spread them|take off your|cum\\b|suck my|lick my)")
 func _isCrude(text: String) -> bool:
 	var low := text.to_lower()
+	if Lang.isEn():
+		return _crudeRegexEn.search(low) != null
 	for st in _CRUDE_STEMS:
 		if low.contains(st):
 			return true
@@ -937,7 +991,7 @@ func _speechFor(skin: String) -> String:
 	if not _speechBySkin.has(skin + str(useLiteLore())):
 		var text := ""
 		var lore := _loreFor(skin)
-		for head in ["Как ты говоришь:", "Тон речи:"]:
+		for head in ["Как ты говоришь:", "Тон речи:", "How you speak:", "Tone of speech:"]:
 			var i := lore.find(head)
 			if i >= 0:
 				var rest := lore.substr(i + head.length()).strip_edges()
@@ -1157,6 +1211,12 @@ const CHAT_ACTIONS := {
 	"подойти": "come", "лечь": "lie", "сесть": "sit",
 	"встать": "stand", "прыгнуть": "jump", "отойти": "away",
 }
+const CHAT_ACTIONS_EN := {
+	"come": "come", "come here": "come", "come over": "come", "lie": "lie", "lie down": "lie", "sit": "sit",
+	"sit down": "sit", "stand": "stand", "stand up": "stand", "get up": "stand", "jump": "jump", "away": "away",
+	"go away": "away", "move away": "away", "step away": "away",
+}
+var _actionRegexEn := RegEx.create_from_string("\\[\\s*(?:ACTION|Action|action)\\s*:\\s*([^\\]]+)\\]")
 var _actionRegex := RegEx.create_from_string("\\[\\s*(?:ДЕЙСТВИЕ|Действие|действие)\\s*:\\s*([^\\]]+)\\]")
 
 ## Случайный тон ответа в чате - чтобы разговор не был однотонным.
@@ -1311,7 +1371,7 @@ func _playerFormRule(skinTag: String, playerSkin: String) -> String:
 	# и его персонаж - два разных существа
 	var out := "\nЭтот персонаж и есть твой человек - говори с ним на 'ты', а не о нём в третьем лице."
 	var rel := relationTo(skinTag, playerSkin)
-	if rel != "" and rel != "своя" and rel != "свой":
+	if rel != "" and rel != "своя" and rel != "свой" and rel.to_lower() != "own":
 		out += "\nК его виду ты относишься так: " + rel + ". Но внутри - твой человек, и к нему ты относишься как всегда: вид можешь подколоть, человека - нет."
 	if isFemale(playerSkin):
 		out += "\nОн сейчас в женском облике - обращайся в женском роде ('ты пришла'); изредка, не в каждой фразе, можешь по-доброму обыграть, что внутри твой человек-парень."
@@ -1470,6 +1530,9 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 ## в SAVE.json -> saw[petId].secret и пропадает вместе с персонажем: удалить и
 ## создать заново, full_reset - тайну надо заслужить снова (решение Alex 19.10).
 const SECRET_ASK_STEMS := ["лаборатор", "прошл", "откуда ты", "тайн", "секрет", "клетк", "тест", "делали с тобой", "с тобой делали", "корпорац", "расскажи о себе", "скрываешь", "что с тобой было"]
+## EN: с пробелом впереди - начало слова (текст тоже дополняется пробелом): " lab" не ловит "label".
+const SECRET_ASK_STEMS_EN := [" lab", " past", "where are you from", "where do you come from", " secret", " cage",
+	" test", "what did they do", "did they do to you", "corporation", "tell me about yourself", " hiding", "what happened to you"]
 const SECRET_MOOD := 60.0
 const SECRET_STEPS := 4
 const SECRET_GAP_MS := 60000   # 054.9991: шаг - через минуту ИЛИ через SECRET_GAP_MSGS реплик о другом (Alex)
@@ -1508,9 +1571,10 @@ func _saveSecret(petId: String) -> void:
 ## Прямой вопрос о тайне (SECRET_ASK_ANY) засчитывается у всех: у Експи свой
 ## список заменял общий, "ты что-то скрываешь?" не считалось (стенд sec3, 20.10).
 const SECRET_ASK_ANY := ["тайн", "секрет", "скрываешь", "скрывает", "скрыва", "прячешь", "утаива", "правду", "расскажи о себе"]
+const SECRET_ASK_ANY_EN := [" secret", " hiding", "hide something", "conceal", "the truth", "tell me about yourself", "keeping from me"]
 func _asksAboutSecret(skin: String, text: String) -> bool:
-	var low := text.to_lower()
-	var stems: Array = SECRET_ASK_ANY + passport(skin).get("secretAsk", SECRET_ASK_STEMS)
+	var low := " " + text.to_lower()
+	var stems: Array = Lang.pick(SECRET_ASK_ANY, SECRET_ASK_ANY_EN) + passport(skin).get("secretAsk", Lang.pick(SECRET_ASK_STEMS, SECRET_ASK_STEMS_EN))
 	for st in stems:
 		if low.contains(st):
 			return true
@@ -1576,13 +1640,16 @@ func _secretTextFor(skin: String) -> String:
 const _SECRET_STEM_STOP := ["челов", "котор", "никог", "всегд", "тольк", "потом", "очень", "когда", "своих", "этого",
 	"здесь", "больш", "сейча", "может", "чтобы", "почем", "сразу", "такие", "такой", "обрат", "иногд", "никто", "никем"]
 
+const _SECRET_STEM_STOP_EN := ["human", "never", "alway", "about", "where", "there", "their", "which", "would", "could",
+	"every", "other", "after", "befor", "becau", "somet", "nothi", "someo", "anyon", "thing", "being", "still", "again",
+	"until", "these", "those", "reall", "think"]
 func _secretStems(secret: String) -> Array:
 	var stems: Array = []
 	for w in _normWords(secret):
 		if w.length() < 5:
 			continue
 		var stem := w.substr(0, 5)
-		if not _SECRET_STEM_STOP.has(stem) and not stems.has(stem):
+		if not Lang.pick(_SECRET_STEM_STOP, _SECRET_STEM_STOP_EN).has(stem) and not stems.has(stem):
 			stems.append(stem)
 	return stems
 
@@ -1632,9 +1699,11 @@ func secretSetback(skin: String, petId: String) -> void:
 ## Собеседник спрашивает о прошлых словах ("что ты сказала", "почему", "помнишь").
 const PAST_STEMS := ["сказал", "говорил", "имел в виду", "имела в виду", "почему", "зачем ты", "помнишь", "о чём", "о чем", "что это было", "про экран", "что ты там"]
 
+const PAST_STEMS_EN := ["you said", "did you say", "you were saying", "you mean", "did you mean", "why", "what for",
+	"remember", "what about", "what was that", "about the screen", "what was it", "what were you", "say again", "repeat"]
 func _asksAboutPast(text: String) -> bool:
 	var low := text.to_lower()
-	for st in PAST_STEMS:
+	for st in Lang.pick(PAST_STEMS, PAST_STEMS_EN):
 		if low.contains(st):
 			return true
 	return false
@@ -1643,9 +1712,11 @@ func _asksAboutPast(text: String) -> bool:
 ## Речь о еде в реплике собеседника (тогда в запрос - вкусы персонажа).
 const FOOD_STEMS := ["ед", "еду", "есть", "поесть", "куша", "голод", "корм", "жра", "плот", "бургер", "пицц", "хлеб", "банан", "сок", "фрукт", "вкус", "мяс", "перекус", "обед", "ужин", "завтрак"]
 
+const FOOD_STEMS_EN := ["food", "eat", "ate", "hungry", "hunger", "feed", "snack", "meal", "lunch", "dinner", "breakfast",
+	"flesh", "burger", "pizza", "bread", "banana", "juice", "fruit", "geofruit", "taste", "tasty", "delicious", "meat", "yum"]
 func _aboutFood(text: String) -> bool:
 	for w in _normWords(text):
-		for st in FOOD_STEMS:
+		for st in Lang.pick(FOOD_STEMS, FOOD_STEMS_EN):
 			if w.begins_with(st) and (st.length() > 2 or w.length() <= 4):
 				return true
 	return false
@@ -1654,9 +1725,11 @@ func _aboutFood(text: String) -> bool:
 ## Просьба что-то сделать (подойти, лечь, сесть, встать, прыгнуть, отойти).
 const ACTION_REQUEST_STEMS := ["подойд", "подходи", "иди сюда", "иди ко мне", "ляг", "ложис", "приляг", "сядь", "садис", "присядь", "встань", "вставай", "прыгн", "прыгай", "подпрыгн", "отойд", "отходи", "уйди"]
 
+const ACTION_REQUEST_STEMS_EN := [" come here", " come to me", " come over", " come closer", "get over here", " lie down",
+	" lay down", " sit", " stand up", " get up", " jump", " go away", " step away", " move away", " back off", " get away"]
 func _asksForAction(text: String) -> bool:
-	var low := text.to_lower()
-	for st in ACTION_REQUEST_STEMS:
+	var low := " " + text.to_lower()
+	for st in Lang.pick(ACTION_REQUEST_STEMS, ACTION_REQUEST_STEMS_EN):
 		if low.contains(st):
 			return true
 	return false
@@ -1670,6 +1743,8 @@ const _PROFANITY_ROOTS := ["хуй", "ебат", "ёбан", "ебан", "зае
 ## выкидывали нормальные примеры, когда мат выключен.
 var _profanityWordStart := RegEx.create_from_string("(?<![а-яёa-z])(бля|сук|хер|хуе|хуё|ебл|ёб)") # хуе/ёб - только с начала слова ("страхуемый", "дёшево" не ловить)
 
+const _PROFANITY_ROOTS_EN := ["fuck", "shit", "bitch", "cunt", "asshole", "bastard", "motherf", "bullshit", "slut", "whore", "wank", "twat"]
+var _profanityWordStartEn := RegEx.create_from_string("(?<![a-z])(dick\\b|dicks\\b|piss|cock\\b|prick)")
 ## Strips profane example lines before they ever reach the model - relying
 ## on a prompt instruction alone isn't enough, since a capable model will
 ## happily imitate the STYLE of its examples, swearing included, even when
@@ -1716,10 +1791,10 @@ func _fixOutputQuirks(text: String) -> String:
 
 func _containsProfanity(text: String) -> bool:
 	var lower: String = text.to_lower()
-	for root in _PROFANITY_ROOTS:
+	for root in Lang.pick(_PROFANITY_ROOTS, _PROFANITY_ROOTS_EN):
 		if lower.find(root) != -1:
 			return true
-	return _profanityWordStart.search(lower) != null
+	return (_profanityWordStartEn if Lang.isEn() else _profanityWordStart).search(lower) != null
 
 
 func _filterExamplesForProfanity(lines: Array) -> Array:
@@ -2352,10 +2427,11 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 	# текста как "<act:come>" - behavior.replyToPlayer выполнит действие.
 	var chatAction := ""
 	if _currentTag.ends_with(":chat"):
-		var m := _actionRegex.search(text)
+		var actRe: RegEx = _actionRegexEn if Lang.isEn() else _actionRegex
+		var m := actRe.search(text)
 		if m:
-			chatAction = CHAT_ACTIONS.get(m.get_string(1).strip_edges().to_lower(), "")
-			text = _actionRegex.sub(text, "", true).strip_edges()
+			chatAction = Lang.pick(CHAT_ACTIONS, CHAT_ACTIONS_EN).get(m.get_string(1).strip_edges().to_lower(), "")
+			text = actRe.sub(text, "", true).strip_edges()
 
 	if not isPrefetchBatch:
 		var rawReply := text
@@ -2586,7 +2662,7 @@ func checkModel(name: String, callback: Callable) -> void:
 	http.request_completed.connect(func(_result, response_code, _headers, body):
 		http.queue_free()
 		if response_code != 200:
-			callback.call("Ollama не знает такую модель (код %d)" % response_code)
+			callback.call(Lang.t("Ollama не знает такую модель (код %d)") % response_code)
 			return
 		var parsed = JSON.parse_string(body.get_string_from_utf8())
 		var caps: Array = parsed.get("capabilities", []) if parsed is Dictionary else []
@@ -2604,7 +2680,7 @@ func checkModel(name: String, callback: Callable) -> void:
 	)
 	if http.request("http://127.0.0.1:11434/api/show", ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"model": name})) != OK:
 		http.queue_free()
-		callback.call("не удалось спросить Ollama")
+		callback.call(Lang.t("не удалось спросить Ollama"))
 
 
 ## 054.995: список скачанных моделей для меню ai_model.
@@ -2673,13 +2749,13 @@ func _explainSlow(tps: float) -> void:
 						share = float(m.get("size_vram", 0)) / float(m["size"])
 		var msg := ""
 		if share >= 0.0 and share < 0.97:
-			msg = "ИИ отвечает медленно (%.0f ток/с): модель не влезла в видеопамять - на видеокарте только %d%%, остальное в обычной памяти. Видеопамять заняли другие программы: стрим или звонок в Discord, браузер, видеоплеер, игры. В Discord выключи аппаратное ускорение (Настройки - Расширенные), закрой лишнее и перезапусти DeskSaw - модель загрузится заново. Или выбери модель поменьше в model_manager (qwen3-vl:8b-instruct влезает в 8 ГБ)." % [tps, int(share * 100)]
+			msg = Lang.t("ИИ отвечает медленно (%.0f ток/с): модель не влезла в видеопамять - на видеокарте только %d%%, остальное в обычной памяти. Видеопамять заняли другие программы: стрим или звонок в Discord, браузер, видеоплеер, игры. В Discord выключи аппаратное ускорение (Настройки - Расширенные), закрой лишнее и перезапусти DeskSaw - модель загрузится заново. Или выбери модель поменьше в model_manager (qwen3-vl:8b-instruct влезает в 8 ГБ).") % [tps, int(share * 100)]
 		elif share >= 0.97:
 			# Ollama видит 100%, но на Windows драйвер NVIDIA при нехватке видеопамяти тихо
 			# переносит часть в общую память - и тогда тоже в разы медленнее (20.10)
-			msg = "ИИ отвечает медленно (%.0f ток/с). Ollama считает, что модель целиком в видеопамяти, но, скорее всего, видеопамяти впритык и драйвер тихо перенёс часть в обычную память. Проверь: Диспетчер задач - Производительность - GPU - \"Общая память графического процессора\": если там больше 0,3 ГБ, видеопамяти не хватает. Помогает закрыть или свернуть то, что держит видеокарту (браузер, плеер, второй стрим), выключить в Discord аппаратное ускорение и перезапустить DeskSaw. Или выбери модель поменьше в model_manager." % tps
+			msg = Lang.t("ИИ отвечает медленно (%.0f ток/с). Ollama считает, что модель целиком в видеопамяти, но, скорее всего, видеопамяти впритык и драйвер тихо перенёс часть в обычную память. Проверь: Диспетчер задач - Производительность - GPU - \"Общая память графического процессора\": если там больше 0,3 ГБ, видеопамяти не хватает. Помогает закрыть или свернуть то, что держит видеокарту (браузер, плеер, второй стрим), выключить в Discord аппаратное ускорение и перезапустить DeskSaw. Или выбери модель поменьше в model_manager.") % tps
 		else:
-			msg = "ИИ отвечает медленно (%.0f ток/с). Если идёт стрим или звонок в Discord - выключи в нём аппаратное ускорение (Настройки - Расширенные) и закрой лишние программы на видеокарте." % tps
+			msg = Lang.t("ИИ отвечает медленно (%.0f ток/с). Если идёт стрим или звонок в Discord - выключи в нём аппаратное ускорение (Настройки - Расширенные) и закрой лишние программы на видеокарте.") % tps
 		_logDebugLine("system", "SLOW", "%.1f tok/s, vram share %s" % [tps, ("%.0f%%" % (share * 100)) if share >= 0.0 else "?"])
 		Console.print("[color=YELLOW]" + msg + "[/color]")
 	)
@@ -2746,7 +2822,7 @@ func describeItemImage(path: String, withName: bool, cb: Callable) -> void:
 		_logDebugLine("items", "DESCRIBE", "нет установленной модели со зрением")
 		cb.call("", "")
 		return
-	var payload := {"model": model, "prompt": ITEM_NAME_PROMPT if withName else ITEM_DESCRIBE_PROMPT, "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
+	var payload := {"model": model, "prompt": Lang.tp(ITEM_NAME_PROMPT if withName else ITEM_DESCRIBE_PROMPT), "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
 		"stream": false, "think": false, "keep_alive": "1m", "options": {"temperature": 0.2, "num_predict": 40, "num_ctx": 4096}}
 	var parsed = await _ollamaJson("/api/generate", payload)
 	var desc := ""
@@ -2756,9 +2832,9 @@ func describeItemImage(path: String, withName: bool, cb: Callable) -> void:
 		if withName:
 			for line in raw.split("\n", false):
 				var l := line.strip_edges()
-				if l.to_lower().begins_with("название"):
+				if l.to_lower().begins_with("название") or l.to_lower().begins_with("name"):
 					name = _cleanItemDescription(l.get_slice(":", 1)) if l.contains(":") else ""
-				elif l.to_lower().begins_with("описание"):
+				elif l.to_lower().begins_with("описание") or l.to_lower().begins_with("description"):
 					desc = _cleanItemDescription(l.get_slice(":", 1)) if l.contains(":") else ""
 			name = name.get_slice("/", 0).get_slice("(", 0).strip_edges() # "Гном/Предмет игры" -> "Гном"
 			if name.split(" ", false).size() > 4:
@@ -2857,9 +2933,9 @@ func pullModel(name: String, onDone: Callable = Callable()) -> void:
 			client.poll()
 			await get_tree().process_frame
 	if client.get_status() != HTTPClient.STATUS_CONNECTED:
-		errText = "Ollama не отвечает - проверь, что она запущена (значок в трее)"
+		errText = Lang.t("Ollama не отвечает - проверь, что она запущена (значок в трее)")
 	elif client.request(HTTPClient.METHOD_POST, "/api/pull", ["Content-Type: application/json"], JSON.stringify({"model": name, "stream": true})) != OK:
-		errText = "не удалось отправить запрос"
+		errText = Lang.t("не удалось отправить запрос")
 	else:
 		while client.get_status() == HTTPClient.STATUS_REQUESTING:
 			client.poll()
@@ -2915,14 +2991,14 @@ func _sumValues(d: Dictionary) -> float:
 func _pullBar(done: float, total: float) -> String:
 	var frac := clampf(done / total, 0.0, 1.0) if total > 0.0 else 0.0
 	var filled := int(round(frac * PULL_BAR_WIDTH))
-	return "Установка модели %d%% [%s%s] %s из %s" % [int(frac * 100.0), "=".repeat(filled), " ".repeat(PULL_BAR_WIDTH - filled), gbText(done), gbText(total)]
+	return Lang.t("Установка модели %d%% [%s%s] %s из %s") % [int(frac * 100.0), "=".repeat(filled), " ".repeat(PULL_BAR_WIDTH - filled), gbText(done), gbText(total)]
 
 
 ## 6140415975 -> "6,1 ГБ", 91000000 -> "91 МБ"
 static func gbText(bytes: float) -> String:
 	if bytes < 1e9:
-		return "%d МБ" % int(round(bytes / 1e6))
-	return ("%.1f ГБ" % (bytes / 1e9)).replace(".", ",")
+		return Lang.t("%d МБ") % int(round(bytes / 1e6))
+	return (Lang.t("%.1f ГБ") % (bytes / 1e9)).replace(".", "," if not Lang.isEn() else ".")
 
 
 ## 054.998: можно ли проверить модель ДО скачивания - по "паспорту" в реестре
