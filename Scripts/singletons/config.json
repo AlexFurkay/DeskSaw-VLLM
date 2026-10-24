@@ -34,6 +34,7 @@
 	"eatingSoundEnabled": true,
 	"messageEnabled": true,
 	"updNotif": true,
+	"sendStats": true,
 	"phraseColorOnDesk": true,
 	"hungerEnabled": true,
 	"sleepEnabled": true,

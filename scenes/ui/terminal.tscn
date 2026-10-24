@@ -482,6 +482,12 @@ label = "Уведомление об обновлениях"
 key = "updNotif"
 defaultValue = true
 
+[node name="SendStats" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=1210968113 instance=ExtResource("5_hils5")]
+layout_mode = 2
+label = "Отправлять анонимную статистику запусков (версия игры и модель ИИ)"
+key = "sendStats"
+defaultValue = true
+
 [node name="NoPersPopup" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/GeneralPanel/ScrollContainer/VBoxContainer" unique_id=783160364 instance=ExtResource("5_hils5")]
 layout_mode = 2
 label = "Не показывать окно «слишком много персонажей»"

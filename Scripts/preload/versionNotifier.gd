@@ -17,6 +17,32 @@ func _ready():
 	http.timeout = 15.0
 	http.request_completed.connect(_request_done)
 	http.request(RELEASES, ["User-Agent: DeskSaw-VLLM"], HTTPClient.METHOD_GET)
+	_sendLaunchStat()
+
+
+## 055.004: анонимная статистика запусков (идея и решение Alex 24.10).
+## Раз в запуск - одна отметка в GoatCounter: путь /launch/<версия>/<модель>.
+## Ни имени, ни номера компьютера - только версия игры и модель ИИ. Галочка
+## «Отправлять анонимную статистику запусков» (sendStats, по умолчанию вкл);
+## что именно уходит - написано в README. Запуски без окна (стенды, проверки
+## сборки) не считаются.
+const STATS_URL := "https://akfrk.goatcounter.com/count"
+
+func _sendLaunchStat() -> void:
+	if not gbData.settings.get("sendStats", true):
+		return
+	if DisplayServer.get_name() == "headless":
+		return
+	var model := String(LLMManager.modelName) if gbData.settings.get("llmVisionEnabled", true) else "ai-off"
+	var path := "/launch/%s/%s" % [GlobalVariable.BUILD, model]
+	var url := "%s?p=%s&t=%s&e=true&rnd=%d" % [STATS_URL, path.uri_encode(), "DeskSaw launch".uri_encode(), randi()]
+	var stat := HTTPRequest.new()
+	add_child(stat)
+	stat.timeout = 15.0
+	stat.request_completed.connect(func(_r, code, _h, _b):
+		print("Stats: запуск отмечен (код %d)" % code)
+		stat.queue_free())
+	stat.request(url, ["User-Agent: DeskSawVLLM/%s (%s)" % [GlobalVariable.BUILD, OS.get_name()]], HTTPClient.METHOD_GET)
 
 
 func _request_done(_result, code, _headers, body):
