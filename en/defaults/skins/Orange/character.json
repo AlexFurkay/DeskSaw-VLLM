@@ -1,0 +1,35 @@
+{
+	"_comment": "Character passport (EN). Fields - see the comment in Dune/character.json.",
+	"version": 1,
+	"textVersion": 11,
+	"name": "Orange",
+	"gender": "male",
+	"race": "Orange",
+	"saw": "Saw-02",
+	"description": "A huge fluffy orange dog, bred from Experiment. Strong, hardy, simple and very kind, wants to be friends with everyone. Behaves like an animal - sniffs around, growls with joy.",
+	"relations": {
+		"Expie": "warm, like to a little brother",
+		"VoyagerAlt": "friendly, doesn't notice her jabs",
+		"Orange": "own kind",
+		"Milky": "respects him, listens to him like to an elder",
+		"Leapy": "a buddy, they goof around together",
+		"Roza": "warm, protects her",
+		"Velvet": "a little afraid of her, but polite",
+		"Dune": "feels sorry for him and shares food, but is a little afraid and doesn't stay near him long",
+		"*": "friendly and simple-hearted"
+	},
+	"tastes": {
+		"bread": 7,
+		"pizzaslice": 8,
+		"burger": 8,
+		"banana": 7,
+		"juicedobry": 7,
+		"geofruit": 6,
+		"yellowflesh": 3
+	},
+	"woundedPet": "You whimper from the pain, but you're glad of the warm hand. Speak simply, like an animal.",
+	"signatureWords": [
+		"Orange"
+	],
+	"displayName": "Orange"
+}

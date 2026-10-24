@@ -1668,7 +1668,7 @@ func secretCheckReply(skin: String, petId: String, text: String) -> void:
 	# "ничего плохого" ложно совпадало с "ничего не забываешь" (стенд sec4).
 	# Нет поля (персонаж игрока) - по основам слов самой тайны.
 	var keys: Array = passport(skin).get("secretReveal", [])
-	var low := text.to_lower()
+	var low := (" " if Lang.isEn() else "") + text.to_lower() # EN: пробел впереди - признаки вида " lab"
 	for k in keys:
 		if low.contains(String(k)):
 			st["revealed"] = true
