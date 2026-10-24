@@ -113,10 +113,10 @@ func _addPhrasesPanel() -> void:
 	_phrasesLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_phrasesLabel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(_phrasesLabel)
-	_phrasesLabel.text = "[color=gray]Здесь появляются последние %d фраз всех персонажей.[/color]\n" % GlobalVariable.PHRASE_LOG_MAX + "\n".join(GlobalVariable.phraseLog)
+	_phrasesLabel.text = Lang.t("[color=gray]Здесь появляются последние %d фраз всех персонажей.[/color]\n") % GlobalVariable.PHRASE_LOG_MAX + "\n".join(GlobalVariable.phraseLog)
 	GlobalVariable.phraseLogged.connect(_onPhraseLogged)
 	submenuPanels.append(panel)
-	submenuButton.add_item("Фразы")
+	submenuButton.add_item(Lang.t("Фразы"))
 	panel.hide()
 
 

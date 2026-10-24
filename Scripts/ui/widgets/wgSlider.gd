@@ -35,7 +35,7 @@ func _update_label() -> void:
 	# prettyy annoying. couldn't find a proper way to call this once.
 	if not _label:
 		return
-	_label.text = label
+	_label.text = Lang.t(label)
 
 func _update_value() -> void:
 	var v = _slider.value

@@ -434,7 +434,7 @@ func _recordSpoken(text: String) -> void:
 	if clean == "":
 		return
 	# во вкладку «Фразы» - все, включая реплики перса-игрока
-	GlobalVariable.logPhrase(PlayerManager.displayNameFor(_skinTag()) + (" (ты)" if isPlayer else ""), clean, _skinTag(), isPlayer)
+	GlobalVariable.logPhrase(PlayerManager.displayNameFor(_skinTag()) + (Lang.t(" (ты)") if isPlayer else ""), clean, _skinTag(), isPlayer)
 	if isPlayer:
 		return
 	_spokenLog.append({"t": Time.get_ticks_msec(), "text": clean})
@@ -653,13 +653,13 @@ func checker():
 		# 054.999: окошко по Ctrl - по-русски, целыми числами; зависимость - если есть.
 		# Ломку не показываем (решение Alex: ломает погружение).
 		statUpd.stat = {
-			"Настроение": int(round(moodN)),
-			"Сытость": int(round(hungerHandler.hungry)),
-			"Усталость": int(round(sleepN)),
-			"Здоровье": int(round(healthHandler.health)),
+			Lang.t("Настроение"): int(round(moodN)),
+			Lang.t("Сытость"): int(round(hungerHandler.hungry)),
+			Lang.t("Усталость"): int(round(sleepN)),
+			Lang.t("Здоровье"): int(round(healthHandler.health)),
 		}
 		if addiction >= 1.0:
-			statUpd.stat["Зависимость"] = int(round(addiction))
+			statUpd.stat[Lang.t("Зависимость")] = int(round(addiction))
 		statUpd.upd(statUpd.stat)
 
 		await get_tree().create_timer(tick).timeout
@@ -769,7 +769,7 @@ func _registerImpact(speed: float) -> void:
 		return
 	_lastImpactMsec = now
 	if LLMManager.debugTags:
-		Console.print("[color=YELLOW]Удар: сила %.0f -> урон %.0f[/color]" % [speed, dmg])
+		Console.print(Lang.t("[color=YELLOW]Удар: сила %.0f -> урон %.0f[/color]") % [speed, dmg])
 	print("IMPACT[%s] hit=%.0f dmg=%.0f" % [_skinTag(), speed, dmg])
 	if isSleeping:
 		wakeUp()
@@ -1364,7 +1364,7 @@ func _forceSleep() -> void:
 	_urgentInQueue = 0
 	moveSys.rigidtorso.linear_velocity = Vector2.ZERO
 	if isPlayer:
-		PlayerManager._showStatus("Игрок уснул (автопилот) - %s, чтобы разбудить" % PlayerManager.currentKeys())
+		PlayerManager._showStatus(Lang.t("Игрок уснул (автопилот) - %s, чтобы разбудить") % PlayerManager.currentKeys())
 	sleep()
 
 
@@ -1431,7 +1431,7 @@ func tempRagdoll(isHardFall: bool = false, silent: bool = false, impactSpeed: fl
 		if impactSpeed >= KNOCKOFF_IMPACT:
 			_knockOffClothes()
 		if LLMManager.debugTags:
-			Console.print("[color=YELLOW]Сбита с ног: сила %.0f -> урон %.0f[/color]" % [impactSpeed, dmg])
+			Console.print(Lang.t("[color=YELLOW]Сбита с ног: сила %.0f -> урон %.0f[/color]") % [impactSpeed, dmg])
 		if dmg > 0.0:
 			_lastImpactMsec = Time.get_ticks_msec()
 			_impactThisRagdoll = true

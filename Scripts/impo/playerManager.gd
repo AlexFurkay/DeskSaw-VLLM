@@ -123,7 +123,7 @@ func spawnPlayer(skinPath: String, skinName: String) -> void:
 	player = beh
 	controlled = false
 	_applyCapture()
-	Console.print("Игрок: [color=CYAN]%s[/color]. Управление - [color=CYAN]%s[/color] (A/D - ходьба, W/пробел - прыжок, S - сесть/встать, Enter - сказать)." % [playerName, currentKeys()])
+	Console.print(Lang.t("Игрок: [color=CYAN]%s[/color]. Управление - [color=CYAN]%s[/color] (A/D - ходьба, W/пробел - прыжок, S - сесть/встать, Enter - сказать).") % [playerName, currentKeys()])
 
 
 ## Персонаж, восстановленный из сейва с пометкой player (expiePersistence).
@@ -150,10 +150,10 @@ func _removePlayer() -> void:
 
 func toggleControl() -> void:
 	if not hasPlayer():
-		_showStatus("Сначала создай игрока: консоль -> Skins -> Spawn as player")
+		_showStatus(Lang.t("Сначала создай игрока: консоль -> Skins -> Spawn as player"))
 		return
 	if player.isUnconscious:
-		_showStatus("Игрок без сознания")
+		_showStatus(Lang.t("Игрок без сознания"))
 		return
 	controlled = not controlled
 	if not controlled and chatOpen:
@@ -161,9 +161,9 @@ func toggleControl() -> void:
 	player.setPlayerControlled(controlled)
 	_applyCapture()
 	if controlled:
-		_showStatus("Управление: ВКЛ  (A/D, W/пробел, S - сесть, Enter - сказать)")
+		_showStatus(Lang.t("Управление: ВКЛ  (A/D, W/пробел, S - сесть, Enter - сказать)"))
 	else:
-		_showStatus("Управление: ВЫКЛ (автопилот)")
+		_showStatus(Lang.t("Управление: ВЫКЛ (автопилот)"))
 
 
 func _applyCapture() -> void:

@@ -26,8 +26,8 @@ var _history_index : int
 
 
 func _init() -> void:
-	create_command("clear", _command_clear, "очищает окно консоли")
-	create_command("help", _command_help, "список всех команд")
+	create_command("clear", _command_clear, Lang.t("очищает окно консоли"))
+	create_command("help", _command_help, Lang.t("список всех команд"))
 
 ## Return [param true] if the console has a command.
 func has_command(command: StringName) -> bool:
@@ -104,9 +104,9 @@ func validate_argument_count(args: PackedStringArray, cmd: Dictionary) -> bool:
 	if args.size() < expected_min or args.size() > expected_max:
 		var error_message: String = ""
 		if cmd.default_args:
-			error_message = "Неверное число аргументов: нужно от %d до %d, а введено %d." % [expected_min, expected_max, args.size()]
+			error_message = Lang.t("Неверное число аргументов: нужно от %d до %d, а введено %d.") % [expected_min, expected_max, args.size()]
 		else:
-			error_message = "Неверное число аргументов: нужно %d, а введено %d." % [expected_max, args.size()]
+			error_message = Lang.t("Неверное число аргументов: нужно %d, а введено %d.") % [expected_max, args.size()]
 
 		self.error(error_message)
 		return false
@@ -136,11 +136,11 @@ func execute(string: String) -> void:
 		return
 
 	if not has_command(args[0]):
-		return self.error("Команда '%s' не найдена. Список команд - help" % string)
+		return self.error(Lang.t("Команда '%s' не найдена. Список команд - help") % string)
 
 	var cmd: Dictionary = _commands[args[0]]
 	if not is_instance_id_valid(cmd.object_id):
-		return self.error("Команда сейчас недоступна.")
+		return self.error(Lang.t("Команда сейчас недоступна."))
 
 	args.remove_at(0) # Remove command name from arguments.
 	if not validate_argument_count(args, cmd):
@@ -154,7 +154,7 @@ func execute(string: String) -> void:
 		for i: int in args.size():
 			var value: Variant = convert_string(args[i], cmd.arg_types[i])
 			if value == null:
-				return self.error("Аргумент %d введён в неверном виде (нужен тип %s - например, число)." % [i, type_string(cmd.arg_types[i])])
+				return self.error(Lang.t("Аргумент %d введён в неверном виде (нужен тип %s - например, число).") % [i, type_string(cmd.arg_types[i])])
 
 			arg_array[i] = value
 

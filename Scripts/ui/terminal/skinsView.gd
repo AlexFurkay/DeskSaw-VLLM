@@ -33,7 +33,7 @@ func _ready() -> void:
 
 	# Персонаж-игрок (PlayerManager): кнопка рядом со Spawn
 	var playerButton := Button.new()
-	playerButton.text = " Создать за игрока "
+	playerButton.text = Lang.t(" Создать за игрока ")
 	spawnButton.get_parent().add_child(playerButton)
 	spawnButton.get_parent().move_child(playerButton, spawnButton.get_index() + 1)
 	playerButton.pressed.connect(_on_spawn_player_press)
@@ -79,7 +79,7 @@ func _defaultSkinPath() -> String:
 ## 054.998: "(по умолчанию)" - у того персонажа, который выбран в настройке
 ## "Персонаж по умолчанию" (defaultSkin). Раньше надпись была вшита в кнопку
 ## Experiment - наследство оригинала, где он и был по умолчанию.
-const DEFAULT_MARK := " (по умолчанию)"
+var DEFAULT_MARK: String = Lang.t(" (по умолчанию)")
 
 func _markDefaultSkin() -> void:
 	var def := String(gbData.settings.get("defaultSkin", ""))
@@ -103,7 +103,7 @@ func _update() -> void:
 	expieDisplayWidget.ApplyTextures(GlobalVariable.userSkinPath)
 	if _descLabel:
 		var desc := _skinDescription(EXPIE_SKIN if selectedSkin == null else selectedSkin.name)
-		_descLabel.text = desc if desc != "" else "[i]Описания нет - его можно добавить полем \"description\" в character.json скина.[/i]"
+		_descLabel.text = desc if desc != "" else Lang.t("[i]Описания нет - его можно добавить полем \"description\" в character.json скина.[/i]")
 
 func get_skin_name() -> String:
 	return "Experiment" if selectedSkin == null else selectedSkin.name

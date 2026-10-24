@@ -9,6 +9,7 @@ const BUILD := "055.003"
 var LANG: String = Lang.code()
 
 func _ready() -> void:
+	Lang.setup()
 	print("LANG: %s, user dir: %s" % [LANG, OS.get_user_data_dir()])
 
 ## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
@@ -116,9 +117,9 @@ func makePopUp(text: String, parent: CanvasLayer, position: Vector2) -> bool:
 	newpop.labelText = text
 
 	#configure
-	newpop.titleText = "Эй!"
-	newpop.yesButtonText = "Да"
-	newpop.noButtonText = "Нет"
+	newpop.titleText = Lang.t("Эй!")
+	newpop.yesButtonText = Lang.t("Да")
+	newpop.noButtonText = Lang.t("Нет")
 	newpop.position = position
 	#ts dont work
 	newpop.size = Vector2(500, 300)

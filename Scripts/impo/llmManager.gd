@@ -1991,7 +1991,7 @@ func prewarmAllCategories(categoriesToExamples: Dictionary, eventPoolsToDescript
 	if _prewarmTotal == 0:
 		_prewarmStartMsec = Time.get_ticks_msec()
 	_prewarmTotal += toWarm.size() + eventsToWarm.size()
-	Console.print("[color=CYAN]ИИ создаёт %d наборов фраз, первые 1-2 минуты будут тупняки. Сообщение о готовности появится здесь, в консоли.[/color]" % _prewarmTotal)
+	Console.print(Lang.t("[color=CYAN]ИИ создаёт %d наборов фраз, первые 1-2 минуты будут тупняки. Сообщение о готовности появится здесь, в консоли.[/color]") % _prewarmTotal)
 
 	for cat in toWarm:
 		var examples: Array = _pickExamples(categoriesToExamples[cat].duplicate(), 8)
@@ -2129,12 +2129,12 @@ func _onPoolRefilled(category: String, rawText: String) -> void:
 	if _prewarmTotal > 0:
 		_prewarmDone += 1
 		var elapsed := (Time.get_ticks_msec() - _prewarmStartMsec) / 1000.0
-		Console.print("[color=CYAN]Прогрев: %d/%d готово (только что: %s, прошло %.0f сек с начала)[/color]" % [_prewarmDone, _prewarmTotal, category, elapsed])
+		Console.print(Lang.t("[color=CYAN]Прогрев: %d/%d готово (только что: %s, прошло %.0f сек с начала)[/color]") % [_prewarmDone, _prewarmTotal, category, elapsed])
 		if _prewarmDone >= _prewarmTotal:
 			if _prewarmIsFinalWave:
-				Console.print("[color=GREEN]Все ИИ-реплики созданы, можно взаимодействовать.[/color]")
+				Console.print(Lang.t("[color=GREEN]Все ИИ-реплики созданы, можно взаимодействовать.[/color]"))
 			else:
-				Console.print("[color=GREEN]Все первостепенные ИИ-реплики готовы, можно взаимодействовать (редкие ещё догружаются в фоне).[/color]")
+				Console.print(Lang.t("[color=GREEN]Все первостепенные ИИ-реплики готовы, можно взаимодействовать (редкие ещё догружаются в фоне).[/color]"))
 			_prewarmTotal = 0
 			_prewarmDone = 0
 			prewarmBatchFinished.emit()
@@ -2293,7 +2293,7 @@ func _noteFailure(code: int) -> void:
 	_failStreak += 1
 	_logDebugLine(_currentTag, "OLLAMA_FAIL", "код %d, подряд %d" % [code, _failStreak])
 	if _failStreak == 3:
-		Console.print("[color=ORANGE]Ollama не успевает отвечать (3 раза подряд). Скорее всего, видеокарта перегружена: голосовой Discord, стрим, игра. В Discord помогает выключить аппаратное ускорение (Настройки - Расширенные).[/color]")
+		Console.print(Lang.t("[color=ORANGE]Ollama не успевает отвечать (3 раза подряд). Скорее всего, видеокарта перегружена: голосовой Discord, стрим, игра. В Discord помогает выключить аппаратное ускорение (Настройки - Расширенные).[/color]"))
 
 
 func _on_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
@@ -2592,14 +2592,14 @@ func checkModel(name: String, callback: Callable) -> void:
 		var caps: Array = parsed.get("capabilities", []) if parsed is Dictionary else []
 		var problems: Array = []
 		if not caps.has("vision"):
-			problems.append("не умеет видеть картинки (нет vision)")
+			problems.append(Lang.t("не умеет видеть картинки (нет vision)"))
 		# 055.002: размышления мешают, только если их нельзя выключить
 		# (Ollama: thinking.values без false). У Gemma 4 - [false, true], подходит.
 		if caps.has("thinking"):
 			var th = parsed.get("thinking", {})
 			var values: Array = th.get("values", []) if th is Dictionary else []
 			if not values.has(false):
-				problems.append("с режимом размышлений (thinking), который нельзя выключить")
+				problems.append(Lang.t("с режимом размышлений (thinking), который нельзя выключить"))
 		callback.call(", ".join(problems))
 	)
 	if http.request("http://127.0.0.1:11434/api/show", ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"model": name})) != OK:
@@ -2793,18 +2793,18 @@ func listAvailableModels() -> void:
 				for m in parsed["models"]:
 					names.append(String(m.get("name", "?")))
 				if names.is_empty():
-					Console.print("Доступные модели: [color=CYAN](ни одна ещё не скачана)[/color]")
+					Console.print(Lang.t("Доступные модели: [color=CYAN](ни одна ещё не скачана)[/color]"))
 				else:
-					Console.print("Доступные модели: [color=CYAN]%s[/color]" % ", ".join(names))
+					Console.print(Lang.t("Доступные модели: [color=CYAN]%s[/color]") % ", ".join(names))
 			else:
-				Console.print("Не удалось разобрать список моделей от Ollama.")
+				Console.print(Lang.t("Не удалось разобрать список моделей от Ollama."))
 		else:
-			Console.print("Не удалось получить список моделей от Ollama (код ответа %d)." % response_code)
+			Console.print(Lang.t("Не удалось получить список моделей от Ollama (код ответа %d).") % response_code)
 		http.queue_free()
 	)
 	var err := http.request("http://127.0.0.1:11434/api/tags")
 	if err != OK:
-		Console.print("Не получилось запросить список моделей у Ollama.")
+		Console.print(Lang.t("Не получилось запросить список моделей у Ollama."))
 		http.queue_free()
 
 
@@ -2827,7 +2827,7 @@ func setModel(name: String, pull: bool = true) -> void:
 		repetitionGuard = MODEL_PRESETS[name][1]
 		gbData.settings["llmCreativity"] = creativity
 		gbData.settings["llmRepetitionGuard"] = repetitionGuard
-		Console.print("Настройки под модель: креативность [color=CYAN]%s[/color], защита от повторов [color=CYAN]%s[/color]" % [creativity, repetitionGuard])
+		Console.print(Lang.t("Настройки под модель: креативность [color=CYAN]%s[/color], защита от повторов [color=CYAN]%s[/color]") % [creativity, repetitionGuard])
 	gbData.savetodisk("user://CONFIG.json", gbData.settings)
 	# 054.9991: смена модели видна в ИИ-логе (в отчёте 054.999 её угадывали по окну 8192)
 	_logDebugLine("SESSION", "MODEL", "model=%s creativity=%.2f repetitionGuard=%.2f" % [modelName, creativity, repetitionGuard])
@@ -2848,7 +2848,7 @@ func setModel(name: String, pull: bool = true) -> void:
 const PULL_BAR_WIDTH := 20
 
 func pullModel(name: String, onDone: Callable = Callable()) -> void:
-	Console.print("Скачиваю модель [color=CYAN]%s[/color] через Ollama..." % name)
+	Console.print(Lang.t("Скачиваю модель [color=CYAN]%s[/color] через Ollama...") % name)
 	var client := HTTPClient.new()
 	var ok := false
 	var errText := ""
@@ -2898,9 +2898,9 @@ func pullModel(name: String, onDone: Callable = Callable()) -> void:
 			Console.print_progress(_pullBar(_sumValues(totals), _sumValues(totals)))
 	client.close()
 	if ok:
-		Console.print("Модель [color=CYAN]%s[/color] скачана." % name)
+		Console.print(Lang.t("Модель [color=CYAN]%s[/color] скачана.") % name)
 	else:
-		Console.print("[color=RED]Не получилось скачать модель %s: %s.[/color]" % [name, errText if errText != "" else "Ollama оборвала загрузку"])
+		Console.print(Lang.t("[color=RED]Не получилось скачать модель %s: %s.[/color]") % [name, errText if errText != "" else Lang.t("Ollama оборвала загрузку")])
 	if onDone.is_valid():
 		onDone.call(ok)
 
@@ -2951,7 +2951,7 @@ func checkRegistry(name: String) -> Dictionary:
 	var manifest = await _registryJson(REGISTRY + path + "/manifests/" + tag, ["Accept: application/vnd.docker.distribution.manifest.v2+json"])
 	if manifest is int:
 		if manifest == 404:
-			return {"problem": "такой модели нет в библиотеке Ollama - проверь имя", "sure": true}
+			return {"problem": Lang.t("такой модели нет в библиотеке Ollama - проверь имя"), "sure": true}
 		return unsure
 	var configDigest := ""
 	var templateDigest := ""
@@ -2982,9 +2982,9 @@ func checkRegistry(name: String) -> Dictionary:
 	if thinking and vision:
 		return unsure
 	if thinking:
-		problems.append("с режимом размышлений (thinking)")
+		problems.append(Lang.t("с режимом размышлений (thinking)"))
 	if not vision and TEXT_FAMILIES.has(family):
-		problems.append("не умеет видеть картинки (нет vision)")
+		problems.append(Lang.t("не умеет видеть картинки (нет vision)"))
 	elif not vision:
 		return {"problem": ", ".join(problems), "sure": not problems.is_empty()} # незнакомое семейство - зрение проверим после
 	return {"problem": ", ".join(problems), "sure": true}

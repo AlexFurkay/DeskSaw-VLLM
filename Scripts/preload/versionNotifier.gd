@@ -57,8 +57,8 @@ func _request_done(_result, code, _headers, body):
 		return
 	print("VersionNotifier: последний релиз %s, у тебя %s" % [latest, GlobalVariable.BUILD])
 	if _buildNumber(latest) > _buildNumber(GlobalVariable.BUILD) and gbData.settings.get("updNotif", true):
-		Console.print("[color=ORANGE]Вышла новая версия DeskSaw VLLM: %s (у тебя %s). Скачать: [url=%s]%s[/url]. Это сообщение отключается в Настройки - Общее.[/color]" % [latest, GlobalVariable.BUILD, RELEASES_PAGE, RELEASES_PAGE])
-		OS.alert("Вышла новая версия DeskSaw VLLM: %s\nУ тебя: %s\n\n%s\n\nЭто окно можно отключить в Настройки - Общее." % [latest, GlobalVariable.BUILD, RELEASES_PAGE], "DeskSaw VLLM")
+		Console.print(Lang.t("[color=ORANGE]Вышла новая версия DeskSaw VLLM: %s (у тебя %s). Скачать: [url=%s]%s[/url]. Это сообщение отключается в Настройки - Общее.[/color]") % [latest, GlobalVariable.BUILD, RELEASES_PAGE, RELEASES_PAGE])
+		OS.alert(Lang.t("Вышла новая версия DeskSaw VLLM: %s\nУ тебя: %s\n\n%s\n\nЭто окно можно отключить в Настройки - Общее.") % [latest, GlobalVariable.BUILD, RELEASES_PAGE], "DeskSaw VLLM")
 
 
 ## "054.994Pru" -> 54.994, "v055" -> 55.0
