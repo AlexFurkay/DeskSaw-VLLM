@@ -1188,6 +1188,24 @@ const ITEM_ANGLES := [
 	"пошути над ним в своём стиле.",
 ]
 
+## 055.005: подсказка ИИ для реакции на подарок (behavior.onItemGiven и стенд gift).
+## wishKey - что персонаж хотел ("food" - поесть, "" - ничего не просил).
+func giftHint(skin: String, key: String, wishKey: String, wishName: String, isFood: bool, itemTaste: int) -> String:
+	var extra := "\nЭто подарок: человек только что дал этот предмет именно тебе."
+	if wishKey == key or (wishKey == "food" and isFood):
+		extra += "\nТы как раз этого {хотела|хотел} - это то, что ты {просила|просил}."
+	elif wishKey == "food":
+		extra += "\nТы {хотела|хотел} поесть, а дали это."
+	elif wishKey != "":
+		extra += "\nТы {просила|просил} другое (%s), а дали это." % wishName
+	if isFood:
+		var tastes = passport(skin).get("tastes", {})
+		var taste: int = int(tastes[key]) if tastes is Dictionary and tastes.has(key) else itemTaste
+		extra += "\nНа вкус для тебя это " + ("очень вкусно." if taste >= 7 else ("противно." if taste <= 3 else "так себе, обычная еда."))
+	extra += "\nОтветь человеку одной фразой: поблагодари, обрадуйся, удивись или поворчи - по характеру и вкусу."
+	return extra
+
+
 func requestItemReaction(skinTag: String, itemDescription: String, stateHintText: String, callback: Callable) -> void:
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return

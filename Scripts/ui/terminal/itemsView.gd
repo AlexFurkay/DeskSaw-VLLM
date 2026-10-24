@@ -121,6 +121,7 @@ func _on_item_button_press(item: ItemEntry) -> void:
 		body.position = _spawnPos() # ДО add_child: Rapier не переносит уже добавленное тело - оно оставалось в (0,0)
 		get_tree().current_scene.add_child(body)
 		body.owner = get_tree().current_scene
+		GlobalVariable.itemGiven(body) # 055.005: подарок, если персонаж ждал
 		return
 	# TODO: directly connect this to the command, maybe?
 	var scene = load(item.scene_path)
@@ -129,6 +130,7 @@ func _on_item_button_press(item: ItemEntry) -> void:
 	get_tree().current_scene.add_child(instance)
 	instance.owner = get_tree().current_scene
 	instance.set_meta("itemName", item.name) # было item (объект ItemEntry) - код, ждущий строку, на этом падал
+	GlobalVariable.itemGiven(instance) # 055.005: подарок, если персонаж ждал
 
 ## 054.9991: около курсора, но не у самого края экрана (CustomItems.spawnPosition).
 func _spawnPos() -> Vector2:

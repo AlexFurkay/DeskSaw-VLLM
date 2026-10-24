@@ -60,6 +60,21 @@ func _phraseColorHex(skin: String, isPlayer: bool) -> String:
 	var base: Color = PHRASE_COLORS.get(skin, Color(0.6, 0.85, 1.0))
 	return Color.WHITE.lerp(base, 0.5).to_html(false)
 
+## 055.005: человек положил предмет - если персонаж его ждал (просил или
+## человек сказал «держи»), отвечает как на подарок. Один - с самым свежим ожиданием.
+func itemGiven(body: Node) -> void:
+	var best: Node = null
+	var bestAt := -1
+	for p in get_tree().get_nodes_in_group("pets"):
+		if p.has_method("giftTime"):
+			var t: int = p.giftTime()
+			if t > bestAt:
+				best = p
+				bestAt = t
+	if best != null:
+		best.onItemGiven(body)
+
+
 func logPhrase(who: String, text: String, skin: String = "", isPlayer: bool = false) -> void:
 	var col := _phraseColorHex(skin, isPlayer)
 	var line := "[color=gray]%s[/color]  [color=#%s]%s: %s[/color]" % [Time.get_time_string_from_system().substr(0, 5), col, who, text]

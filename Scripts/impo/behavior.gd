@@ -437,6 +437,7 @@ func _recordSpoken(text: String) -> void:
 	GlobalVariable.logPhrase(PlayerManager.displayNameFor(_skinTag()) + (Lang.t(" (ты)") if isPlayer else ""), clean, _skinTag(), isPlayer)
 	if isPlayer:
 		return
+	_noteOwnWish(clean) # 055.005: «хочу банан» - ждём подарок
 	_spokenLog.append({"t": Time.get_ticks_msec(), "text": clean})
 	while _spokenLog.size() > SPOKEN_LOG_SIZE:
 		_spokenLog.pop_front()
@@ -1100,6 +1101,8 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 		playerState = "здоровье %.0f из 100%s" % [php, ", тяжёлые раны" if php <= 30.0 else (", есть раны" if php <= 60.0 else "")]
 	LLMManager.chatMood = moodSys.mood + moodSys.drugOffset # для тайны (secretBlock)
 	LLMManager.chatPetId = petId
+	if chatHistory.size() > 0: # 055.005: «держи», «хочешь банан?» - ждём подарок
+		_notePlayerOffer(String(chatHistory[chatHistory.size() - 1].get("text", "")))
 	LLMManager.requestChatReply(_skinTag(), speaker, chatHistory, stats + _aiStateHint(), _recentSpoken(), func(text: String):
 		LLMManager.secretCheckReply(_skinTag(), petId, text)
 		var action := ""
@@ -1627,7 +1630,7 @@ func itemWatch() -> void:
 		var extra := ""
 		if _isFoodKey(key):
 			# 054.998: у каждого персонажа свои вкусы (паспорт, поле tastes)
-			var taste := tasteFor(key, 5)
+			var taste := tasteFor(key, int(CustomItems.entry(key).get("taste", 5))) # 055.005: свой предмет - его вкус (был всегда 5)
 			extra = "\nНа вкус для тебя это " + ("очень вкусно." if taste >= 7 else ("противно." if taste <= 3 else "так себе, обычная еда."))
 			if hungerHandler.hungry < 30.0:
 				extra += "\nТы {голодна|голоден}." # было "Ты голодна." и для мужских персонажей
@@ -1796,6 +1799,102 @@ func _on_state_reaction(text: String) -> void:
 	if isPlayer or beingDragged or isSleeping or shocked:
 		return
 	_queueMessage(text)
+
+
+## 055.005: ПОДАРОК (идея Alex). Персонаж сам сказал, что хочет предмет («хочу
+## банан», «поесть бы»), или человек в чате сказал «держи / лови / вот тебе /
+## хочешь банан?» - и в течение GIFT_WINDOW_MS кладёт предмет: персонаж сразу
+## отвечает как на подарок (рад, если это то, что просил, или вкусно; ворчит,
+## если не то), без обычного перерыва между реакциями на предметы. Отвечает
+## один персонаж - с самым свежим ожиданием (GlobalVariable.itemGiven).
+const GIFT_WINDOW_MS := 180000
+const WISH_ITEM_STEMS := {"banana": [" банан"], "burger": [" бургер"], "pizzaslice": [" пицц"], "bread": [" хлеб", " булк", " батон"], "juicedobry": [" сок ", " сок,", " сок.", " сок!", " сок?", " сока", " соку", " соком", " сочк"], "geofruit": [" геофрукт"], "yellowflesh": [" жёлтую плоть", " жёлтая плоть", " желтую плоть", " желтая плоть", " жёлтой плоти", " желтой плоти"]}
+const WISH_ITEM_STEMS_EN := {"banana": [" banana"], "burger": [" burger"], "pizzaslice": [" pizza"], "bread": [" bread", " bun ", " loaf"], "juicedobry": [" juice"], "geofruit": [" geofruit"], "yellowflesh": [" yellow flesh"]}
+const WISH_WORDS := [" хочу", " хотел", " хочется", " дай", " дашь", " принеси", " бы ", " не отказал", " мечтаю", " покорми", " съел бы", " съела бы"]
+const WISH_WORDS_EN := [" want", " give me", " could use", " would love", " i'd love", " craving", " wouldn't mind", " feed me", " i'd kill for", " dream of", " gimme"]
+const HUNGER_WORDS := [" голод", " поесть", " покушать", " кушать", " покорми", " еды", " есть хочу"]
+const HUNGER_WORDS_EN := [" hungry", " starving", " feed me", " some food", " something to eat"]
+const OFFER_WORDS := [" держи", " лови", " вот тебе", " на,", " на!", " дам тебе", " даю", " щас дам", " сейчас дам", " положу", " кладу", " угощайся", " бери", " получай", " подарок", " дарю", " принёс", " принес", " хочешь"]
+const OFFER_WORDS_EN := [" here you go", " here,", " catch", " take it", " take this", " i'll give", " giving you", " have this", " for you", " enjoy", " gift", " present", " brought you", " got you", " want some", " do you want", " want a"]
+var _wishKey := "" # что хотел: ключ предмета, "food" - поесть, "" - не важно
+var _wishName := ""
+var _wishAt := -GIFT_WINDOW_MS
+var _offerAt := -GIFT_WINDOW_MS
+
+## Какой предмет назван в тексте (low - в нижнем регистре, с пробелами по краям).
+func _itemMentioned(low: String) -> Array:
+	var stems: Dictionary = Lang.pick(WISH_ITEM_STEMS, WISH_ITEM_STEMS_EN)
+	for key in stems:
+		for st in stems[key]:
+			if low.contains(st):
+				return [key, String(st).strip_edges().rstrip(",.!?")]
+	for e in CustomItems.all():
+		var n := String(e["name"]).to_lower().strip_edges()
+		if n.length() >= 3 and n != String(e["id"]).to_lower() and low.contains(n):
+			return [CustomItems.KEY_PREFIX + String(e["id"]), String(e["name"])]
+	return ["", ""]
+
+func _hasAny(low: String, words: Array) -> bool:
+	for w in words:
+		if low.contains(w):
+			return true
+	return false
+
+## Своя реплика персонажа: «хочу банан» / «поесть бы» - запоминаем желание.
+func _noteOwnWish(text: String) -> void:
+	var low := " " + text.to_lower() + " "
+	var hungry := _hasAny(low, Lang.pick(HUNGER_WORDS, HUNGER_WORDS_EN))
+	if not (hungry or _hasAny(low, Lang.pick(WISH_WORDS, WISH_WORDS_EN))):
+		return
+	var m := _itemMentioned(low)
+	if m[0] == "" and not hungry:
+		return
+	_wishKey = m[0] if m[0] != "" else "food"
+	_wishName = m[1]
+	_wishAt = Time.get_ticks_msec()
+
+## Реплика человека в разговоре: «держи», «хочешь банан?» - ждём подарок.
+func _notePlayerOffer(text: String) -> void:
+	var low := " " + text.to_lower() + " "
+	if not _hasAny(low, Lang.pick(OFFER_WORDS, OFFER_WORDS_EN)):
+		return
+	_offerAt = Time.get_ticks_msec()
+	var m := _itemMentioned(low)
+	if m[0] != "": # «хочешь банан?» - теперь ждём именно его
+		_wishKey = m[0]
+		_wishName = m[1]
+		_wishAt = _offerAt
+
+## Когда персонаж последний раз ждал подарок (-1 - не ждёт).
+func giftTime() -> int:
+	if isPlayer or isUnconscious or isSleeping:
+		return -1
+	var now := Time.get_ticks_msec()
+	var t := -1
+	if now - _wishAt < GIFT_WINDOW_MS:
+		t = _wishAt
+	if now - _offerAt < GIFT_WINDOW_MS:
+		t = maxi(t, _offerAt)
+	return t
+
+func onItemGiven(body: Node) -> void:
+	if not is_instance_valid(body) or not gbData.settings.get("llmVisionEnabled", false) or gbData.settings.get("mutePassive", false):
+		return
+	var key := _itemKey(body)
+	var desc := _itemDesc(key)
+	if desc == "":
+		return
+	var now := Time.get_ticks_msec()
+	var wishOn := now - _wishAt < GIFT_WINDOW_MS and _wishKey != ""
+	_seenItems[body.get_instance_id()] = true # обычная реакция «новый предмет рядом» не нужна
+	_itemCommentedAt[key] = now
+	_lastItemReactionMsec = now
+	_wishAt = -GIFT_WINDOW_MS
+	_offerAt = -GIFT_WINDOW_MS
+	LLMManager.requestItemReaction(_skinTag(), desc, _aiStateHint() + LLMManager.giftHint(_skinTag(), key, _wishKey if wishOn else "", _wishName, _isFoodKey(key), int(CustomItems.entry(key).get("taste", 5))), func(text: String):
+		if is_instance_valid(self) and not isSleeping and not isUnconscious:
+			_queueMessage(text, 1.0, true, PRIO_DIALOGUE))
+
 
 
 ## Speaks from `category` (a key in dialogueSys.data, e.g. "sleepy", "pet",

@@ -237,5 +237,10 @@
  "Отреагируй на ласку в своём характере.": "React to the affection in character.",
  "Тебя гладят рукой, а ты тяжело {ранена|ранен}, тебе очень больно. ": "You're being petted by a hand, but you're badly hurt, it hurts a lot. ",
  "\nЧеловек показывает тебе свой экран - его снимок приложен к этому сообщению. Посмотри на снимок: о нём и речь. Ответь про то, что видишь, своими словами и со своим отношением; не описывай экран целиком. Маленькие пиксельные существа поверх окон - ты и твои соседи; люди и звери на фото и в видео - просто картинки.": "\nThe human is showing you their screen - a screenshot of it is attached to this message. Look at the screenshot: that's what they mean. Reply about what you see, in your own words and with your own attitude; don't describe the whole screen. The little pixel creatures over the windows are you and your neighbors; people and animals in photos and videos are just pictures.",
- "\nЧеловек недавно показал тебе свой экран, свежий снимок снова приложен. Если разговор о показанном - говори о том, что на снимке.": "\nThe human recently showed you their screen; a fresh screenshot is attached again. If the talk is about what they showed - talk about what's on the screenshot."
+ "\nЧеловек недавно показал тебе свой экран, свежий снимок снова приложен. Если разговор о показанном - говори о том, что на снимке.": "\nThe human recently showed you their screen; a fresh screenshot is attached again. If the talk is about what they showed - talk about what's on the screenshot.",
+ "\nЭто подарок: человек только что дал этот предмет именно тебе.": "\nIt's a gift: the human just gave this item to you personally.",
+ "\nТы как раз этого {хотела|хотел} - это то, что ты {просила|просил}.": "\nThis is exactly what you wanted - it's what you asked for.",
+ "\nТы {хотела|хотел} поесть, а дали это.": "\nYou wanted something to eat, and you got this.",
+ "\nТы {просила|просил} другое (%s), а дали это.": "\nYou asked for something else (%s), and you got this.",
+ "\nОтветь человеку одной фразой: поблагодари, обрадуйся, удивись или поворчи - по характеру и вкусу.": "\nAnswer the human with one line: thank them, be glad, be surprised or grumble - by your character and taste."
 }

@@ -77,6 +77,7 @@ func _additem(item: String = "containercrate"):
 	get_tree().current_scene.add_child(instance)
 	instance.owner = get_tree().current_scene
 	instance.set_meta("itemName", item)
+	GlobalVariable.itemGiven(instance) # 055.005: подарок, если персонаж ждал
 
 
 ## 054.9992: где появиться предмету. Курсор над рабочим столом - около курсора
