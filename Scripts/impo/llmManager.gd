@@ -1382,6 +1382,51 @@ func _playerFormRule(skinTag: String, playerSkin: String) -> String:
 	return out
 
 
+## 055.005: «СМОТРИ, ЧТО ПОКАЖУ» (идея Alex). Человек в чате показывает экран -
+## к ответу прикладывается свежий снимок, персонаж отвечает про увиденное.
+## Сильные слова (смотри, глянь, покажу, зацени, на экране...) срабатывают сами;
+## «как тебе / что скажешь / оцени» - только рядом со словом о картинке (арт,
+## фото, видео...), иначе «как тебе спалось?» тоже сделало бы снимок.
+## Большие модели (от 10B) видят снимок ещё SHOW_FOLLOW_TURNS ответа в течение
+## SHOW_FOLLOW_MS - чтобы продолжить тему; маленьким - только в момент показа.
+const SHOW_FOLLOW_MS := 90000
+const SHOW_FOLLOW_TURNS := 2
+var _showStrongRe := RegEx.create_from_string("(?<![а-яё])(посмотри|посмотрите|смотри|смотрите|гляди|глянь|гляньте|погляди|поглядите|взгляни|взгляните|зацени|заценишь|заценить|покажу|показываю|показать|покажи-ка|видишь это|видишь вот|видал|видала|узнаёшь|узнаешь|на экране|на экран|на мониторе|на монитор|на рабочем столе|скрин|скриншот|скрине)(?![а-яё])")
+var _showWeakRe := RegEx.create_from_string("(?<![а-яё])(как тебе|что скажешь|что думаешь|оцени|оценишь|нравится|ну как)(?![а-яё])")
+var _showNounRe := RegEx.create_from_string("(?<![а-яё])(арт|рисун|нарисов|картин|фот|снимок|видос|видео|ролик|мем|скрин|экран|монитор|сайт|игр|стрим|аниме|фильм|мульт|комикс|модельк|скетч|набросок|постер|обои|лаборатор|поделк|сделал|слепил)")
+var _showStopRe := RegEx.create_from_string("(смотри у меня|смотри,? не |смотрите,? не |смотря |посмотрим|видишь ли|гляди у меня|гляди,? не )")
+var _showStrongReEn := RegEx.create_from_string("(?<![a-z])(look|look at|watch this|watch that|check this|check that|check it|check out|see this|see that|see it|showing|i'll show|let me show|show you|on my screen|on the screen|on screen|on my monitor|on the monitor|on my desktop|screenshot|do you recognize|recognise this|recognize this)(?![a-z])")
+var _showWeakReEn := RegEx.create_from_string("(?<![a-z])(how do you like|what do you think|what about this|rate|thoughts on|do you like|how is|how's)(?![a-z])")
+var _showNounReEn := RegEx.create_from_string("(?<![a-z])(art|drawing|drew|draw|sketch|picture|pic|photo|image|video|clip|meme|screen|site|website|game|stream|anime|movie|film|cartoon|comic|model|poster|wallpaper|lab|made|built)")
+var _showStopReEn := RegEx.create_from_string("(look out|watch out|watch it|look forward|look after|look for|look,? i[ ']|look here,? you|look at you|you look|i look)")
+
+## Человек показывает что-то на экране? (последняя реплика разговора)
+func wantsToShow(text: String) -> bool:
+	var low := " " + text.to_lower() + " "
+	var en := Lang.isEn()
+	var stop: RegEx = _showStopReEn if en else _showStopRe
+	var strong: RegEx = _showStrongReEn if en else _showStrongRe
+	if strong.search(low) != null:
+		# «смотри у меня!» и т.п. - не показ; но если есть и картинка - всё же показ
+		if stop.search(low) == null or (_showNounReEn if en else _showNounRe).search(low) != null:
+			return true
+	return (_showWeakReEn if en else _showWeakRe).search(low) != null and (_showNounReEn if en else _showNounRe).search(low) != null
+
+## 0 - экран не нужен, 1 - человек показывает сейчас, 2 - продолжение темы.
+var _shownAt := {} # skinTag -> [msec, сколько ещё ответов со снимком]
+func _showMode(skinTag: String, speakerSkin: String, chatHistory: Array) -> int:
+	if speakerSkin != "" or chatHistory.is_empty():
+		return 0
+	if wantsToShow(String(chatHistory[chatHistory.size() - 1].get("text", ""))):
+		_shownAt[skinTag] = [Time.get_ticks_msec(), SHOW_FOLLOW_TURNS if modelBillions() >= 10.0 else 0]
+		return 1
+	var s = _shownAt.get(skinTag)
+	if s is Array and int(s[1]) > 0 and Time.get_ticks_msec() - int(s[0]) < SHOW_FOLLOW_MS:
+		s[1] = int(s[1]) - 1
+		return 2
+	return 0
+
+
 ## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
 ## playerSkin - скин перса-игрока; speakerState - здоровье/настроение собеседника.
 func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> void:
@@ -1389,10 +1434,19 @@ func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stat
 	if not gbData.settings.get("llmVisionEnabled", true):
 		return
 	var tag := skinTag + ":chat"
-	var prompt := buildChatReplyPrompt(skinTag, speaker, chatHistory, stateText, ownRecent, speakerSkin, playerSkin, speakerState)
+	# 055.005: человек показывает экран - снимок к ответу (в фоне, ~0,5 с)
+	var images: Array = []
+	var showing := _showMode(skinTag, speakerSkin, chatHistory)
+	if showing > 0 and ScreenCapture.CaptureAsync():
+		var png: PackedByteArray = await ScreenCapture.ScreenshotReady
+		if not png.is_empty():
+			images = [Marshalls.raw_to_base64(png)]
+	if images.is_empty():
+		showing = 0
+	var prompt := buildChatReplyPrompt(skinTag, speaker, chatHistory, stateText, ownRecent, speakerSkin, playerSkin, speakerState, showing)
 
 	# в разговоре чуть "смелее" обычного - живее и разнообразнее
-	var job := {"prompt": _g(skinTag, prompt), "images": [], "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.05)}
+	var job := {"prompt": _g(skinTag, prompt), "images": images, "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.05)}
 	if busy and _currentTag.begins_with("prefetch:") and not _currentJob.is_empty():
 		# прерываем фоновый пакет - ответ человеку важнее
 		http.cancel_request()
@@ -1413,7 +1467,8 @@ const MEMORY_LARGE := {"own": 6, "ownMin": 15, "ownAsked": 20, "chat": 40}
 func memoryProfile() -> Dictionary:
 	return MEMORY_SMALL if modelBillions() < 10.0 else MEMORY_LARGE
 
-func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "") -> String:
+## showing: 1 - человек показывает экран (снимок приложен), 2 - продолжение темы.
+func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "", showing: int = 0) -> String:
 	var tag := skinTag + ":chat"
 	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
 	var prompt := _buildBasePrompt(tag)
@@ -1515,6 +1570,11 @@ func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, 
 	var worn := _wornOutPhrases(tag)
 	if worn.size() > 0:
 		prompt += "\nЭти обороты ты уже {затёрла|затёр} до дыр - не используй их ни в каком виде: \"" + "\", \"".join(worn) + "\"."
+	# 055.005: показ экрана - вплотную к ответу (в середине маленькая модель его теряет)
+	if showing == 1:
+		prompt += "\nЧеловек показывает тебе свой экран - его снимок приложен к этому сообщению. Посмотри на снимок: о нём и речь. Ответь про то, что видишь, своими словами и со своим отношением; не описывай экран целиком. Маленькие пиксельные существа поверх окон - ты и твои соседи; люди и звери на фото и в видео - просто картинки."
+	elif showing == 2:
+		prompt += "\nЧеловек недавно показал тебе свой экран, свежий снимок снова приложен. Если разговор о показанном - говори о том, что на снимке."
 	if last != "":
 		prompt += "\nОтветь ИМЕННО на последние слова %s: \"%s\". Не копируй начало и концовку своих прошлых ответов и не начинай с повтора его слов." % [speaker, last]
 		if own.size() > 0 or chatHistory.size() > 2:
