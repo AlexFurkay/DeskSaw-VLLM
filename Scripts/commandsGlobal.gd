@@ -416,7 +416,7 @@ func _cmd_aiRepetitionGuard(value: float) -> void:
 ## команды - номер (выбрать), "удалить N", имя новой модели (скачать), 0 - выход.
 ## Новая модель проверяется ДО скачивания по реестру Ollama; если заранее не
 ## понять - после, а неподходящую можно сразу удалить.
-const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "gemma4:12b", "ministral-3:14b"] # 055.004: gemma4 вместо gemma3 (стенд 24.10: лучше в ~8 раз чаще)
+const RECOMMENDED_MODELS := ["qwen3-vl:8b-instruct", "gemma4:12b"] # 055.004: gemma4 вместо gemma3 и ministral-3:14b (стенды 24.10: лучше обеих в ~8 раз чаще)
 
 func _cmd_aiModel(name: String = "") -> void:
 	if name != "":
