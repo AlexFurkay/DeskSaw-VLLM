@@ -53,6 +53,20 @@ func _migrateOldDataDir() -> void:
 	_note(Lang.t("SaveLoadSys: данные перенесены из %s (%d файлов)") % [oldRoot, copied])
 
 
+## 055.004: первый запуск на английском - настройки (шрифт, модель, звуки,
+## флирт...) берём из русской версии, чтобы не настраивать всё заново.
+## Только CONFIG.json: персонажи и предметы у каждого языка свои.
+const RU_DATA_DIR := "DDnAKFRK/DeskSawVLLM"
+func _inheritRuSettings() -> void:
+	if not Lang.isEn() or FileAccess.file_exists(conPath):
+		return
+	var ruConfig := OS.get_data_dir().path_join(RU_DATA_DIR).path_join("CONFIG.json")
+	if not FileAccess.file_exists(ruConfig):
+		return
+	if DirAccess.copy_absolute(ruConfig, ProjectSettings.globalize_path(conPath)) == OK:
+		_note(Lang.t("SaveLoadSys: настройки взяты из русской версии (%s)") % ruConfig)
+
+
 func _copyDirRecursive(from: String, to: String) -> int:
 	var count := 0
 	DirAccess.make_dir_recursive_absolute(to)
@@ -80,6 +94,7 @@ func _ready():
 		restarting = true
 		return
 	_migrateOldDataDir()
+	_inheritRuSettings()
 	# Настройки грузим ПЕРВЫМИ (было после сохранения) - иначе самый первый
 	# персонаж на чистой установке создаётся до того, как defaultSkin вообще
 	# прочитан, и молча получает "Default" вместо того, что реально задано.

@@ -85,7 +85,14 @@ static func describe(key: String) -> String:
 	if e.is_empty():
 		return ""
 	var desc := String(e["description"]).strip_edges()
-	return desc if desc != "" else String(e["name"])
+	var name := String(e["name"]).strip_edges()
+	if desc == "":
+		return name
+	# 055.004: персонаж знает и название («Кедр», «Steyr AUG»), а не только
+	# описание. Без названия - если оно авто (= имя файла) или уже есть в описании.
+	if name == "" or name == String(e["id"]) or desc.to_lower().contains(name.to_lower()):
+		return desc
+	return Lang.pick("«%s» - %s", "\"%s\" - %s") % [name, desc]
 
 
 static func isFood(key: String) -> bool:
