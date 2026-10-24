@@ -3,7 +3,7 @@ extends Node
 #i probably shouldve put these here earlier but better late than never
 
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
-const BUILD := "055.003"
+const BUILD := "055.004"
 
 ## Язык сборки: "ru" или "en" (EN-сборка - пресет с feature-тегом "en", см. Scripts/preload/lang.gd).
 var LANG: String = Lang.code()
