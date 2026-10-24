@@ -1,14 +1,17 @@
 class_name Lang
 
-## Язык сборки (EN-план, этап 1). Одна база кода, два языка:
-## EN-сборка экспортируется пресетом с feature-тегом "en"
-## (export_presets.cfg, custom_features="en"); RU - без тега.
+## Язык игры (EN-план). Одна игра, два языка, переключатель во вкладке
+## «Отладка» (см. switchTo / startupChoice ниже). Выбор хранится в
+## override.cfg рядом с exe: Godot читает его до запуска игры, так что
+## он задаёт и язык ([desksaw] lang), и папку сохранений (у EN своя -
+## DDnAKFRK/DeskSawVLLM-EN). Feature-тег "en" тоже включает EN (старый
+## способ, отдельной EN-сборки больше нет).
 ##
 ## Переведённые тексты лежат зеркалом в папке res://en/, повторяя путь
 ## оригинала: res://defaults/skins/Expie/lore.txt ->
 ## res://en/defaults/skins/Expie/lore.txt. Картинки не дублируются -
-## берутся из оригинала. Чего нет в en/ - берётся русское (RU-сборка
-## вообще не смотрит в en/ и в неё не экспортируется).
+## берутся из оригинала. Чего нет в en/ - берётся русское. В RU папка
+## en/ не читается вовсе.
 
 static func code() -> String:
 	return "en" if isEn() else "ru"
@@ -20,6 +23,80 @@ static func isEn() -> bool:
 	if _en < 0:
 		_en = 1 if OS.has_feature("en") or String(ProjectSettings.get_setting("desksaw/lang", "")) == "en" else 0
 	return _en == 1
+
+## --- Переключение языка ---
+## Файл выбора: override.cfg рядом с exe (из исходников - рядом с
+## project.godot; там же его кладёт стенд). Игра пишет его целиком.
+const CHOICE_FILE := "override.cfg"
+const EN_USER_DIR := "DDnAKFRK/DeskSawVLLM-EN"
+
+static func choicePath() -> String:
+	if OS.has_feature("template"):
+		return OS.get_executable_path().get_base_dir().path_join(CHOICE_FILE)
+	return ProjectSettings.globalize_path("res://").path_join(CHOICE_FILE)
+
+## Записать выбор. false - не удалось (папка игры защищена от записи,
+## например Program Files).
+static func writeChoice(lang: String) -> bool:
+	var t := "; DeskSaw: язык игры / game language (вкладка «Отладка» / «Debug» tab)\n"
+	t += "[desksaw]\nlang=\"%s\"\n" % lang
+	if lang == "en":
+		t += "\n[application]\nconfig/custom_user_dir_name=\"%s\"\n" % EN_USER_DIR
+	var f := FileAccess.open(choicePath(), FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(t)
+	f.close()
+	return true
+
+## Переключатель во вкладке «Отладка»: записать выбор и перезапустить игру.
+static func switchTo(lang: String) -> bool:
+	if lang == code():
+		return true
+	if not writeChoice(lang):
+		return false
+	_restart()
+	return true
+
+## Ключ ярлыка: --lang=en / --lang=ru (можно и после «--»).
+static func _langArg(a: String) -> String:
+	a = a.trim_prefix("--").trim_prefix("++").to_lower()
+	if a == "lang=en":
+		return "en"
+	if a == "lang=ru":
+		return "ru"
+	return ""
+
+static func _restart() -> void:
+	var args := PackedStringArray()
+	for a in OS.get_cmdline_args():
+		if _langArg(a) == "":
+			args.append(a)
+	OS.set_restart_on_exit(true, args)
+	(Engine.get_main_loop() as SceneTree).quit()
+
+## Вызывается первым делом при запуске (SaveLoadSys._ready, до сохранений).
+## true - игра сейчас перезапустится на другом языке, грузиться дальше нельзя.
+## Порядок: ключ ярлыка; иначе при самом первом запуске - язык Windows
+## (русский - RU, любой другой - EN). Из исходников (стенд) не срабатывает:
+## там язык задаёт только override.cfg.
+static func startupChoice() -> bool:
+	if not OS.has_feature("template"):
+		return false
+	var want := ""
+	for a in Array(OS.get_cmdline_args()) + Array(OS.get_cmdline_user_args()):
+		var l := _langArg(String(a))
+		if l != "":
+			want = l
+	if want == "" and not FileAccess.file_exists(choicePath()) and not FileAccess.file_exists("user://CONFIG.json"):
+		want = "ru" if OS.get_locale_language() == "ru" else "en"
+	if want == "" or want == code():
+		return false
+	if not writeChoice(want):
+		push_warning("Lang: не удалось записать %s - папка игры защищена от записи" % choicePath())
+		return false
+	_restart()
+	return true
 
 ## Путь к переведённой копии файла, если сборка EN и перевод есть;
 ## иначе - исходный путь без изменений.
@@ -41,7 +118,7 @@ static func pick(ru, en):
 ## переводится ШАБЛОН, а не готовая строка. Надписи в сценах (.tscn)
 ## переводятся сами: словарь подключается к TranslationServer, и Godot
 ## подменяет text у Label/Button/CheckBox при совпадении ключа.
-## RU-сборка словарь не грузит вовсе - t() возвращает текст как есть.
+## В RU словарь не грузится вовсе - t() возвращает текст как есть.
 const STRINGS_PATH := "res://en/strings.json"
 static var _dict: Dictionary = {}
 static var _ready := false

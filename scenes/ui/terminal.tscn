@@ -556,6 +556,12 @@ text = "Привет! Эти настройки лучше не трогать, 
 fit_content = true
 horizontal_alignment = 1
 
+[node name="Language" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=1593572468 instance=ExtResource("12_qw8t2")]
+layout_mode = 2
+label = "Язык игры (при смене игра перезапустится)"
+key = "uiLanguage"
+choicesLanguage = true
+
 [node name="SkinName" parent="MarginContainer/ViewportPanel/SettingsView/MarginContainer/VBoxContainer/SettingsPanel/MarginContainer/DebugPanel/ScrollContainer/VBoxContainer" unique_id=737089591 instance=ExtResource("12_qw8t2")]
 layout_mode = 2
 label = "Персонаж по умолчанию (появляется при запуске)"

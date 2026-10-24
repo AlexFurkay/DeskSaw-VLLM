@@ -69,7 +69,16 @@ func _copyDirRecursive(from: String, to: String) -> int:
 	return count
 
 
+## true - игра перезапускается на другом языке (Lang.startupChoice):
+## сохранения не грузились и не пишутся, остальным модулям ничего не делать.
+var restarting := false
+
 func _ready():
+	# Язык решаем ДО сохранений: у RU и EN разные папки данных, и смена языка
+	# (ключ ярлыка, первый запуск на нерусской Windows) - это перезапуск.
+	if Lang.startupChoice():
+		restarting = true
+		return
 	_migrateOldDataDir()
 	# Настройки грузим ПЕРВЫМИ (было после сохранения) - иначе самый первый
 	# персонаж на чистой установке создаётся до того, как defaultSkin вообще
@@ -325,6 +334,9 @@ func addPet(skin: String = "Default") -> String:
 	data["saw"][newId]["skin"] = skin
 	# случайное стартовое настроение: каждый новый персонаж приходит немного по-своему
 	data["saw"][newId]["mood"] = snappedf(randf_range(45.0, 65.0), 0.05)
+	# 055.004: и сытость тоже случайная (0 - пусто, 100 - сыт); раньше все
+	# приходили почти сытыми (90 из шаблона) и долго не просили есть
+	data["saw"][newId]["hunger"] = snappedf(randf_range(25.0, 75.0), 0.05)
 
 
 	savetodisk(savePath, data)

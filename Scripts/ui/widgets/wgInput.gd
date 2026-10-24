@@ -15,6 +15,9 @@ extends PanelContainer
 ## 054.998: вместо текстового поля - выпадающий список папок персонажей
 ## (user://skin). Для "скина по умолчанию": имя папки нельзя ввести с ошибкой.
 @export var choicesFromSkins: bool = false
+## Выпадающий выбор языка игры (Русский / English). Смена - перезапуск игры
+## (Lang.switchTo); в настройки не пишется, выбор хранит override.cfg.
+@export var choicesLanguage: bool = false
 
 @export_category("Nodes - DONT CHANGE")
 @export var _textEdit: TextEdit
@@ -28,6 +31,8 @@ func _update_label() -> void:
 	_label.text = Lang.t(label)
 
 func _update_state() -> void:
+	if choicesLanguage:
+		return
 	var init_v = gbData.settings.get(key)
 	if init_v == null:
 		# if the key doesn't exist, create it!
@@ -82,6 +87,8 @@ func _ready() -> void:
 		GlobalVariable.dataNuked.connect(_read_refresh)
 		if choicesFromSkins:
 			_setupSkinChoices()
+		elif choicesLanguage:
+			_setupLanguageChoices()
 
 
 var _choices: OptionButton
@@ -117,6 +124,26 @@ func _fillSkinChoices() -> void:
 	_choices.get_popup().add_theme_font_size_override("font_size", maxi(6, int(round(_choices.get_theme_font_size("font_size")))))
 
 
+func _setupLanguageChoices() -> void:
+	_textEdit.visible = false
+	_choices = OptionButton.new()
+	_choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_textEdit.get_parent().add_child(_choices)
+	_textEdit.get_parent().move_child(_choices, _textEdit.get_index())
+	_choices.add_item("Русский")
+	_choices.add_item("English")
+	_choices.select(1 if Lang.isEn() else 0)
+	_choices.get_popup().add_theme_font_size_override("font_size", maxi(6, int(round(_choices.get_theme_font_size("font_size")))))
+	_choices.item_selected.connect(_on_language_selected)
+
+
+func _on_language_selected(index: int) -> void:
+	if Lang.switchTo("en" if index == 1 else "ru"):
+		return # игра перезапускается
+	_choices.select(1 if Lang.isEn() else 0)
+	_label.text = Lang.t("Язык не сменить: папка игры защищена от записи. Перенеси игру в обычную папку (не Program Files).")
+
+
 func _on_choice_selected(index: int) -> void:
 	# 054.9995: программная подстановка в поле не вызывает его обработчик - выбор не
 	# сохранялся, всегда появлялась Вояджер (тест Alex 21.10). Сохраняем сами.
@@ -132,7 +159,7 @@ func _read_refresh() -> void:
 	# correctly display all values.
 	_ignore_next_change = true
 	refresh()
-	if _choices:
+	if _choices and choicesFromSkins:
 		_fillSkinChoices()
 
 func _on_text_edit_changed() -> void:

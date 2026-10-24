@@ -327,5 +327,7 @@
  "Открыть папку скинов": "Open skins folder",
  " База скинов": " Skins Database",
  " Создать ": " Spawn",
- "[color=ED2B42]БОЛЬШАЯ ЧАСТЬ АССЕТОВ ВЗЯТА ИЗ \n[color=2BEDD6]https://casualtiesunknown.miraheze.org/wiki/[/color]": "[color=ED2B42]MOST IF NOT ALL ASSETS ARE RIPPED FROM \n[color=2BEDD6]https://casualtiesunknown.miraheze.org/wiki/[/color]"
+ "[color=ED2B42]БОЛЬШАЯ ЧАСТЬ АССЕТОВ ВЗЯТА ИЗ \n[color=2BEDD6]https://casualtiesunknown.miraheze.org/wiki/[/color]": "[color=ED2B42]MOST IF NOT ALL ASSETS ARE RIPPED FROM \n[color=2BEDD6]https://casualtiesunknown.miraheze.org/wiki/[/color]",
+ "Язык игры (при смене игра перезапустится)": "Game language (the game restarts when changed)",
+ "Язык не сменить: папка игры защищена от записи. Перенеси игру в обычную папку (не Program Files).": "Can't change the language: the game folder is write-protected. Move the game to a regular folder (not Program Files)."
 }
