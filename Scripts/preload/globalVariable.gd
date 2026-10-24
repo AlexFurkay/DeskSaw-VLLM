@@ -5,6 +5,12 @@ extends Node
 ## Номер сборки - в diagnostics.txt и для проверки, какая версия у тестера.
 const BUILD := "055.003"
 
+## Язык сборки: "ru" или "en" (EN-сборка - пресет с feature-тегом "en", см. Scripts/preload/lang.gd).
+var LANG: String = Lang.code()
+
+func _ready() -> void:
+	print("LANG: %s, user dir: %s" % [LANG, OS.get_user_data_dir()])
+
 ## 054.995: журнал фраз для вкладки «Фразы» в консоли (пользователи просили
 ## видеть, что персонажи говорили, - фраза над головой быстро исчезает).
 signal phraseLogged(line: String)

@@ -79,7 +79,7 @@ static func displayNameFor(skinName: String) -> String:
 	# 054.999: сначала displayName - русское имя для речи ("Orange" модель звала
 	# "Оранжевый"); у игрока со старым паспортом его нет - берём из сборки
 	var fallback := skinName
-	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+	for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
 		if FileAccess.file_exists(path):
 			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 			if data is Dictionary:

@@ -58,7 +58,7 @@ var _descLabel: RichTextLabel
 
 ## "description" из character.json скина (папка игрока, потом встроенная).
 func _skinDescription(skinName: String) -> String:
-	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+	for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
 		if FileAccess.file_exists(path):
 			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 			if data is Dictionary:

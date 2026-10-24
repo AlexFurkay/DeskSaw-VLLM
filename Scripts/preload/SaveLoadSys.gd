@@ -106,7 +106,7 @@ func _ready():
 	# Load translation file
 	if FileAccess.file_exists(transPath):
 		text = loadjson(transPath)
-		fixMissing(text, loadjson("res://Scripts/singletons/TEMPDialogue.json"))
+		fixMissing(text, loadjson(Lang.localize("res://Scripts/singletons/TEMPDialogue.json")))
 	else:
 		newTrans()
 
@@ -123,6 +123,7 @@ func _ready():
 
 
 func _skinVersion(charJsonPath: String) -> int:
+	charJsonPath = Lang.localize(charJsonPath) # EN: паспорт из en/, если есть
 	if not FileAccess.file_exists(charJsonPath):
 		return 0
 	var data = JSON.parse_string(FileAccess.get_file_as_string(charJsonPath))
@@ -130,6 +131,7 @@ func _skinVersion(charJsonPath: String) -> int:
 
 
 func _skinTextVersion(charJsonPath: String) -> int:
+	charJsonPath = Lang.localize(charJsonPath)
 	if not FileAccess.file_exists(charJsonPath):
 		return 0
 	var data = JSON.parse_string(FileAccess.get_file_as_string(charJsonPath))
@@ -146,7 +148,7 @@ func _updateSkinTexts(srcRoot: String, dstRoot: String, skinName: String) -> voi
 	if newVer <= 0 or oldVer >= newVer:
 		return
 	for fileName in ["TRANSLATION.json", "lore.txt", "character.json"]:
-		var srcPath: String = srcRoot + "/" + fileName
+		var srcPath: String = Lang.localize(srcRoot + "/" + fileName)
 		if not FileAccess.file_exists(srcPath):
 			continue
 		var dstPath: String = dstRoot + "/" + fileName
@@ -182,7 +184,7 @@ func _copySkinFiles(srcRoot: String, dstRoot: String, onlyArtAndPassport: bool) 
 		else:
 			var out := FileAccess.open(dstPath, FileAccess.WRITE)
 			if out:
-				out.store_buffer(FileAccess.get_file_as_bytes(srcPath))
+				out.store_buffer(FileAccess.get_file_as_bytes(Lang.localize(srcPath)))
 				out.close()
 				count += 1
 	return count
@@ -262,7 +264,7 @@ func _syncBundledSkins() -> void:
 				else:
 					print("SYNC DEBUG: не смог перекодировать картинку %s" % srcPath)
 			else:
-				var fileData := FileAccess.get_file_as_bytes(srcPath)
+				var fileData := FileAccess.get_file_as_bytes(Lang.localize(srcPath)) # EN: текст из en/, если есть
 				var out := FileAccess.open(dstPath, FileAccess.WRITE)
 				if out:
 					out.store_buffer(fileData)
@@ -343,6 +345,7 @@ func newTrans():
 	var defaultTrans := "res://Scripts/singletons/TEMPDialogue.json"
 	if ResourceLoader.exists("res://defaults/TRANSLATION.json"):
 		defaultTrans = "res://defaults/TRANSLATION.json"
+	defaultTrans = Lang.localize(defaultTrans)
 
 	text = loadjson(defaultTrans).duplicate(true)
 	savetodisk(transPath, text)
@@ -442,7 +445,7 @@ func getDialogueForSkin(skinPath: String):
 	# новые категории из обновления (например healed) иначе никогда бы до
 	# него не дошли. Файл игрока ниже всё равно перекрывает эти значения,
 	# так что его собственные правки сохраняются.
-	var bundledFile := "res://defaults/skins/%s/TRANSLATION.json" % skinName
+	var bundledFile := Lang.localize("res://defaults/skins/%s/TRANSLATION.json" % skinName)
 	if FileAccess.file_exists(bundledFile):
 		var bundledText = loadjson(bundledFile)
 		if bundledText is Dictionary and bundledText.get("diaGlobal") is Dictionary:

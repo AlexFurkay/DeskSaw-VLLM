@@ -15,6 +15,7 @@ config/version="0.2.0"
 run/main_scene="uid://cqg8h324jtya"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="DDnAKFRK/DeskSawVLLM"
+config/custom_user_dir_name.en="DDnAKFRK/DeskSawVLLM-EN"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 run/low_processor_mode=true
 boot_splash/bg_color=Color(0, 0, 0, 0)

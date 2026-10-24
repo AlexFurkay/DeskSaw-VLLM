@@ -246,7 +246,7 @@ func _loreFor(skinName: String) -> String:
 		if lite:
 			text = _readText("user://skin/%s/lore_lite.txt" % skinName)
 			if text == "":
-				text = _readText("res://defaults/skins/%s/lore_lite.txt" % skinName)
+				text = _readText(Lang.localize("res://defaults/skins/%s/lore_lite.txt" % skinName))
 		if text == "":
 			text = _readText(_lorePathForSkin(skinName))
 		_loreBySkin[key] = text
@@ -264,7 +264,7 @@ func passport(skinName: String) -> Dictionary:
 		# старой версией нет новых полей (tastes, woundedPet, signatureWords) -
 		# они берутся из сборки, а то, что он правил сам, остаётся его.
 		var result := {}
-		for path in ["res://defaults/skins/%s/character.json" % skinName, "user://skin/%s/character.json" % skinName]:
+		for path in [Lang.localize("res://defaults/skins/%s/character.json" % skinName), "user://skin/%s/character.json" % skinName]:
 			if FileAccess.file_exists(path):
 				var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 				if data is Dictionary:
@@ -282,7 +282,7 @@ var _genderBySkin: Dictionary = {}
 func isFemale(skinName: String) -> bool:
 	if not _genderBySkin.has(skinName):
 		var gender := "male"
-		for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+		for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
 			if FileAccess.file_exists(path):
 				var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 				if data is Dictionary:
@@ -1172,7 +1172,7 @@ const CHAT_ANGLES := [
 
 ## Отношение персонажа к другому - из паспорта (relations[папка скина]).
 func relationTo(skinName: String, otherSkin: String) -> String:
-	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+	for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
 		if FileAccess.file_exists(path):
 			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 			if data is Dictionary and data.get("relations") is Dictionary:
@@ -1185,7 +1185,7 @@ func relationTo(skinName: String, otherSkin: String) -> String:
 ## Кто это: имя + вид, номер Saw и род из паспорта ("Voyager (вид Voyager, Saw-07, женского рода)").
 func aboutCharacter(skinName: String, withGender: bool = true) -> String:
 	var shown: String = PlayerManager.displayNameFor(skinName)
-	for path in ["user://skin/%s/character.json" % skinName, "res://defaults/skins/%s/character.json" % skinName]:
+	for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
 		if FileAccess.file_exists(path):
 			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 			if data is Dictionary:
