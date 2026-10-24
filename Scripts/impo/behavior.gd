@@ -1889,7 +1889,7 @@ func _on_state_reaction(text: String) -> void:
 ## отвечает как на подарок (рад, если это то, что просил, или вкусно; ворчит,
 ## если не то), без обычного перерыва между реакциями на предметы. Отвечает
 ## один персонаж - с самым свежим ожиданием (GlobalVariable.itemGiven).
-const GIFT_WINDOW_MS := 180000
+const GIFT_WINDOW_MS := 120000 # 2 мин (Alex 25.10, было 3)
 const WISH_ITEM_STEMS := {"banana": [" банан"], "burger": [" бургер"], "pizzaslice": [" пицц"], "bread": [" хлеб", " булк", " батон"], "juicedobry": [" сок ", " сок,", " сок.", " сок!", " сок?", " сока", " соку", " соком", " сочк"], "geofruit": [" геофрукт"], "yellowflesh": [" жёлтую плоть", " жёлтая плоть", " желтую плоть", " желтая плоть", " жёлтой плоти", " желтой плоти"]}
 const WISH_ITEM_STEMS_EN := {"banana": [" banana"], "burger": [" burger"], "pizzaslice": [" pizza"], "bread": [" bread", " bun ", " loaf"], "juicedobry": [" juice"], "geofruit": [" geofruit"], "yellowflesh": [" yellow flesh"]}
 const WISH_WORDS := [" хочу", " хотел", " хочется", " дай", " дашь", " принеси", " бы ", " не отказал", " мечтаю", " покорми", " съел бы", " съела бы"]
