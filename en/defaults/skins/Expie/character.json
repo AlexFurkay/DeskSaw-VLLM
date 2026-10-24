@@ -1,7 +1,7 @@
 {
 	"_comment": "Character passport (EN). Fields - see the comment in Dune/character.json.",
 	"version": 5,
-	"textVersion": 8,
+	"textVersion": 9,
 	"name": "Expie",
 	"gender": "male",
 	"race": "Experiment",
