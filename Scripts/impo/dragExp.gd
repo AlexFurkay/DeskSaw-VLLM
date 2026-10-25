@@ -46,9 +46,17 @@ func _ready() -> void:
 			child.mouse_exited.connect(_on_body_part_mouse_exited.bind(child))
 			child.input_event.connect(_on_body_part_input.bind(child))
 
+## 055.005 (тест Alex): Ctrl без фокуса окна - через GlobalKeys (Windows), иначе
+## приходилось сначала щёлкнуть по персонажу, чтобы Ctrl+ПКМ открыл консоль.
+func _ctrlDown() -> bool:
+	if Input.is_action_pressed("ctrl"):
+		return true
+	var keys := get_node_or_null("/root/GlobalKeys")
+	return keys != null and keys.has_method("IsCtrlDown") and bool(keys.IsCtrlDown())
+
 func _process(_delta: float) -> void:
 		## ++ adding this to make it to where wrjbgpijkdfgjndfnj the little stat window show
-	owner.get_node("textParent/Control").visible = not _hovered_bodies.is_empty() and Input.is_action_pressed("ctrl")
+	owner.get_node("textParent/Control").visible = not _hovered_bodies.is_empty() and _ctrlDown()
 	if _use_x11_input_regions:
 		_update_x11_input_regions()
 
@@ -277,7 +285,7 @@ func _on_body_part_input(_viewport: Node, event: InputEvent, _shape_idx: int, bo
 func _handleBodyClick(event: InputEventMouseButton, body: RigidBody2D) -> void:
 	#dragging
 	if event.button_index == MOUSE_BUTTON_RIGHT:
-		if Input.is_action_pressed("ctrl"):
+		if _ctrlDown():
 			GlobalVariable.TerminalOpenPressed.emit(false)
 			return
 		var mouse_pos := rigid_bodies_container.get_global_mouse_position()

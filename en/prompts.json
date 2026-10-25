@@ -244,5 +244,6 @@
  "\nТы {просила|просил} другое (%s), а дали это.": "\nYou asked for something else (%s), and you got this.",
  "\nОтветь человеку одной фразой: поблагодари, обрадуйся, удивись или поворчи - по характеру и вкусу.": "\nAnswer the human with one line: thank them, be glad, be surprised or grumble - by your character and taste.",
  "\nНа столе сейчас лежит: %s.": "\nOn the desk right now: %s.",
- "\nСобеседник говорит о предмете на столе. Реши по характеру, пойдёшь ли к нему; ТОЛЬКО если идёшь, в самом конце допиши метку [ДЕЙСТВИЕ: к предмету].": "\nThey're talking about an item on the desk. Decide by your character whether you'll go to it; ONLY if you go, add this tag at the very end: [ACTION: go to item]."
+ "\nСобеседник говорит о предмете на столе. Реши по характеру, пойдёшь ли к нему; ТОЛЬКО если идёшь, в самом конце допиши метку [ДЕЙСТВИЕ: к предмету].": "\nThey're talking about an item on the desk. Decide by your character whether you'll go to it; ONLY if you go, add this tag at the very end: [ACTION: go to item].",
+ "Ты только что {проснулась|проснулся} после сна и потягиваешься.": "You just woke up from sleep and you're stretching."
 }

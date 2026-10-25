@@ -192,19 +192,33 @@ var _startedAt := 0
 func isShowing() -> bool:
 	return richtextlabel.visible and richtextlabel.text.strip_edges() != "" and (isTyping or richtextlabel.visible_characters != 0)
 
+## 055.005 (тест Alex 25.10): 1) плашка фразы росла под длинную фразу и не сжималась -
+## короткая фраза потом висела высоко и левее (наверху пустой плашки) - высота теперь
+## подгоняется под текст; 2) по бокам фраза уходила за край экрана - держим и по X
+## (по реальной ширине текста); 3) сдвиг шёл рывками 10 раз в секунду - теперь каждый
+## кадр с плавным подтягиванием (новая фраза встаёт на место сразу).
+const PLACE_SMOOTH := 12.0 # скорость подтягивания, 1/с
+var _baseX := INF
+
 func _avoidOverlap() -> void:
 	_startedAt = Time.get_ticks_msec()
 	var h := tre
 	await get_tree().process_frame
+	var first := true
 	while is_instance_valid(richtextlabel) and tre == h and isShowing():
-		_placeLabel()
-		await get_tree().create_timer(0.1).timeout
+		_placeLabel(first)
+		first = false
+		await get_tree().process_frame
 
 
-func _placeLabel() -> void:
+func _placeLabel(snap: bool = true) -> void:
 	if _baseBottom == INF:
 		_baseBottom = BASE_LABEL_BOTTOM
-	richtextlabel.position.y = _baseBottom - richtextlabel.size.y
+	if _baseX == INF:
+		_baseX = richtextlabel.position.x
+	var prev := richtextlabel.position
+	richtextlabel.size.y = 0.0 # сожмётся до высоты текста (fit_content)
+	richtextlabel.position = Vector2(_baseX, _baseBottom - richtextlabel.size.y)
 	for _pass in 3:
 		var mine := richtextlabel.get_global_rect()
 		var moved := false
@@ -229,6 +243,17 @@ func _placeLabel() -> void:
 		box = richtextlabel.get_global_rect()
 	if box.position.y < view.position.y + 4.0:
 		richtextlabel.global_position.y += view.position.y + 4.0 - box.position.y
+		box = richtextlabel.get_global_rect()
+	# по бокам - по ширине самого текста (он по центру плашки, плашка бывает шире)
+	var half: float = minf(box.size.x, float(richtextlabel.get_content_width()) * richtextlabel.get_global_transform().get_scale().x) / 2.0
+	var cx: float = box.get_center().x
+	if cx + half > view.end.x - 4.0:
+		richtextlabel.global_position.x -= cx + half - (view.end.x - 4.0)
+	elif cx - half < view.position.x + 4.0:
+		richtextlabel.global_position.x += view.position.x + 4.0 - (cx - half)
+	if not snap:
+		var target := richtextlabel.position
+		richtextlabel.position = prev.lerp(target, clampf(get_process_delta_time() * PLACE_SMOOTH, 0.0, 1.0))
 
 ## Низ фразы в textParent - offset_bottom из sawianBase.tscn (RichTextLabel).
 const BASE_LABEL_BOTTOM := -5.2512627

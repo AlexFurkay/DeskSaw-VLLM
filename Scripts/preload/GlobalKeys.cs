@@ -169,6 +169,10 @@ public partial class GlobalKeys : Node
 
     public bool IsKeyDown(int vk) { return _down.Contains((uint)vk); }
 
+    /// 055.005 (тест Alex): Ctrl прямо у Windows - без фокуса окна игры. Godot видит
+    /// клавиши только в фокусе, и Ctrl+ПКМ по персонажу (консоль) хватал его вместо этого.
+    public bool IsCtrlDown() { return AsyncDown(0x11); }
+
     /// "Ctrl+Alt+P", "Shift+F5", "Ctrl+Shift+K"... Возвращает false, если
     /// сочетание не распознано (тогда старое остаётся как было).
     public bool SetCombo(string text)

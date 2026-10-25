@@ -36,8 +36,8 @@ var creativity := 0.7    # was "temperature" - higher = more random/wild answers
 ## keep these updated whenever their own values change - screen reactions
 ## read them to let bad mood/low health quietly colour the tone.
 var repetitionGuard := 1.2 # was "repeat_penalty" - higher = less likely to repeat the same words/phrases
-var minScreenInterval := 60.0
-var maxScreenInterval := 120.0
+var minScreenInterval := 120.0 # 055.005: значения Alex по умолчанию (config.json)
+var maxScreenInterval := 185.0
 
 ## Free text loaded from user://LORE.txt - reload at runtime with `reloadLore`.
 var lore := ""
@@ -1246,8 +1246,8 @@ const CHAT_ACTIONS_EN := {
 ## лежит на столе, и метка [ДЕЙСТВИЕ: к предмету]; персонаж идёт к нему (и ест,
 ## если это еда и его об этом просили или он сам её хотел) - behavior._doChatAction.
 var chatItems: Array = [] # что лежит на столе (короткие имена), ставит behavior перед запросом
-const ITEM_REQUEST_STEMS := [" возьми", " бери", " вон он", " вон она", " вон оно", " вон там", " вон же", " иди к ", " подойди к ", " сходи к ", " сходи за", " лежит", " на экране", " на столе", " рядом с тобой", " ешь", " съешь", " кушай", " попробуй", " угощайся"]
-const ITEM_REQUEST_STEMS_EN := [" take it", " grab it", " grab the", " go get", " get it", " right there", " over there", " go to the", " it's on the", " on the screen", " on the desk", " next to you", " eat it", " eat the", " try it", " have it", " help yourself"]
+const ITEM_REQUEST_STEMS := [" возьми", " бери", " полечись", " лечись", " используй", " перевяжись", " вон он", " вон она", " вон оно", " вон там", " вон же", " иди к ", " подойди к ", " сходи к ", " сходи за", " лежит", " на экране", " на столе", " рядом с тобой", " ешь", " съешь", " кушай", " попробуй", " угощайся"]
+const ITEM_REQUEST_STEMS_EN := [" take it", " grab it", " heal yourself", " use it", " use the", " patch yourself", " grab the", " go get", " get it", " right there", " over there", " go to the", " it's on the", " on the screen", " on the desk", " next to you", " eat it", " eat the", " try it", " have it", " help yourself"]
 func asksForItem(text: String) -> bool:
 	var low := " " + text.to_lower() + " "
 	for st in Lang.pick(ITEM_REQUEST_STEMS, ITEM_REQUEST_STEMS_EN):

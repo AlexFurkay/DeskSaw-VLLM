@@ -561,6 +561,7 @@ func sleep():
 				isSleeping = false
 				moveSys.ragdoll(true)
 				ragdolled = false
+				_sayWokeUp() # 055.005: тест Alex - Експи проснулся и промолчал
 				break
 
 				
@@ -575,6 +576,17 @@ func sleep():
 
 			await get_tree().create_timer(tick / 7).timeout
 	pass
+
+## 055.005: выспался сам - через пару секунд (успеть встать) говорит что-нибудь
+## «утреннее»; стиль - из его фраз «встал» (там «Доброе утро...», «Ещё один день...»).
+func _sayWokeUp() -> void:
+	if isPlayer:
+		return
+	await get_tree().create_timer(randf_range(1.5, 3.0)).timeout
+	if isSleeping or isUnconscious or beingDragged:
+		return
+	_say("getUp", 0.0, true, "Ты только что {проснулась|проснулся} после сна и потягиваешься.", "wake") # свой пул: не «встал после падения»
+
 
 func checker():
 	while get_tree():
@@ -635,8 +647,8 @@ func checker():
 			# "Счастливые" глаза у Expie/Voyager - закрытые дугой (часть спрайтов
 			# цельная с головой), ходить так постоянно нелогично. Только при очень
 			# высоком настроении; при поглаживании счастливое лицо включается само.
-			if moodN > 85.0:
-				currentEmotion = emotionz.happy
+			# 055.005 (тест Alex): и при очень высоком - открытые глаза; дуги «^^» -
+			# только пока гладят (petted -> setEmotion("happy")).
 
 				#ungry
 			if hungerHandler.hungry < 30.0:
@@ -1126,7 +1138,7 @@ func replyToPlayer(speaker: String, chatHistory: Array, onReply: Callable) -> vo
 ## Запасной вариант, если в ответе нет метки действия: в реплике игрока есть
 ## просьба, а в ответе - согласие без отказа.
 const CHAT_REQUEST_WORDS := {
-	"item": ["возьми", "бери", "вон он", "вон она", "вон там", "иди к ", "подойди к ", "сходи к", "сходи за", "съешь", "кушай", "попробуй", "угощайся"], # 055.005, первым: «подойди к банану»
+	"item": ["возьми", "бери", "полечись", "лечись", "используй", "перевяжись", "вон он", "вон она", "вон там", "иди к ", "подойди к ", "сходи к", "сходи за", "съешь", "кушай", "попробуй", "угощайся"], # 055.005, первым: «подойди к банану»
 	"come": ["подойди", "иди сюда", "иди ко мне", "ко мне", "сюда", "подходи"],
 	"lie": ["ляг", "ложись", "ляжь", "приляг"],
 	"sit": ["сядь", "садись", "присядь"],
@@ -1138,7 +1150,7 @@ const CHAT_YES_WORDS := ["иду", "бегу", "сейчас", "ладно", "х
 const CHAT_NO_WORDS := ["нет", "не буду", "не хочу", "не пойду", "не стану", "ни за что", "отстань", "сам "]
 
 const CHAT_REQUEST_WORDS_EN := {
-	"item": [" take it", " grab it", " grab the", " go get", " get it", " go to the", " eat it", " eat the", " try it", " help yourself"], # 055.005
+	"item": [" take it", " grab it", " heal yourself", " use it", " use the", " patch yourself", " grab the", " go get", " get it", " go to the", " eat it", " eat the", " try it", " help yourself"], # 055.005
 	"come": [" come here", " come to me", " come over", " come closer", "get over here"],
 	"lie": [" lie down", " lay down"],
 	"sit": [" sit"],
@@ -1446,10 +1458,18 @@ func _goToItem(hint: String = "") -> void:
 	var x: float = target.global_position.x
 	var side: float = signf(moveSys.rigid.global_position.x - x)
 	await _walkTo(clampf(x + (side if side != 0.0 else 1.0) * 40.0, 60.0, float(GlobalVariable.screenWidth) - 60.0), true)
-	if not is_instance_valid(target) or not _isFoodKey(key):
+	if not is_instance_valid(target):
+		return
+	var near: bool = target.global_position.distance_to(moveSys.rigid.global_position) < 260.0 * float(gbData.settings.get("petScale", 4.0)) / 4.0
+	# 055.005 (тест Alex: Експи шёл к бинту и не лечился): бинт/аптечка - полечиться,
+	# как при касании (healthHandler: звук, хп, «вылечили»). Фентанил - никогда сам.
+	if near and key != "fentanyl" and target.has_node("properties") and float(target.get_node("properties").propertyTable.get("healIfConsumable", 0.0)) > 0.0:
+		healthHandler._onItemEnter(target)
+		return
+	if not _isFoodKey(key):
 		return
 	var eat := _hasAny(low, Lang.pick(EAT_WORDS, EAT_WORDS_EN)) or key == _wishKey or (_wishKey == "food" and Time.get_ticks_msec() - _wishAt < GIFT_WINDOW_MS)
-	if eat and target.global_position.distance_to(moveSys.rigid.global_position) < 260.0 * float(gbData.settings.get("petScale", 4.0)) / 4.0:
+	if eat and near:
 		hungerHandler._onItemEnter(target) # как будто еда попала в рот: вкус, «наелся», «не буду»
 
 
@@ -2393,7 +2413,7 @@ func _pickWalkTarget() -> float:
 func _aiPetCount() -> int:
 	var n := 0
 	for p in get_tree().get_nodes_in_group("pets"):
-		if not p.isPlayer and not p.isUnconscious:
+		if not p.isPlayer and not p.isUnconscious and not p.isSleeping: # 055.005: спящий не делит частоту (тест Alex: Милки молчал, пока Експи спал)
 			n += 1
 	return maxi(1, n)
 
