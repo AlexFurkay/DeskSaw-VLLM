@@ -1421,10 +1421,17 @@ func _playerFormRule(skinTag: String, playerSkin: String) -> String:
 ## Сильные слова (смотри, глянь, покажу, зацени, на экране...) срабатывают сами;
 ## «как тебе / что скажешь / оцени» - только рядом со словом о картинке (арт,
 ## фото, видео...), иначе «как тебе спалось?» тоже сделало бы снимок.
-## Большие модели (от 10B) видят снимок ещё SHOW_FOLLOW_TURNS ответа в течение
-## SHOW_FOLLOW_MS - чтобы продолжить тему; маленьким - только в момент показа.
-const SHOW_FOLLOW_MS := 90000
-const SHOW_FOLLOW_TURNS := 2
+## Тема показанного живёт SHOW_TOPIC_MS с последнего упоминания (Alex 25.10:
+## «показ - ИИ - я - ИИ - я - забыл» звучит странно, люди говорят дольше).
+## Человек снова говорит о показанном - таймер обновляется, снимок прикладывается
+## заново. Явные слова (картинка, арт, фото, цвета, фон, закат...) - всем моделям;
+## короткие отсылки («это», «там», «туда») - только большим (от 10B): маленькой
+## снимок дорог по окну контекста, а «это» звучит почти в каждой реплике.
+const SHOW_TOPIC_MS := 120000
+var _showRefStrongRe := RegEx.create_from_string("(?<![а-яё])(картин|рисун|рисова|нарисов|дорисов|арт|фот|снимок|снимал|кадр|видео|ролик|экран|монитор|цвет|фон|закат|детал|персонаж|на ней|на нём|на нем|в руке|в углу|посмотри|глянь|смотри|красив|сюжет|хвост|глаз|лиц|морд|одежд|рубашк|уш|лап|позу|позе|поза|линии|штрих|раскрас|покрас|прикол|мем|шутк|смешн|написан|надпис|текст|чел|мужик|кот(?!ор)|пёс|собак|внизу|вверху|сверху|снизу|слева|справа|сзади|спит|лежит|валяется)")
+var _showRefWeakRe := RegEx.create_from_string("(?<![а-яё])(это|этот|эта|эти|там|туда|оттуда|тут|здесь|он|она|оно|его|её|ее|такое)(?![а-яё])")
+var _showRefStrongReEn := RegEx.create_from_string("(?<![a-z])(picture|pic|drawing|drew|draw|art|photo|shot|image|video|clip|screen|monitor|colou?rs?|background|sunset|detail|character|in the hand|in the corner|look|pretty|beautiful|scene|tail|eyes?|face|clothes|shirt|ears?|paws?|pose|lines|colou?r it|joke|meme|funny|says|written|text|guy|dude|cats?(?![a-z])|dog|at the bottom|at the top|on the left|on the right|sleeping|lying)")
+var _showRefWeakReEn := RegEx.create_from_string("(?<![a-z])(it|it's|its|this|that|these|those|there|here)(?![a-z])")
 var _showStrongRe := RegEx.create_from_string("(?<![а-яё])(посмотри|посмотрите|смотри|смотрите|гляди|глянь|гляньте|погляди|поглядите|взгляни|взгляните|зацени|заценишь|заценить|покажу|показываю|показать|покажи-ка|видишь это|видишь вот|видал|видала|узнаёшь|узнаешь|на экране|на экран|на мониторе|на монитор|на рабочем столе|скрин|скриншот|скрине)(?![а-яё])")
 var _showWeakRe := RegEx.create_from_string("(?<![а-яё])(как тебе|что скажешь|что думаешь|оцени|оценишь|нравится|ну как)(?![а-яё])")
 var _showNounRe := RegEx.create_from_string("(?<![а-яё])(арт|рисун|нарисов|картин|фот|снимок|видос|видео|ролик|мем|скрин|экран|монитор|сайт|игр|стрим|аниме|фильм|мульт|комикс|модельк|скетч|набросок|постер|обои|лаборатор|поделк|сделал|слепил)")
@@ -1447,18 +1454,25 @@ func wantsToShow(text: String) -> bool:
 	return (_showWeakReEn if en else _showWeakRe).search(low) != null and (_showNounReEn if en else _showNounRe).search(low) != null
 
 ## 0 - экран не нужен, 1 - человек показывает сейчас, 2 - продолжение темы.
-var _shownAt := {} # skinTag -> [msec, сколько ещё ответов со снимком]
+var _showTopic := {} # skinTag -> msec последнего упоминания показанного
 func _showMode(skinTag: String, speakerSkin: String, chatHistory: Array) -> int:
 	if speakerSkin != "" or chatHistory.is_empty():
 		return 0
-	if wantsToShow(String(chatHistory[chatHistory.size() - 1].get("text", ""))):
-		_shownAt[skinTag] = [Time.get_ticks_msec(), SHOW_FOLLOW_TURNS if modelBillions() >= 10.0 else 0]
+	var last := String(chatHistory[chatHistory.size() - 1].get("text", ""))
+	var now := Time.get_ticks_msec()
+	if wantsToShow(last):
+		_showTopic[skinTag] = now
 		return 1
-	var s = _shownAt.get(skinTag)
-	if s is Array and int(s[1]) > 0 and Time.get_ticks_msec() - int(s[0]) < SHOW_FOLLOW_MS:
-		s[1] = int(s[1]) - 1
+	if not _showTopic.has(skinTag) or now - int(_showTopic[skinTag]) > SHOW_TOPIC_MS:
+		return 0 # темы нет или затухла
+	var low := " " + last.to_lower() + " "
+	var en := Lang.isEn()
+	var strong := (_showRefStrongReEn if en else _showRefStrongRe).search(low) != null
+	var weak := (_showRefWeakReEn if en else _showRefWeakRe).search(low) != null
+	if strong or (weak and modelBillions() >= 10.0):
+		_showTopic[skinTag] = now # упомянул - тема живёт дальше
 		return 2
-	return 0
+	return 0 # о другом - снимка нет, тема тем временем затухает
 
 
 ## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
