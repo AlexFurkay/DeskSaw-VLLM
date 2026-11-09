@@ -1,0 +1,317 @@
+[gd_resource type="Theme" format=3 uid="uid://cle2qxvhrms2"]
+
+[ext_resource type="Texture2D" uid="uid://d22dn5lltdw18" path="res://assets/textures/ui/uiBlockNano.png" id="1_bcjv3"]
+[ext_resource type="Texture2D" uid="uid://bogcu0sckkhuc" path="res://assets/textures/ui/uiCheckBox.png" id="2_j73u5"]
+[ext_resource type="Texture2D" uid="uid://bl7a6rjqdycap" path="res://assets/textures/ui/uiCheckBoxDisabled.png" id="3_1bjkj"]
+[ext_resource type="Texture2D" uid="uid://bpcjvpjvq2i2p" path="res://assets/textures/ui/UICheckMark.png" id="4_tnxot"]
+[ext_resource type="Texture2D" uid="uid://e6chytminnqr" path="res://assets/textures/ui/UICheckMarkDisabled.png" id="5_ukn7i"]
+[ext_resource type="Texture2D" uid="uid://cup2ht5rrx2xu" path="res://assets/textures/ui/uioutline.png" id="6_b8qrs"]
+[ext_resource type="Texture2D" uid="uid://bnty16rbgawsy" path="res://assets/textures/ui/uiSlider.png" id="6_bcjv3"]
+[ext_resource type="Texture2D" uid="uid://c8u3smw23sf6v" path="res://assets/textures/ui/uiDropdown.png" id="8_j73u5"]
+[ext_resource type="FontFile" uid="uid://bh21v7uuhl7i4" path="res://assets/fonts/Retro.Gaming.Extended.ttf" id="8_pt8a6"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tnxot"]
+content_margin_left = 7.0
+content_margin_right = 7.0
+bg_color = Color(0, 0, 0, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qw8t2"]
+content_margin_left = 7.0
+content_margin_right = 7.0
+bg_color = Color(0, 0, 0, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 1, 1, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ukn7i"]
+content_margin_left = 7.0
+content_margin_right = 7.0
+bg_color = Color(0, 0, 0, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.92941177, 0.95686275, 0.95686275, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_b8qrs"]
+content_margin_left = 7.0
+content_margin_right = 7.0
+bg_color = Color(0, 0, 0, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+
+[sub_resource type="ImageTexture" id="ImageTexture_ri3og"]
+
+[sub_resource type="ImageTexture" id="ImageTexture_aaf3k"]
+
+[sub_resource type="ImageTexture" id="ImageTexture_lhi56"]
+
+[sub_resource type="ImageTexture" id="ImageTexture_hgxyn"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_16jwf"]
+texture = ExtResource("6_b8qrs")
+texture_margin_left = 4.0
+texture_margin_top = 4.0
+texture_margin_right = 4.0
+texture_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_stgv8"]
+texture = ExtResource("6_b8qrs")
+texture_margin_left = 4.0
+texture_margin_top = 4.0
+texture_margin_right = 4.0
+texture_margin_bottom = 4.0
+modulate_color = Color(0.66245234, 0.66245234, 0.6624523, 1)
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_6kb2l"]
+texture = ExtResource("6_b8qrs")
+texture_margin_left = 4.0
+texture_margin_top = 4.0
+texture_margin_right = 4.0
+texture_margin_bottom = 4.0
+modulate_color = Color(0.66245234, 0.66245234, 0.6624523, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_nmb15"]
+bg_color = Color(1, 1, 1, 1)
+expand_margin_left = 2.0
+expand_margin_top = 2.0
+expand_margin_right = 2.0
+expand_margin_bottom = 2.0
+anti_aliasing = false
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bcjv3"]
+content_margin_left = 6.0
+content_margin_top = 6.0
+content_margin_right = 6.0
+content_margin_bottom = 6.0
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.37254903, 0.37254903, 0.37254903, 1)
+corner_detail = 1
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_lvnyu"]
+content_margin_left = 6.0
+content_margin_top = 6.0
+content_margin_right = 6.0
+content_margin_bottom = 6.0
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 1, 1, 1)
+corner_detail = 1
+
+[sub_resource type="DPITexture" id="DPITexture_yiplu"]
+_source = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><path fill=\"#fff\" fill-opacity=\".75\" d=\"m1 3 2-2 5 5 5-5 2 2-5 5 5 5-2 2-5-5-5 5-2-2 5-5z\"/></svg>
+"
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_mgmpr"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(1, 1, 1, 0.75)
+draw_center = false
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+corner_detail = 5
+expand_margin_left = 2.0
+expand_margin_top = 2.0
+expand_margin_right = 2.0
+expand_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_72ypp"]
+texture = ExtResource("1_bcjv3")
+texture_margin_left = 2.0
+texture_margin_top = 2.0
+texture_margin_right = 2.0
+texture_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_8yy6x"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.1, 0.1, 0.1, 0.3)
+border_width_bottom = 2
+border_color = Color(0, 0, 0, 0.3)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+corner_detail = 5
+
+[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_fdvqc"]
+load_path = "res://.godot/imported/uiBlockNano.png-ee89e34c3037951672e466c5b938f3ac.ctex"
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_dhvi2"]
+texture = SubResource("CompressedTexture2D_fdvqc")
+texture_margin_left = 2.0
+texture_margin_top = 2.0
+texture_margin_right = 2.0
+texture_margin_bottom = 2.0
+
+[sub_resource type="ImageTexture" id="ImageTexture_a45h2"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_cb16c"]
+texture = ExtResource("1_bcjv3")
+texture_margin_left = 2.0
+texture_margin_top = 2.0
+texture_margin_right = 2.0
+texture_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxLine" id="StyleBoxLine_olc1p"]
+color = Color(1, 1, 1, 1)
+
+[sub_resource type="FontVariation" id="FontVariation_xhmmj"]
+base_font = ExtResource("8_pt8a6")
+variation_embolden = 0.66
+
+[sub_resource type="FontVariation" id="FontVariation_bcjv3"]
+base_font = ExtResource("8_pt8a6")
+variation_embolden = 0.66
+variation_transform = Transform2D(1, 0.4, 0, 1, 0, 0)
+
+[sub_resource type="FontVariation" id="FontVariation_j73u5"]
+base_font = ExtResource("8_pt8a6")
+variation_transform = Transform2D(1, 0.4, 0, 1, 0, 0)
+
+[sub_resource type="FontVariation" id="FontVariation_1bjkj"]
+base_font = ExtResource("8_pt8a6")
+
+[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_bcjv3"]
+load_path = "res://.godot/imported/uioutline.png-c3bc7f29cd5f03078525420c0c5bf478.ctex"
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_j73u5"]
+texture = SubResource("CompressedTexture2D_bcjv3")
+texture_margin_left = 4.0
+texture_margin_top = 4.0
+texture_margin_right = 4.0
+texture_margin_bottom = 4.0
+modulate_color = Color(0.5449743, 0.54497427, 0.54497427, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ri3og"]
+bg_color = Color(1, 1, 1, 1)
+expand_margin_top = 4.0
+expand_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_j73u5"]
+bg_color = Color(1, 1, 1, 1)
+expand_margin_top = 4.0
+expand_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1bjkj"]
+bg_color = Color(1, 1, 1, 1)
+expand_margin_top = 4.0
+expand_margin_bottom = 4.0
+
+[sub_resource type="FontVariation" id="FontVariation_kw77j"]
+base_font = ExtResource("8_pt8a6")
+
+[resource]
+default_font = SubResource("FontVariation_kw77j")
+default_font_size = 20
+Button/constants/line_spacing = -9
+Button/styles/disabled = SubResource("StyleBoxFlat_tnxot")
+Button/styles/focus = SubResource("StyleBoxFlat_qw8t2")
+Button/styles/hover = SubResource("StyleBoxFlat_ukn7i")
+Button/styles/normal = SubResource("StyleBoxFlat_qw8t2")
+Button/styles/pressed = SubResource("StyleBoxFlat_b8qrs")
+CheckBox/colors/checkbox_checked_color = Color(1, 1, 1, 1)
+CheckBox/colors/checkbox_unchecked_color = Color(1, 1, 1, 1)
+CheckBox/colors/font_color = Color(0.875, 0.875, 0.875, 1)
+CheckBox/colors/font_disabled_color = Color(0.875, 0.875, 0.875, 0.5)
+CheckBox/colors/font_focus_color = Color(0.95, 0.95, 0.95, 1)
+CheckBox/colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
+CheckBox/colors/font_hover_pressed_color = Color(1, 1, 1, 1)
+CheckBox/colors/font_outline_color = Color(0, 0, 0, 1)
+CheckBox/colors/font_pressed_color = Color(1, 1, 1, 1)
+CheckBox/constants/check_v_offset = 0
+CheckBox/constants/h_separation = 4
+CheckBox/constants/outline_size = 0
+CheckBox/icons/checked = ExtResource("2_j73u5")
+CheckBox/icons/checked_disabled = ExtResource("3_1bjkj")
+CheckBox/icons/radio_checked = ExtResource("4_tnxot")
+CheckBox/icons/radio_checked_disabled = ExtResource("5_ukn7i")
+CheckBox/icons/radio_unchecked = SubResource("ImageTexture_ri3og")
+CheckBox/icons/radio_unchecked_disabled = SubResource("ImageTexture_aaf3k")
+CheckBox/icons/unchecked = SubResource("ImageTexture_lhi56")
+CheckBox/icons/unchecked_disabled = SubResource("ImageTexture_hgxyn")
+CheckBox/styles/disabled = SubResource("StyleBoxTexture_16jwf")
+CheckBox/styles/focus = SubResource("StyleBoxTexture_stgv8")
+CheckBox/styles/hover = SubResource("StyleBoxTexture_stgv8")
+CheckBox/styles/hover_pressed = SubResource("StyleBoxTexture_6kb2l")
+CheckBox/styles/normal = SubResource("StyleBoxTexture_16jwf")
+CheckBox/styles/pressed = SubResource("StyleBoxTexture_16jwf")
+HScrollBar/styles/grabber = SubResource("StyleBoxFlat_nmb15")
+HScrollBar/styles/grabber_highlight = SubResource("StyleBoxFlat_nmb15")
+HScrollBar/styles/grabber_pressed = SubResource("StyleBoxFlat_nmb15")
+HScrollBar/styles/scroll = SubResource("StyleBoxFlat_bcjv3")
+HScrollBar/styles/scroll_focus = SubResource("StyleBoxFlat_bcjv3")
+HSlider/icons/grabber = ExtResource("6_bcjv3")
+HSlider/icons/grabber_disabled = ExtResource("6_bcjv3")
+HSlider/icons/grabber_highlight = ExtResource("6_bcjv3")
+HSlider/styles/grabber_area = SubResource("StyleBoxFlat_lvnyu")
+HSlider/styles/grabber_area_highlight = SubResource("StyleBoxFlat_lvnyu")
+HSlider/styles/slider = SubResource("StyleBoxFlat_bcjv3")
+Label/constants/line_spacing = -9
+LineEdit/colors/caret_color = Color(0.95, 0.95, 0.95, 1)
+LineEdit/colors/clear_button_color = Color(0.875, 0.875, 0.875, 1)
+LineEdit/colors/clear_button_color_pressed = Color(1, 1, 1, 1)
+LineEdit/colors/font_color = Color(0.875, 0.875, 0.875, 1)
+LineEdit/colors/font_outline_color = Color(0, 0, 0, 1)
+LineEdit/colors/font_placeholder_color = Color(0.875, 0.875, 0.875, 0.6)
+LineEdit/colors/font_selected_color = Color(1, 1, 1, 1)
+LineEdit/colors/font_uneditable_color = Color(0.875, 0.875, 0.875, 0.5)
+LineEdit/colors/selection_color = Color(0.5, 0.5, 0.5, 1)
+LineEdit/constants/caret_width = 1
+LineEdit/constants/minimum_character_width = 4
+LineEdit/constants/outline_size = 0
+LineEdit/icons/clear = SubResource("DPITexture_yiplu")
+LineEdit/styles/focus = SubResource("StyleBoxFlat_mgmpr")
+LineEdit/styles/normal = SubResource("StyleBoxTexture_72ypp")
+LineEdit/styles/read_only = SubResource("StyleBoxFlat_8yy6x")
+OptionButton/icons/arrow = ExtResource("8_j73u5")
+Panel/styles/panel = SubResource("StyleBoxTexture_dhvi2")
+PopupMenu/constants/outline_size = 0
+PopupMenu/constants/v_separation = 2
+PopupMenu/icons/radio_checked = ExtResource("4_tnxot")
+PopupMenu/icons/radio_checked_disabled = ExtResource("5_ukn7i")
+PopupMenu/icons/radio_unchecked = SubResource("ImageTexture_a45h2")
+PopupMenu/icons/radio_unchecked_disabled = SubResource("ImageTexture_a45h2")
+PopupMenu/styles/panel = SubResource("StyleBoxTexture_cb16c")
+PopupMenu/styles/separator = SubResource("StyleBoxLine_olc1p")
+RichTextLabel/constants/line_separation = -9
+RichTextLabel/fonts/bold_font = SubResource("FontVariation_xhmmj")
+RichTextLabel/fonts/bold_italics_font = SubResource("FontVariation_bcjv3")
+RichTextLabel/fonts/italics_font = SubResource("FontVariation_j73u5")
+RichTextLabel/fonts/mono_font = SubResource("FontVariation_1bjkj")
+TextEdit/constants/line_spacing = -9
+TextEdit/styles/focus = SubResource("StyleBoxTexture_16jwf")
+TextEdit/styles/normal = SubResource("StyleBoxTexture_16jwf")
+TextEdit/styles/read_only = SubResource("StyleBoxTexture_j73u5")
+VScrollBar/styles/grabber = SubResource("StyleBoxFlat_ri3og")
+VScrollBar/styles/grabber_highlight = SubResource("StyleBoxFlat_j73u5")
+VScrollBar/styles/grabber_pressed = SubResource("StyleBoxFlat_1bjkj")
+VScrollBar/styles/scroll = SubResource("StyleBoxFlat_bcjv3")
+VScrollBar/styles/scroll_focus = SubResource("StyleBoxFlat_bcjv3")

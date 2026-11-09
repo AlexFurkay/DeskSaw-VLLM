@@ -1,0 +1,54 @@
+[gd_scene format=3]
+
+[ext_resource type="Shader" uid="uid://b1x03c3wn85hg" path="res://assets/shaders/outline.gdshader" id="1_sh"]
+[ext_resource type="Texture2D" path="res://assets/objectSpr/KnifeClassic.png" id="2_tx"]
+[ext_resource type="Script" uid="uid://cbm2skouhq87k" path="res://Scripts/impo/dragObj.gd" id="3_dr"]
+[ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_pr"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ol"]
+shader = ExtResource("1_sh")
+shader_parameter/thickness = 0.0
+shader_parameter/ring_count = 4
+shader_parameter/ring_offset = 0.0
+shader_parameter/outline_color = Color(0, 0, 0.22745098, 1)
+shader_parameter/border_clipping_fix = true
+shader_parameter/aspect_ratio = 1.0
+shader_parameter/square_border = true
+shader_parameter/offset = Vector2(0, 0)
+shader_parameter/max_or_add = false
+
+[node name="Body" type="RigidBody2D"]
+mass = 0.001
+metadata/Category = "object"
+
+[node name="Detector" type="Area2D" parent="."]
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture_filter = 1
+material = SubResource("ShaderMaterial_ol")
+scale = Vector2(3.3, 3.3)
+texture = ExtResource("2_tx")
+
+[node name="draggable" type="Node" parent="." node_paths=PackedStringArray("sprite")]
+script = ExtResource("3_dr")
+sprite = NodePath("../Sprite")
+metadata/_custom_type_script = "uid://cbm2skouhq87k"
+
+[node name="properties" type="Node" parent="."]
+script = ExtResource("4_pr")
+propertyTable = {
+"consumable": false,
+"danger": 0,
+"interest": 2,
+"object": true,
+"replenishIfConsumable": 0.0
+}
+
+[node name="Poly0" type="CollisionPolygon2D" parent="."]
+scale = Vector2(3.3, 3.3)
+polygon = PackedVector2Array(-5.5, -2.5, -18.5, -0.5, -18.5, 1.5, -6.5, 1.5, -6.5, 3.5, 5.5, 3.5, 14.5, 3.5, 16.5, 1.5, 18.5, 1.5, 17.5, 0.5, 17.5, -0.5, 14.5, -0.5, 14.5, -1.5, -2.5, -1.5, -3.5, -2.5, -3.5, -3.5, -5.5, -3.5)
+
+[node name="Grab0_0" type="CollisionPolygon2D" parent="Detector"]
+scale = Vector2(3.3, 3.3)
+polygon = PackedVector2Array(-6.12132, -5, -7, -4.12132, -7, -3.78688, -19.2769, -1.89813, -20, -1.05527, -20, 2.12132, -19.12132, 3, -8, 3, -8, 4.12132, -7.12132, 5, 14.79837, 5, 15.34968, 4.77164, 17.12132, 3, 19.50227, 3, 20.26937, 1.14805, 19, -0.12132, 19, -1.12132, 18.12132, -2, 16, -2, 16, -2.12132, 15.12132, -3, -1.87868, -3, -2, -3.12132, -2, -4.12132, -2.87868, -5)
+

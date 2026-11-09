@@ -1,0 +1,257 @@
+# Copyright (c) 2020-2025 Mansur Isaev and contributors - MIT License
+# See `LICENSE.md` included in the source distribution for details.
+
+@tool
+## Default container for Console output/input.
+extends VBoxContainer
+
+
+const ConsoleNode: GDScript = preload("res://addons/godot-console/scripts/console.gd")
+
+
+var _console : ConsoleNode
+
+var _console_output : RichTextLabel
+var _console_input : LineEdit
+
+var _tooltip_label : RichTextLabel
+
+# Cycle through the autocomplete options. negative value indicates no selection.
+var _autocomplete_index: int = -1
+# Preserve the original input text when cycling through options.
+var _autocomplete_prompt: String = ""
+
+## 04.11: всё напечатанное хранится кусками - чтобы при щелчке переключателя в списке help
+## перерисовать вывод с новыми ВКЛ/ВЫКЛ (метки Console.STATE_TOKEN подставляются при выводе).
+const MAX_CHUNKS := 3000
+var _chunks: PackedStringArray = PackedStringArray()
+var _hasTokens := false
+var _tokenRe := RegEx.create_from_string("%%STATE:([A-Za-z0-9_]+)%%")
+
+
+func _init() -> void:
+	_console_output = RichTextLabel.new()
+	_console_output.size_flags_vertical = SIZE_EXPAND_FILL
+	_console_output.scroll_following = true
+	_console_output.selection_enabled = true
+	_console_output.focus_mode = Control.FOCUS_NONE
+	_console_output.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST # пиксельные значки в списке help (04.11)
+	self.add_child(_console_output, false, Node.INTERNAL_MODE_FRONT)
+
+	_console_input = LineEdit.new()
+	_console_input.context_menu_enabled = false
+	_console_input.clear_button_enabled = true
+	_console_input.caret_blink = true
+	_console_input.placeholder_text = "Command"
+	_console_input.clear_button_enabled = true
+	_console_input.editable = false
+
+	var error := _console_input.text_changed.connect(_on_input_text_changed)
+	assert(error == OK, error_string(error))
+
+	error = _console_input.gui_input.connect(_on_input_gui_event)
+	assert(error == OK, error_string(error))
+
+	error = _console_output.meta_clicked.connect(_on_meta_clicked)
+	assert(error == OK, error_string(error))
+
+	self.add_child(_console_input, false, Node.INTERNAL_MODE_FRONT)
+
+	_tooltip_label = RichTextLabel.new()
+	_tooltip_label.set_theme_type_variation(&"TooltipPanel")
+	_tooltip_label.set_use_bbcode(true)
+	_tooltip_label.set_autowrap_mode(TextServer.AUTOWRAP_OFF)
+	_tooltip_label.set_fit_content(true)
+	_tooltip_label.set_v_grow_direction(Control.GROW_DIRECTION_BEGIN)
+	_tooltip_label.set_offset(SIDE_LEFT, 4.0)
+	_tooltip_label.set_offset(SIDE_BOTTOM, -4.0)
+	_tooltip_label.hide()
+	_console_input.add_child(_tooltip_label)
+
+
+func _enter_tree() -> void:
+	var error := visibility_changed.connect(_on_visibility_changed)
+	assert(error == OK, error_string(error))
+
+	set_console(get_node_or_null(^"/root/Console") as ConsoleNode)
+	_tooltip_label.add_theme_stylebox_override(&"normal", get_theme_stylebox(&"panel", &"TooltipPanel"))
+
+
+func _exit_tree() -> void:
+	set_console(null)
+
+
+func set_console(console: ConsoleNode) -> void:
+	if is_same(_console, console):
+		return
+
+	if is_instance_valid(_console):
+		if _console.printed_line.is_connected(_on_printed_line):
+			_console.printed_line.disconnect(_on_printed_line)
+
+		if _console.cleared.is_connected(_on_cleared):
+			_console.cleared.disconnect(_on_cleared)
+
+		if _console.states_changed.is_connected(_rerender):
+			_console.states_changed.disconnect(_rerender)
+
+		if _console.progress_line.is_connected(_on_progress_line):
+			_console.progress_line.disconnect(_on_progress_line)
+
+	if is_instance_valid(console):
+		if not console.printed_line.is_connected(_on_printed_line):
+			var error := console.printed_line.connect(_on_printed_line)
+			assert(error == OK, error_string(error))
+
+		if not console.cleared.is_connected(_on_cleared):
+			var error := console.cleared.connect(_on_cleared)
+			assert(error == OK, error_string(error))
+
+		if not console.states_changed.is_connected(_rerender):
+			console.states_changed.connect(_rerender)
+
+		if not console.progress_line.is_connected(_on_progress_line):
+			console.progress_line.connect(_on_progress_line)
+
+	_console = console
+	_console_input.editable = is_instance_valid(_console)
+
+
+## После "строка\n" последний абзац пустой - сама строка прогресса предпоследняя.
+func _on_progress_line(string: String, replace: bool) -> void:
+	var count := _console_output.get_paragraph_count()
+	if replace and count >= 2:
+		_console_output.remove_paragraph(count - 2)
+	_console_output.append_text(string + "\n")
+	if replace and not _chunks.is_empty():
+		_chunks[_chunks.size() - 1] = string + "\n"
+	else:
+		_remember(string + "\n")
+
+
+func _remember(text: String) -> void:
+	_chunks.append(text)
+	if _chunks.size() > MAX_CHUNKS:
+		_chunks = _chunks.slice(_chunks.size() - MAX_CHUNKS + 500)
+	if text.contains("%%STATE:"):
+		_hasTokens = true
+
+
+func _on_printed_line(text: String) -> void:
+	_remember(text)
+	_console_output.append_text(_render(text))
+
+
+func _on_cleared() -> void:
+	_chunks.clear()
+	_hasTokens = false
+	_console_output.clear()
+
+
+## Метки состояния -> текст (ВКЛ/ВЫКЛ, «открыть»...), см. Console.state_text.
+func _render(text: String) -> String:
+	if not text.contains("%%STATE:"):
+		return text
+	var out := text
+	for m in _tokenRe.search_all(text):
+		var cmd := m.get_string(1)
+		var shown := ""
+		if is_instance_valid(_console) and _console.state_text.is_valid():
+			shown = String(_console.state_text.call(cmd))
+		out = out.replace(m.get_string(0), shown)
+	return out
+
+
+## Переключили что-то из списка help - перерисовать вывод с новыми состояниями, не сбивая прокрутку.
+func _rerender() -> void:
+	if not _hasTokens or not is_inside_tree():
+		return
+	var bar := _console_output.get_v_scroll_bar()
+	var atBottom := bar.value >= bar.max_value - bar.page - 4.0
+	var keep := bar.value
+	var follow := _console_output.scroll_following
+	_console_output.scroll_following = false
+	_console_output.clear()
+	var parts := PackedStringArray()
+	for c in _chunks:
+		parts.append(_render(c))
+	_console_output.append_text("".join(parts))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if atBottom:
+		bar.value = bar.max_value
+	else:
+		bar.value = keep
+	_console_output.scroll_following = follow
+
+
+## Ссылки в выводе: «cmd:имя» - команда из списка help (окно/переключатель/кнопка),
+## http - открыть в браузере, остальное (как раньше) - вставить в строку ввода.
+func _on_meta_clicked(meta: Variant) -> void:
+	var m := String(meta)
+	if m.begins_with("cmd:"):
+		if is_instance_valid(_console):
+			_console.command_link_clicked.emit(m.substr(4).strip_edges())
+		return
+	if m.begins_with("http://") or m.begins_with("https://"):
+		OS.shell_open(m)
+		return
+	set_input_text(m)
+
+
+func get_console() -> ConsoleNode:
+	return _console
+
+
+func set_input_text(text: String) -> void:
+	_console_input.set_text(text)
+	_console_input.set_caret_column(text.length())
+	_console_input.text_changed.emit(text)
+
+
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree():
+		_console_input.grab_focus()
+		_console_input.accept_event()
+
+
+func _show_autocomplete(text: String) -> void:
+	var autocomplete := PackedStringArray() if text.is_empty() else _console.autocomplete_list(text, _autocomplete_index)
+
+	if autocomplete.is_empty():
+		_tooltip_label.hide()
+	else:
+		_tooltip_label.set_text("\n".join(autocomplete))
+		_tooltip_label.show()
+
+func _on_input_text_changed(text: String) -> void:
+	_show_autocomplete(text if _autocomplete_prompt.is_empty() else _autocomplete_prompt)
+
+func _cycle_autocomplete(direction: int) -> void:
+	var autocomplete: PackedStringArray = _console.autocomplete_list(_autocomplete_prompt)
+	_autocomplete_index = wrapi(_autocomplete_index + direction, 0, autocomplete.size())
+	set_input_text(_console.autocomplete_command(_autocomplete_prompt, _autocomplete_index))
+
+func _on_input_gui_event(event: InputEvent) -> void:
+	if event.is_action_type() and not event.is_action(&"ui_text_indent"):
+		# Start below zero so the first tab press "selects" the autocomplete.
+		_autocomplete_index = -1
+		_autocomplete_prompt = ""
+		_show_autocomplete(_console_input.text)
+
+	if event.is_action_pressed(&"ui_text_submit"):
+		_console.execute(_console_input.text)
+		_console_input.clear()
+	elif event.is_action_pressed(&"ui_text_completion_accept"):
+		if _autocomplete_prompt.is_empty():
+			_autocomplete_prompt = _console_input.text
+
+		_cycle_autocomplete(-1 if Input.is_key_pressed(KEY_SHIFT) else 1)
+	elif event.is_action_pressed(&"ui_text_caret_up"):
+		set_input_text(_console.get_prev_command())
+	elif event.is_action_pressed(&"ui_text_caret_down"):
+		set_input_text(_console.get_next_command())
+	else:
+		return
+
+	_console_input.accept_event()

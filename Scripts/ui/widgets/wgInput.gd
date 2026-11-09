@@ -1,0 +1,218 @@
+@tool
+extends PanelContainer
+
+@export_category("Settings")
+
+## Text to be shown alongside the checkbox.
+@export_multiline var label: String:
+	set(new_label):
+		label = new_label
+		_update_label()
+## Config. key to change when switching the checkbox.
+@export var key: String
+## If the key hasn't been created before, which should be it's default value?
+@export var defaultValue: String
+## 054.998: вместо текстового поля - выпадающий список папок персонажей
+## (user://skin). Для "скина по умолчанию": имя папки нельзя ввести с ошибкой.
+@export var choicesFromSkins: bool = false
+## Выпадающий выбор языка игры (Русский / English). Смена - перезапуск игры
+## (Lang.switchTo); в настройки не пишется, выбор хранит override.cfg.
+@export var choicesLanguage: bool = false
+## 05.11 (Alex): вместо поля - стрелки «< 1.5 >» (шаг stepValue, пределы stepMin..stepMax)
+@export var stepValue: float = 0.0
+@export var stepMin: float = 0.5
+@export var stepMax: float = 3.0
+
+@export_category("Nodes - DONT CHANGE")
+@export var _textEdit: TextEdit
+@export var _label: RichTextLabel
+
+func _update_label() -> void:
+	# this function is called before the label can ready up, which is
+	# prettyy annoying. couldn't find a proper way to call this once.
+	if not _label:
+		return
+	_label.text = Lang.t(label)
+
+func _update_state() -> void:
+	if choicesLanguage:
+		return
+	var init_v = gbData.settings.get(key)
+	if init_v == null:
+		# if the key doesn't exist, create it!
+		_init_variable(false)
+		_textEdit.text = defaultValue
+	elif init_v is int or init_v is float:
+		# старые версии сохраняли интервалы числом - поле оставалось пустым
+		var num: float = float(init_v)
+		_textEdit.text = str(int(num)) if is_equal_approx(num, roundf(num)) else str(num)
+		gbData.settings.set(key, _textEdit.text)
+	elif !(init_v is String):
+		# if the key is not text, fuss about it!
+		push_error("Key '%s' is not a string! input widgets are not made for these!" % [key])
+		# for the sake of preventing confusion, we won't initiate the variable on
+		# failure to load. instead, make sure you're not mixing up key types and widgets!
+		###_init_variable(true)
+	else:
+		_textEdit.text = init_v
+
+func _init_variable(save: bool = false) -> void:
+	gbData.settings.set(key, defaultValue)
+	if save:
+		gbData.savetodisk(gbData.conPath, gbData.settings)
+
+func refresh() -> void:
+	_update_label()
+	_update_state()
+
+## 054.9992: в "Игровом режиме" поля интервалов серые и показывают "x2";
+## при выключении - снова сохранённые значения (их режим не трогает).
+const PACE_KEYS := ["minDialogueTime", "maxDialogueTime", "llmMinInterval", "llmMaxInterval", "petTalkMin", "petTalkMax"]
+
+func _applyGameMode() -> void:
+	if not PACE_KEYS.has(key):
+		return
+	var on: bool = gbData.settings.get("gameMode", false)
+	if on and _textEdit.editable:
+		_textEdit.editable = false
+		_textEdit.modulate = Color(1, 1, 1, 0.45)
+		_textEdit.text = "x2"
+	elif not on and not _textEdit.editable:
+		_textEdit.editable = true
+		_textEdit.modulate = Color(1, 1, 1, 1)
+		_textEdit.text = str(gbData.settings.get(key, defaultValue))
+
+func _ready() -> void:
+	if not Engine.is_editor_hint():
+		refresh()
+		_textEdit.text_changed.connect(_on_text_edit_changed)
+		gbData.SettingsChanged.connect(_applyGameMode)
+		_applyGameMode()
+		GlobalVariable.dataNuked.connect(_read_refresh)
+		if choicesFromSkins:
+			_setupSkinChoices()
+		elif choicesLanguage:
+			_setupLanguageChoices()
+		elif stepValue > 0.0:
+			_setupStepper()
+
+
+var _stepLabel: Label
+
+func _setupStepper() -> void:
+	_textEdit.visible = false
+	var box := HBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	_textEdit.get_parent().add_child(box)
+	_textEdit.get_parent().move_child(box, _textEdit.get_index())
+	var mk := func(t: String, d: float):
+		var b := Button.new()
+		b.text = t
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func(): _stepBy(d))
+		box.add_child(b)
+	mk.call("  <  ", -stepValue)
+	_stepLabel = Label.new()
+	_stepLabel.custom_minimum_size = Vector2(60, 0)
+	_stepLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(_stepLabel)
+	mk.call("  >  ", stepValue)
+	_stepBy(0.0)
+
+
+func _stepBy(d: float) -> void:
+	var cur := float(GlobalVariable.getNumFromString(_textEdit.text))
+	if cur <= 0.0:
+		cur = float(defaultValue)
+	var v := clampf(snappedf(cur + d, stepValue), stepMin, stepMax)
+	_stepLabel.text = "%.1f" % v
+	if d != 0.0:
+		_textEdit.text = "%.1f" % v # поле скрыто, но настройку пишет его обработчик
+		_on_text_edit_changed()
+
+
+var _choices: OptionButton
+
+func _setupSkinChoices() -> void:
+	_textEdit.visible = false
+	_choices = OptionButton.new()
+	_choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_textEdit.get_parent().add_child(_choices)
+	_textEdit.get_parent().move_child(_choices, _textEdit.get_index())
+	_fillSkinChoices()
+	_choices.item_selected.connect(_on_choice_selected)
+	# новые папки скинов могли появиться после запуска - список при каждом открытии
+	_choices.get_popup().about_to_popup.connect(_fillSkinChoices)
+
+
+func _fillSkinChoices() -> void:
+	var current := String(gbData.settings.get(key, defaultValue))
+	_choices.clear()
+	var names: Array = []
+	var dir := DirAccess.open("user://skin")
+	if dir:
+		for d in dir.get_directories():
+			if d != "Body" and d != "Default":
+				names.append(d)
+	names.sort()
+	if not names.has(current):
+		names.push_front(current) # чужое/старое значение не теряем молча
+	for n in names:
+		_choices.add_item(n)
+	_choices.select(names.find(current))
+	# список - отдельное окно, общий масштаб текста консоли его не задевает
+	_choices.get_popup().add_theme_font_size_override("font_size", maxi(6, int(round(_choices.get_theme_font_size("font_size")))))
+
+
+func _setupLanguageChoices() -> void:
+	_textEdit.visible = false
+	_choices = OptionButton.new()
+	_choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_textEdit.get_parent().add_child(_choices)
+	_textEdit.get_parent().move_child(_choices, _textEdit.get_index())
+	_choices.add_item("Русский")
+	_choices.add_item("English")
+	_choices.select(1 if Lang.isEn() else 0)
+	_choices.get_popup().add_theme_font_size_override("font_size", maxi(6, int(round(_choices.get_theme_font_size("font_size")))))
+	_choices.item_selected.connect(_on_language_selected)
+
+
+func _on_language_selected(index: int) -> void:
+	if Lang.switchTo("en" if index == 1 else "ru"):
+		return # игра перезапускается
+	_choices.select(1 if Lang.isEn() else 0)
+	_label.text = Lang.t("Язык не сменить: папка игры защищена от записи. Перенеси игру в обычную папку (не Program Files).")
+
+
+func _on_choice_selected(index: int) -> void:
+	# 054.9995: программная подстановка в поле не вызывает его обработчик - выбор не
+	# сохранялся, всегда появлялась Вояджер (тест Alex 21.10). Сохраняем сами.
+	var v := _choices.get_item_text(index)
+	_textEdit.text = v
+	gbData.settings.set(key, v)
+	gbData.savetodisk(gbData.conPath, gbData.settings)
+	gbData.SettingsChanged.emit()
+
+var _ignore_next_change: bool = false
+func _read_refresh() -> void:
+	# currently calling this when we nuke our config to
+	# correctly display all values.
+	_ignore_next_change = true
+	refresh()
+	if _choices and choicesFromSkins:
+		_fillSkinChoices()
+	if _stepLabel:
+		_stepBy(0.0)
+
+func _on_text_edit_changed() -> void:
+	if _ignore_next_change:
+		_ignore_next_change = false
+		return
+
+	if not _textEdit.editable:
+		return # "x2" игрового режима - не значение, в настройки не пишем
+	var v = _textEdit.text
+	gbData.settings.set(key, v)
+	print("Key '%s' [%s] set to '%s'" % [label, key, v])
+	gbData.SettingsChanged.emit()

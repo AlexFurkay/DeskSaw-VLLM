@@ -1,0 +1,53 @@
+[gd_scene format=3]
+
+[ext_resource type="Shader" uid="uid://b1x03c3wn85hg" path="res://assets/shaders/outline.gdshader" id="1_sh"]
+[ext_resource type="Texture2D" path="res://assets/objectSpr/M110.png" id="2_tx"]
+[ext_resource type="Script" uid="uid://cbm2skouhq87k" path="res://Scripts/impo/dragObj.gd" id="3_dr"]
+[ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_pr"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ol"]
+shader = ExtResource("1_sh")
+shader_parameter/thickness = 0.0
+shader_parameter/ring_count = 4
+shader_parameter/ring_offset = 0.0
+shader_parameter/outline_color = Color(0, 0, 0.22745098, 1)
+shader_parameter/border_clipping_fix = true
+shader_parameter/aspect_ratio = 1.0
+shader_parameter/square_border = true
+shader_parameter/offset = Vector2(0, 0)
+shader_parameter/max_or_add = false
+
+[node name="Body" type="RigidBody2D"]
+mass = 0.001
+metadata/Category = "object"
+
+[node name="Detector" type="Area2D" parent="."]
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture_filter = 1
+material = SubResource("ShaderMaterial_ol")
+scale = Vector2(4, 4)
+texture = ExtResource("2_tx")
+
+[node name="draggable" type="Node" parent="." node_paths=PackedStringArray("sprite")]
+script = ExtResource("3_dr")
+sprite = NodePath("../Sprite")
+metadata/_custom_type_script = "uid://cbm2skouhq87k"
+
+[node name="properties" type="Node" parent="."]
+script = ExtResource("4_pr")
+propertyTable = {
+"consumable": false,
+"danger": 0,
+"interest": 2,
+"object": true,
+"replenishIfConsumable": 0.0
+}
+
+[node name="Poly0" type="CollisionPolygon2D" parent="."]
+scale = Vector2(4, 4)
+polygon = PackedVector2Array(-8.5, -9.0, -9.5, -9.0, -9.5, -6.0, -17.5, -6.0, -18.5, -4.0, -35.5, -4.0, -35.5, 7.0, -32.5, 7.0, -30.5, 5.0, -30.5, 4.0, -26.5, 4.0, -20.5, 1.0, -15.5, 1.0, -17.5, 8.0, -18.5, 8.0, -18.5, 10.0, -15.5, 10.0, -15.5, 11.0, -12.5, 7.0, -12.5, 5.0, -7.5, 5.0, -7.5, 11.0, -3.5, 10.0, -0.5, 10.0, -0.5, 3.0, 1.5, 0.0, 1.5, -1.0, 31.5, -2.0, 34.5, -2.0, 32.5, -4.0, 30.5, -4.0, 30.5, -6.0, -0.5, -6.0, -0.5, -8.0, -3.5, -9.0, -3.5, -11.0, -8.5, -11.0)
+
+[node name="Grab0_0" type="CollisionPolygon2D" parent="Detector"]
+scale = Vector2(4, 4)
+polygon = PackedVector2Array(-9.12131977081299, -12.5, -10.0, -11.621319770813, -10.0, -10.5, -10.121319770813, -10.5, -11.0, -9.62131977081299, -11.0, -7.5, -17.9261207580566, -7.5, -18.6510696411133, -7.05194997787476, -19.4270496368408, -5.5, -36.1213188171387, -5.5, -37.0, -4.62131977081299, -37.0, 7.62131977081299, -36.1213188171387, 8.5, -32.2016296386719, 8.5, -31.6503200531006, 8.27163982391357, -29.2283592224121, 5.84967994689941, -29.0835208892822, 5.5, -26.3253498077393, 5.5, -25.9853897094727, 5.41975021362305, -20.1459007263184, 2.5, -17.4885997772217, 2.5, -18.6314601898193, 6.5, -19.1213207244873, 6.5, -20.0, 7.37868022918701, -20.0, 10.621319770813, -19.1213207244873, 11.5, -17.0, 11.5, -17.0, 12.0811395645142, -14.9486799240112, 12.7649097442627, -11.1539497375488, 7.7052698135376, -11.0, 7.24342012405396, -11.0, 6.5, -9.0, 6.5, -9.0, 11.7318897247314, -7.84624004364014, 12.6327199935913, -3.3153600692749, 11.5, 0.12132000178099, 11.5, 1.0, 10.621319770813, 1.0, 3.4541699886322, 2.87127995491028, 0.64724999666214, 2.93003988265991, 0.45315998792648, 31.5250701904297, -0.5, 35.502269744873, -0.5, 36.2693710327148, -2.35194993019104, 33.349681854248, -5.27163982391357, 32.7983703613281, -5.5, 32.0, -5.5, 32.0, -6.62131977081299, 31.1213207244873, -7.5, 1.0, -7.5, 1.0, -8.48423004150391, 0.43373000621796, -9.26990032196045, -2.0, -10.081130027771, -2.0, -11.621319770813, -2.87867999076843, -12.5)

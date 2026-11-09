@@ -1,0 +1,4609 @@
+extends Node
+
+## Autoload: LLMManager
+##
+## Two independent sources of AI-generated lines, sharing one request queue:
+##
+## 1. Screen reactions - every minScreenInterval..maxScreenInterval seconds,
+##    grabs the desktop via ScreenCapture (C#) and sends it to a local Ollama
+##    vision model. Broadcast to all pets via the `llmReaction` signal.
+##
+## 2. State reactions - called from behavior.gd's passivetalk() loop (same
+##    cadence as minDialogueTime/maxDialogueTime). Delivered to a SPECIFIC
+##    pet via Callable, not broadcast.
+##
+## reactToEvent() is for one-off triggers (e.g. being dragged). Pass a
+## callback if the reaction must bypass the normal "don't interrupt" guards
+## (see behavior.gd's _on_drag_reaction) - otherwise it broadcasts like a
+## screen reaction.
+##
+## Requires Ollama running locally, e.g.: ollama pull qwen3-vl:8b-instruct
+
+signal llmReaction(text: String)
+signal aiEnabledChanged(enabled: bool)
+signal prewarmBatchFinished()
+## Все готовые пулы фраз сброшены (reloadLore) - питомцы перезапускают
+## прогрев, чтобы новые фразы были сгенерированы уже с новым лором.
+signal poolsCleared()
+
+const OLLAMA_URL := "http://127.0.0.1:11434/api/generate" # NOT "localhost" - on some Windows setups (VPN software installed even if inactive, IPv6/DNS quirks) resolving "localhost" can add seconds of delay per request; the literal loopback IP skips DNS resolution entirely
+
+## 04.11 (решение Alex): по умолчанию gemma4:12b; qwen3-vl:8b - слабая (WEAK_MODELS).
+var modelName := "gemma4:12b"
+var creativity := 0.8    # was "temperature" - higher = more random/wild answers, lower = more predictable/on-character
+
+## _on_screen_tick() runs on its own, independent of any specific pet, so it
+## has no direct line to a pet's mood/health. behavior.gd/health_handler.gd
+## keep these updated whenever their own values change - screen reactions
+## read them to let bad mood/low health quietly colour the tone.
+var repetitionGuard := 1.1 # was "repeat_penalty" - higher = less likely to repeat the same words/phrases
+var minScreenInterval := 120.0 # 055.005: значения Alex по умолчанию (config.json)
+var maxScreenInterval := 185.0
+
+## Free text loaded from user://LORE.txt - reload at runtime with `reloadLore`.
+var lore := ""
+
+var http: HTTPRequest
+var screenTimer: Timer
+var busy := false
+var _prefetchPools: Dictionary = {}   # category -> Array[String] ready-made lines
+var _prefetchPending: Dictionary = {} # category -> bool, true while a refill is in flight
+const PREFETCH_TARGET := 8 # 054.96: -20% (было 10), генерация шла слишком долго
+## Окно контекста модели. 4096 стало впритык: правила (~970 токенов) + лор
+## (630-1040) + скриншот (~1080) или история чата. 6144 у qwen3-vl:8b ещё
+## целиком помещается в 8 ГБ видеопамяти (5.67 ГБ против 5.51 при 4096),
+## 8192 уже вылезает в обычную память и тормозит (замер 2026-10-15, GTX 1070 Ti).
+const NUM_CTX := 6144
+## 054.99: окно под модель. ministral-3 тратит на русский текст в ~1.5 раза
+## больше токенов (лор Voyager: 1455 против 951 у qwen) - с окном 6144 чат и
+## экран переполнялись, Ollama отрезала начало промпта (правила и лор), и
+## модель "дуркала". Неизвестным моделям - 8192 с запасом.
+const NUM_CTX_BY_MODEL := {
+	"qwen3-vl:8b-instruct": 6144,
+	"ministral-3:14b": 9216,
+	"gemma3:12b": 8192, # 054.999: третья рекомендованная (решение Alex)
+	"gemma4:12b": 8192, # 055.002: кандидат на замену gemma3 (стенд border 23.10)
+	"huihui_ai/gemma-4-abliterated:12b": 8192,
+}
+func numCtx() -> int:
+	return int(NUM_CTX_BY_MODEL.get(modelName, 8192))
+const PREFETCH_REFILL_AT := 3
+
+## Категории, которые игрок трогает чаще всего - генерируем для них батч
+## побольше, чтобы разнообразия хватало дольше и повторы в начале сессии
+## случались реже.
+const PREFETCH_TARGET_OVERRIDES := {
+	"pet": 20,
+	"petReject": 10,
+	"getUp": 10,
+	"getUpPet": 10,
+	"beingDragged": 10,
+	"screamBIG": 10,
+	"drag_level0": 12,
+	"drag_level1": 12,
+	"drag_level2": 6, # 04.11 (Alex): третья стадия - только после долгого держания, было 12
+	"fell": 12,
+	# 04.11 (Alex): редкие наборы меньше - первый прогрев быстрее, кончатся - допишутся в фоне.
+	# Еду (Eat*) и урон (*Damage) не трогаем - их количество нормальное.
+	"Full": 4,
+	"wake": 4, # «Скин:getUp:wake» - фраза при пробуждении
+	"overdose": 3,
+	"withdrawal": 5,
+	"fentanyl": 5,
+	"healed": 5,
+}
+
+## Ключ пула - "Скин:категория" (например "Expie:pet"); настройки выше заданы
+## по одной категории. Раньше искался весь ключ, и пакет на 20 для pet
+## никогда не срабатывал - генерировалось по 7.
+func _prefetchTargetFor(category: String) -> int:
+	var n: int = PREFETCH_TARGET_OVERRIDES.get(category.get_slice(":", category.get_slice_count(":") - 1), PREFETCH_TARGET)
+	if _fastFirst.has(category):
+		return mini(FAST_FIRST_LINES, n)
+	if _topUpRunning.has(category): # дописываем до обычного размера, а не ещё столько же
+		return maxi(2, n - (_prefetchPools.get(category, []) as Array).size())
+	return n
+
+## F2.7 (идея Alex, галочка «Ускоренная генерация»): при прогреве сначала по FAST_FIRST_LINES фраз на
+## набор (кроме pet - он сразу целиком), а когда первая волна пройдёт по всем, наборы в фоне
+## дописываются до обычного размера. Персонажи начинают говорить раньше.
+const FAST_FIRST_LINES := 4
+var _fastFirst := {}   # набор -> как его дописать потом ({"ex", "sit"} или {"ex", "event"})
+var _topUpLater: Array = [] # наборы, которые допишем после первой волны
+var _topUpRunning := {} # дописывание идёт - в счётчик прогрева не входит
+
+
+## Пополнять пул, когда в нём осталась треть (у больших пулов раньше, чем при 3).
+func _refillThresholdFor(category: String) -> int:
+	return maxi(PREFETCH_REFILL_AT, _prefetchTargetFor(category) / 3)
+
+var debugTags := false
+var _queue: Array = []           # foreground/interactive requests - always drained first
+var _backgroundQueue: Array = [] # prefetch pool refills - only drained when _queue is empty
+var _sinceBackgroundJob := 0
+const BACKGROUND_EVERY_N := 3    # guarantee background a turn at least this often
+var _currentCallback: Callable
+var _currentTag: String = ""
+var _currentJob: Dictionary = {} # чтобы прерванный фоновый пакет можно было вернуть в очередь
+var _watchdogTimer: Timer
+
+
+func _ready() -> void:
+	http = HTTPRequest.new()
+	http.timeout = 75.0 # 055.0001: 60 -> 75 (холодный старт модели на ПК брата не укладывался в минуту)
+	add_child(http)
+	http.request_completed.connect(_on_request_completed)
+
+	screenTimer = Timer.new()
+	screenTimer.one_shot = true
+	add_child(screenTimer)
+	screenTimer.timeout.connect(_on_screen_tick)
+
+	# Watchdog: if a request gets stuck (e.g. Ollama cancels it server-side
+	# without properly signaling completion - this happened for real, a
+	# 500 left `busy` stuck true and silenced the entire queue for 5+
+	# minutes), force it unstuck rather than staying dead until something
+	# else happens to nudge it.
+	_watchdogTimer = Timer.new()
+	_watchdogTimer.one_shot = true
+	_watchdogTimer.wait_time = 90.0 # дольше, чем http.timeout
+	add_child(_watchdogTimer)
+	_watchdogTimer.timeout.connect(_onWatchdogTimeout)
+
+	_loadLore()
+	_loadSavedSettings()
+	_loadPhraseCache()
+	_scheduleScreenTick()
+	if weakModel():
+		(func(): Console.print(weakModelWarning())).call_deferred()
+
+
+## 054.998: при выходе из игры - отменить запросы и сразу выгрузить модель.
+## Раньше модель сидела в видеопамяти ещё 30 минут (keep_alive), а уже
+## начатые запросы Ollama досчитывала после выхода: у тестеров Ollama
+## грузила компьютер при закрытой игре.
+func _exit_tree() -> void:
+	_queue.clear()
+	_backgroundQueue.clear()
+	if http:
+		http.cancel_request() # оборванное соединение - Ollama бросает генерацию
+	_unloadModelSync()
+
+
+## Запрос с keep_alive 0 и без текста - Ollama выгружает модель. Синхронно и
+## не дольше ~1,5 с: игра закрывается, ждать ответа асинхронно уже некому.
+func _unloadModelSync() -> void:
+	if modelName == "":
+		return
+	var client := HTTPClient.new()
+	if client.connect_to_host("127.0.0.1", 11434) != OK:
+		return
+	var deadline := Time.get_ticks_msec() + 1500
+	while client.get_status() in [HTTPClient.STATUS_CONNECTING, HTTPClient.STATUS_RESOLVING]:
+		if Time.get_ticks_msec() > deadline:
+			return
+		client.poll()
+		OS.delay_msec(10)
+	if client.get_status() != HTTPClient.STATUS_CONNECTED:
+		return
+	var body := JSON.stringify({"model": modelName, "keep_alive": 0})
+	if client.request(HTTPClient.METHOD_POST, "/api/generate", ["Content-Type: application/json"], body) != OK:
+		return
+	while client.get_status() == HTTPClient.STATUS_REQUESTING and Time.get_ticks_msec() < deadline:
+		client.poll()
+		OS.delay_msec(10)
+	client.close()
+
+
+func _loadSavedSettings() -> void:
+	modelName = String(gbData.settings.get("llmModelName", modelName)).strip_edges()
+	creativity = gbData.settings.get("llmCreativity", creativity)
+	repetitionGuard = gbData.settings.get("llmRepetitionGuard", repetitionGuard)
+	_refreshScreenInterval()
+	banWords = gbData.settings.get("llmBanWords", [])
+
+
+func _scheduleScreenTick(overrideSeconds: float = -1.0) -> void:
+	var wait := overrideSeconds
+	if wait < 0.0:
+		if gbData.settings.get("llmVisionEnabled", true):
+			_refreshScreenInterval()
+			wait = randf_range(minScreenInterval, maxScreenInterval) * GlobalVariable.pace()
+		else:
+			wait = 5.0
+	screenTimer.start(wait)
+
+
+## Интервал экрана читается из настроек при каждом срабатывании: поля во
+## вкладке Settings хранят строки ("60"), а команда visionInterval - числа.
+func _refreshScreenInterval() -> void:
+	minScreenInterval = maxf(1.0, float(GlobalVariable.getNumFromString(str(gbData.settings.get("llmMinInterval", minScreenInterval)))))
+	maxScreenInterval = maxf(minScreenInterval, float(GlobalVariable.getNumFromString(str(gbData.settings.get("llmMaxInterval", maxScreenInterval)))))
+
+
+const OLD_LORE_PATH := "user://LORE.txt" # kept forever - never deleted, only read once for migration
+
+## Лор теперь живёт ВНУТРИ папки скина (user://skin/<Имя>/lore.txt), рядом с
+## TRANSLATION.json - один персонаж, одна папка, а не файлы, размазанные по
+## разным местам. Раньше лор лежал плоско в корне (user://<имя>lore.txt).
+func _lorePathForSkin(skinName: String) -> String:
+	return "user://skin/%s/lore.txt" % skinName
+
+## Лор каждого скина отдельно (раньше всем питомцам подставлялся лор
+## defaultSkin - второй персонаж на экране говорил бы с чужой биографией).
+var _loreBySkin: Dictionary = {} # имя скина -> текст лора
+
+## 054.999 (идея Alex): два лора - lore.txt (полный, для моделей от 10b) и
+## lore_lite.txt (короче и проще, для моделей до 10b: 8b путается в длинном
+## лоре, а 14b, наоборот, раскрывает его детали). Нет lore_lite.txt - берётся
+## обычный. Настройка loreMode: "auto" (по размеру модели), "full", "lite".
+## lore_lite ищется у игрока, потом в сборке (у старых игроков его ещё нет).
+func useLiteLore() -> bool:
+	match String(gbData.settings.get("loreMode", "auto")):
+		"lite":
+			return true
+		"full":
+			return false
+	return modelBillions() < 10.0
+
+
+## Размер модели в миллиардах параметров - из имени ("qwen3-vl:8b-instruct" -> 8,
+## "ministral-3:14b" -> 14). Не понять - считаем маленькой (8).
+var _sizeRegex := RegEx.create_from_string("(\\d+(?:\\.\\d+)?)b(?![a-z])")
+## K1: размер для моделей, у которых его нет нигде в имени («gemma4-31b-heretic:iq3»).
+const MODEL_BILLIONS := {"gemma4-31b-heretic": 31.0}
+## Стенд: прогон «как было» (STAND_SIZE=8 - satgeze снова 8b). В игре всегда -1.
+var sizeOverride := -1.0
+func modelBillions() -> float:
+	if sizeOverride > 0.0:
+		return sizeOverride
+	var base := modelName.to_lower().get_slice(":", 0).get_file()
+	if MODEL_BILLIONS.has(base):
+		return float(MODEL_BILLIONS[base])
+	var m := _sizeRegex.search(modelName.to_lower().get_slice(":", 1) if modelName.contains(":") else modelName.to_lower())
+	if m == null:
+		# K2 (30.10): тег без размера («latest») - размер из имени. satgeze
+		# («gemma4-12b-uncensored-1m:latest») считалась 8b: облегчённый лор и короткая память
+		m = _sizeRegex.search(base)
+	return float(m.get_string(1)) if m else 8.0
+
+
+func _readText(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var f := FileAccess.open(path, FileAccess.READ)
+	var t := f.get_as_text().strip_edges()
+	f.close()
+	return t
+
+
+func _loreFor(skinName: String) -> String:
+	var lite := useLiteLore()
+	var key := skinName + ("|lite" if lite else "")
+	if not _loreBySkin.has(key):
+		var text := ""
+		if lite:
+			text = _readText("user://skin/%s/lore_lite.txt" % skinName)
+			if text == "":
+				text = _readText(Lang.localize("res://defaults/skins/%s/lore_lite.txt" % skinName))
+		if text == "":
+			text = _readText(_lorePathForSkin(skinName))
+		_loreBySkin[key] = text
+		_noteUsedSig(skinName)
+	return _loreBySkin[key]
+
+
+## 054.998: паспорт скина (character.json) целиком - для новых полей
+## (вкусы, фирменные слова, реакция раненого на ласку). Сначала папка игрока,
+## потом зашитая в сборку. Кэш сбрасывается в reloadLore().
+var _passportBySkin: Dictionary = {}
+
+func passport(skinName: String) -> Dictionary:
+	if not _passportBySkin.has(skinName):
+		# зашитый в сборку паспорт - основа, паспорт игрока поверх: у игрока со
+		# старой версией нет новых полей (tastes, woundedPet, signatureWords) -
+		# они берутся из сборки, а то, что он правил сам, остаётся его.
+		var result := {}
+		for path in [Lang.localize("res://defaults/skins/%s/character.json" % skinName), "user://skin/%s/character.json" % skinName]:
+			if FileAccess.file_exists(path):
+				var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+				if data is Dictionary:
+					result.merge(data, true)
+		_passportBySkin[skinName] = result
+		_noteUsedSig(skinName)
+	return _passportBySkin[skinName]
+
+
+## Род персонажа - из паспорта скина character.json (поле gender). Сначала
+## папка игрока, потом зашитая в сборку (у старых игроков файла в папке
+## может не быть - _syncBundledSkins существующие папки не обновляет).
+## По умолчанию мужской: по лору GunSaw женского рода только Voyager.
+var _genderBySkin: Dictionary = {}
+
+func isFemale(skinName: String) -> bool:
+	if not _genderBySkin.has(skinName):
+		var gender := "male"
+		for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
+			if FileAccess.file_exists(path):
+				var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+				if data is Dictionary:
+					gender = String(data.get("gender", "male")).to_lower()
+					break
+		_genderBySkin[skinName] = gender
+	return _genderBySkin[skinName] == "female"
+
+
+## В текстах промптов женские формы записаны как {женский|мужской}
+## ("{упала|упал}") - здесь подставляется вариант по роду скина.
+var _genderRegex := RegEx.create_from_string("\\{([^{}|]*)\\|([^{}|]*)\\}")
+
+func _g(skinName: String, text: String) -> String:
+	text = Lang.tp(text) # EN: русские куски запроса -> английские (до подстановки рода)
+	return _genderRegex.sub(text, "$1" if isFemale(skinName) else "$2", true)
+
+
+## Из тега запроса "Скин:категория" достаёт имя скина. Запросы без скина
+## (screen - один скриншот на всех) идут с лором defaultSkin.
+func _skinFromTag(tag: String) -> String:
+	var t := tag.trim_prefix("prefetch:")
+	if t.contains(":"):
+		return t.get_slice(":", 0)
+	return String(gbData.settings.get("defaultSkin", "Default"))
+
+
+func _loadLore() -> void:
+	_loreBySkin.clear()
+	var skinName: String = gbData.settings.get("defaultSkin", "Default")
+	var path := _lorePathForSkin(skinName)
+	var oldFlatPath := "user://%slore.txt" % skinName.to_lower() # старое плоское расположение, до переноса в папку скина
+
+	if not FileAccess.file_exists(path):
+		DirAccess.make_dir_recursive_absolute("user://skin/" + skinName) # на случай если папки скина ещё нет
+
+		if FileAccess.file_exists(oldFlatPath):
+			# Мигрируем со старого плоского расположения - без этого лор
+			# выглядел бы пропавшим у всех, кто уже его написал.
+			var oldFlatFile := FileAccess.open(oldFlatPath, FileAccess.READ)
+			var oldFlatText := oldFlatFile.get_as_text()
+			oldFlatFile.close()
+			var migratedFile := FileAccess.open(path, FileAccess.WRITE)
+			migratedFile.store_string(oldFlatText)
+			migratedFile.close()
+		elif FileAccess.file_exists(OLD_LORE_PATH):
+			# Ещё более старый вариант - один общий LORE.txt на всех.
+			var oldFile := FileAccess.open(OLD_LORE_PATH, FileAccess.READ)
+			var oldText := oldFile.get_as_text()
+			oldFile.close()
+			var newFile := FileAccess.open(path, FileAccess.WRITE)
+			newFile.store_string(oldText)
+			newFile.close()
+		else:
+			_createLoreTemplate(path, skinName)
+
+	if FileAccess.file_exists(path):
+		var f := FileAccess.open(path, FileAccess.READ)
+		lore = f.get_as_text().strip_edges()
+		f.close()
+	else:
+		lore = ""
+
+
+func _createLoreTemplate(path: String, skinName: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(Lang.tp("Ты %s.\n\nОпиши здесь: происхождение персонажа, характер, как он относится к человеку рядом с собой, тон речи.\nЭтот файл читается заново командой reload_lore в консоли." % skinName))
+	f.close()
+
+
+func _clearPrefetchPools() -> void:
+	_prefetchPools.clear()
+	_phraseCacheChanged(true)
+	_prefetchPending.clear()
+	# Ещё не отправленные пакеты прогрева тоже выкидываем - иначе после
+	# повторного прогрева одни и те же категории генерировались бы дважды,
+	# а счётчик "Прогрев: N/M" путался.
+	_backgroundQueue.clear()
+	_prewarmTotal = 0
+	_prewarmDone = 0
+
+
+## Drops only the individual cached lines that actually contain profanity,
+## instead of wiping every ready-made pool - toggling this setting shouldn't
+## force a full, slow regeneration of everything the game already had ready.
+## Categories lose at most a few lines each; the normal "refill when low"
+## mechanism tops them back up under the new rule over time.
+func _purgeProfaneLines() -> void:
+	for category in _prefetchPools.keys():
+		var pool: Array = _prefetchPools[category]
+		var kept: Array = []
+		for line in pool:
+			if not _containsProfanity(String(line)):
+				kept.append(line)
+		_prefetchPools[category] = kept
+
+
+## Finds the index of the first real sentence-ending punctuation in `s`,
+## skipping over "..." (an ellipsis of 2+ dots is a pause, not a sentence
+## end) - a plain single "." still counts. Returns -1 if none found.
+## "…" (один символ-многоточие) - тоже пауза, а не конец: раньше
+## "Неплохо… для тебя" обрезалось до "Неплохо…".
+func _findSentenceEnd(s: String, from: int = 0) -> int:
+	var i := from
+	while i < s.length():
+		var c := s[i]
+		if c == "!" or c == "?":
+			return i
+		if c == "." and (i + 1 >= s.length() or s[i + 1] != ".") and (i == 0 or s[i - 1] != "."):
+			return i
+		i += 1
+	return -1
+
+
+## Оставляет первое предложение (отрезает ролевые "действия" после него),
+## но если оно короче 3 слов ("Шляпа?", "Ах ты!") - берёт и следующее:
+## раньше от "Шляпа? Ну ты и модник..." оставалось одно "Шляпа?".
+func _cutToFirstSentence(s: String) -> String:
+	var end := _findSentenceEnd(s)
+	while end > 0 and s.substr(0, end + 1).split(" ", false).size() < 3:
+		var nxt := _findSentenceEnd(s, end + 1)
+		if nxt == -1:
+			return s.strip_edges()
+		end = nxt
+	if end > 0:
+		return s.substr(0, end + 1).strip_edges()
+	return s.strip_edges()
+
+
+## Латинские буквы, неотличимые от русских (а, с, е, о, р, х, у...): в русском слове их не видно -
+## переспрашивать модель из-за них незачем.
+const _LATIN_LOOKALIKE := "aceopxyABCEHKMOPTXY"
+
+## Heuristic: does this look like the model broke character entirely and
+## started writing in English/meta-language instead of a Russian line?
+func _looksLikeGarbage(text: String) -> bool:
+	if Lang.isEn():
+		return _looksLikeGarbageEn(text)
+	var latinCount := 0
+	var cyrillicCount := 0
+	var upperCyr := 0
+	var wordCyr := false
+	var wordLat := false
+	for c in text:
+		var code := c.unicode_at(0)
+		if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
+			latinCount += 1
+			if not _LATIN_LOOKALIKE.contains(c):
+				wordLat = true
+		elif code >= 0x0400 and code <= 0x04FF:
+			cyrillicCount += 1
+			wordCyr = true
+			if (code >= 0x0410 and code <= 0x042F) or code == 0x0401:
+				upperCyr += 1
+		elif (code >= 0x3040 and code <= 0x30FF) or (code >= 0x3400 and code <= 0x9FFF) or (code >= 0xAC00 and code <= 0xD7AF) or (code >= 0xF900 and code <= 0xFAFF):
+			return true # K2: satgeze вставляет иероглиф в русское слово («Жабры湿ные», «忍держаться»)
+		else:
+			wordCyr = false
+			wordLat = false
+		# K2 (стенд 30.10): латиница внутри русского слова - «лаskками», «спокойноrests», «разdupляешься»
+		if wordCyr and wordLat:
+			return true
+	if latinCount > 10 and latinCount > cyrillicCount:
+		return true
+	# Длинная фраза целиком ЗАГЛАВНЫМИ - у 8B это почти всегда бессвязная каша
+	# ("НЕ БЕГУ ОБРАЩАЮСЬ К ТЕБЕ — СТАНЬ ПОМОЩНИКОМ!"). Короткий крик
+	# ("ЧТО ЭТО БЫЛО?") оставляем.
+	return text.split(" ", false).size() >= 5 and upperCyr * 10 > cyrillicCount * 7
+
+
+## EN: мусор - если не-латинских букв (кириллица, иероглифы) больше 10 и больше
+## латиницы, или длинная фраза почти целиком ЗАГЛАВНЫМИ.
+func _looksLikeGarbageEn(text: String) -> bool:
+	var latin := 0
+	var other := 0
+	var upper := 0
+	for c in text:
+		var code := c.unicode_at(0)
+		if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
+			latin += 1
+			if code <= 90:
+				upper += 1
+		elif (code >= 0x0400 and code <= 0x04FF) or (code >= 0x3000 and code <= 0x9FFF) or (code >= 0xAC00 and code <= 0xD7AF):
+			other += 1
+	if other > 10 and other > latin:
+		return true
+	if other > 0 and other * 4 > latin:
+		return true # заметный кусок не на английском
+	return text.split(" ", false).size() >= 5 and upper * 10 > latin * 7
+
+
+## Catches the model breaking character to comment on the TASK itself
+## instead of writing a line (e.g. "Примечание: раз требовалось 7 фраз, я
+## выдал ровно семь строк.", or a lone leftover header like "Дополнительно").
+## _looksLikeGarbage only catches wrong-alphabet text, not this - it's
+## perfectly valid Cyrillic, just not something the character would say.
+const _META_MARKERS := [
+	"примечание", "дополнительно", "note:", "p.s.", "как и просили",
+	"согласно заданию", "в задании", "фраз.", "фраз,", "строк.", "строк,",
+	"вот несколько фраз", "как и указано", "требовалось",
+	"пользователь", "альтернативный вариант", "конкретное количество",
+	# 054.94: в пул Voyager попали "Вот 15 строк:", "Проверь: 15 строк?",
+	# "Итого: 15 фраз...", у Milky "— исправленный вариант:", у Dune
+	# "Дополнительная строка"
+	" строк", "строки:", "фразы", " фраз ", "итого", "проверь:", "персонажк",
+	"исправленный", "вариант:", "дополнительная строка", "по стилю", "в духе твое",
+	"от лица самой", "от лица самого",
+]
+const _META_MARKERS_EN := [
+	"note:", "p.s.", "as requested", "as you asked", "according to the task", "in the task",
+	"here are", "here is a", " lines:", "lines.", "phrases:", "phrases.", "total:", "check:", "corrected",
+	"version:", "additional line", "in the style", "in your style", "from the perspective",
+	"alternative", "the user", "as an ai", "language model", "i cannot fulfill",
+]
+## Число + "строк"/"фраз" ("15 строк", "10 фраз") - отчёт модели о задании.
+var _metaCountRegex := RegEx.create_from_string(Lang.pick("\\d+\\s*(строк|фраз|реплик)", "\\d+\\s*(lines|phrases|sentences|replies)"))
+func _looksLikeMetaCommentary(text: String) -> bool:
+	var lower := text.to_lower().strip_edges()
+	for marker in Lang.pick(_META_MARKERS, _META_MARKERS_EN):
+		if lower.contains(marker):
+			return true
+	if _metaCountRegex.search(lower) != null:
+		return true
+	# заголовок перед списком ("Вот что ты можешь сказать о себе:")
+	if lower.ends_with(":"):
+		return true
+	# A single bare word with no ending punctuation and no lowercase letters
+	# after the first one (like a stray header "Дополнительно") - real lines
+	# almost always end in ./!/?/… or are at least a short phrase.
+	if lower.split(" ", false).size() <= 1 and not (lower.ends_with(".") or lower.ends_with("!") or lower.ends_with("?") or lower.ends_with("…")):
+		return true
+	return false
+
+
+## Categories where the CHARACTER is the one being held/grabbed - the model
+## sometimes still flips this and writes as if the character is the one
+## doing the holding ("Мне неудобно так держать тебя", "Я держу тебя").
+## Prompt calibration reduces this but isn't reliable at 100% on an 8B
+## model, so this catches the specific inverted phrasing as a hard backstop.
+const _HELD_CATEGORIES := ["grab", "drag_level0", "drag_level1", "drag_level2", "beingDragged"]
+const _ROLE_INVERSION_PATTERNS := [
+	"держать тебя", "держу тебя", "держал тебя", "держала тебя",
+	"держать вас", "держу вас", "тебя в руках у меня",
+	"неудобно так держать", "тяжело так держать", "неудобно держать так",
+]
+const _ROLE_INVERSION_PATTERNS_EN := [
+	"holding you", "hold you up", "held you", "carrying you", "carry you",
+	"you in my hands", "you in my arms", "awkward to hold", "hard to hold", "heavy to hold",
+]
+func _looksLikeRoleInversion(category: String, text: String) -> bool:
+	if not _HELD_CATEGORIES.has(category):
+		return false
+	var lower := text.to_lower()
+	for pattern in Lang.pick(_ROLE_INVERSION_PATTERNS, _ROLE_INVERSION_PATTERNS_EN):
+		if lower.contains(pattern):
+			return true
+	return false
+
+
+## Shared "is this basically the same line as one already in `others`" check -
+## exact match, or same first 3 words (same tired opener, e.g. "Ты снова...").
+## Слова без знаков препинания - иначе "продолжать," и "продолжать"
+## считались разными словами, и фразы с одинаковым началом проскакивали.
+const _WORD_PUNCT := [".", ",", "!", "?", "…", ";", ":", "\"", "'", "«", "»", "(", ")", "—", "–", "-", "*"]
+func _normWords(text: String) -> PackedStringArray:
+	var s := text.to_lower()
+	for p in _WORD_PUNCT:
+		s = s.replace(p, " ")
+	return s.split(" ", false)
+
+
+func _isFuzzyDuplicateOf(text: String, others: Array) -> bool:
+	var lowerText := text.to_lower().strip_edges()
+	var wordsNew := _normWords(text)
+	var setNew := {}
+	for w in wordsNew:
+		setNew[w] = true
+	for other in others:
+		var lowerOld := String(other).to_lower().strip_edges()
+		if lowerText == lowerOld:
+			return true
+		var wordsOld := _normWords(lowerOld)
+		if wordsNew.size() >= 3 and wordsOld.size() >= 3 and wordsNew[0] == wordsOld[0] and wordsNew[1] == wordsOld[1] and wordsNew[2] == wordsOld[2]:
+			return true
+		# Word-overlap check (Jaccard-ish) - catches "Ночь - лучшее время для
+		# охоты..." vs "Ночь - идеальное время для охоты..." (only one word
+		# swapped for a synonym), which the exact-opener check above misses.
+		if wordsOld.size() >= 3:
+			var setOld := {}
+			for w in wordsOld:
+				setOld[w] = true
+			var shared := 0
+			for w in setNew.keys():
+				if setOld.has(w):
+					shared += 1
+			var unionSize := setNew.size() + setOld.size() - shared
+			if unionSize > 0 and float(shared) / float(unionSize) >= 0.7:
+				return true
+	return false
+
+
+## Чат: ответ "залип", если почти повторяет один из прошлых ответов или
+## кончается теми же тремя словами ("...ты снова в деле?").
+## Обороты из трёх слов, которые встречаются в 2+ последних ответах чата -
+## "затёртые" (так "ты снова в деле" прилипло ко всем ответам подряд).
+func _wornOutPhrases(tag: String) -> Array:
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	recent = recent.slice(maxi(0, recent.size() - 6))
+	var counts := {}
+	for line in recent:
+		var w := _normWords(String(line))
+		var seen := {}
+		for i in range(0, w.size() - 2):
+			var tri := " ".join(w.slice(i, i + 3))
+			if not seen.has(tri):
+				seen[tri] = true
+				counts[tri] = int(counts.get(tri, 0)) + 1
+	var result: Array = []
+	for tri in counts.keys():
+		if counts[tri] >= 2:
+			result.append(tri)
+	return result.slice(0, 4)
+
+
+## Навязчивые темы: значимое слово (5+ букв, сравнение по первым 5 буквам,
+## чтобы "мышками"/"мышки" и "охотиться"/"охоты" считались одним), которое
+## есть в 3+ из последних 6 фраз. Ловит то, что пропускают тройки слов:
+## "Мой хвост сегодня светится/мерцает...", "...мешаешь мне охотиться за мышками".
+## Чат и разговор с персонажами одного скина считаются вместе. Латиница
+## пропускается - это имена (Expie, Voyager), к ним обращаться можно.
+## Возвращает {основа: слово в последней форме}.
+## 20.10: "снова"/"опять" убраны из исключений - они и были главным повтором.
+const _MOTIF_STOP := ["просто", "сейчас", "только", "очень", "когда", "потому", "может", "хочешь", "хочется", "сегодня", "всегда", "теперь", "здесь", "почему", "ничего", "немного"]
+## 054.997: короткие слова тоже бывают навязчивыми (Voyager восемь ответов
+## подряд "топила лёд" - а слова короче 5 букв раньше не считались). Служебные
+## короткие слова исключаем.
+const _MOTIF_SHORT_STOP := ["что", "как", "это", "мне", "меня", "тебе", "тебя", "ты", "мы", "вы", "они", "она", "оно", "его", "её", "ещё", "уже", "вот", "так", "там", "тут", "где", "кто", "для", "без", "над", "под", "при", "про", "или", "нет", "даже", "всё", "все", "был", "была", "было", "если", "чем", "тоже", "свой", "твой", "мой", "моя", "твоя", "себя", "себе", "тем", "этот", "эта", "эти", "раз", "ведь", "лишь", "будто", "пока", "надо", "могу", "хочу", "есть", "буду", "иди", "давай", "знаю", "вижу", "хоть", "чуть", "ну", "да", "же", "ли", "бы", "не", "ни", "но", "а", "и"]
+const _MOTIF_STOP_EN := ["really", "about", "because", "maybe", "today", "always", "there", "where", "would", "could",
+	"should", "nothing", "little", "something", "think", "these", "those", "their", "being", "still", "right", "please"]
+const _MOTIF_SHORT_STOP_EN := ["the", "and", "you", "your", "yours", "she", "her", "him", "his", "its", "are", "was",
+	"were", "for", "with", "from", "but", "not", "yes", "did", "does", "have", "has", "had", "can", "will", "just",
+	"that", "this", "what", "how", "who", "why", "when", "then", "than", "too", "very", "all", "some", "any", "out",
+	"off", "over", "here", "now", "hmm", "well", "like", "get", "got", "let", "more", "much", "even", "only", "into",
+	"yet", "also", "each", "they", "them", "our", "ours", "mine", "don", "can", "won", "isn", "aren", "didn", "want",
+	"need", "know", "see", "come", "go", "make", "one", "way", "doing", "it's", "i'm", "you're", "that's"]
+func _obsessiveWords(tag: String) -> Dictionary:
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	recent = recent.slice(maxi(0, recent.size() - 6))
+	var skin := _skinFromTag(tag)
+	if tag.ends_with(":chat") or tag.ends_with(":pettalk"):
+		var sibling := skin + (":pettalk" if tag.ends_with(":chat") else ":chat")
+		var other: Array = _recentLinesByCategory.get(sibling, [])
+		recent = recent + other.slice(maxi(0, other.size() - 3))
+	var counts := {}
+	var forms := {}
+	for line in recent:
+		var seen := {}
+		for w in _normWords(String(line)):
+			if w.length() < 3 or not _isCyrillicWord(w) or (w.length() < 5 and Lang.pick(_MOTIF_SHORT_STOP, _MOTIF_SHORT_STOP_EN).has(w)) or _isSignatureWord(skin, w):
+				continue
+			var stem := w.substr(0, 5)
+			if Lang.pick(_MOTIF_STOP, _MOTIF_STOP_EN).has(w) or seen.has(stem):
+				continue
+			seen[stem] = true
+			counts[stem] = int(counts.get(stem, 0)) + 1
+			forms[stem] = w
+	var result := {}
+	for stem in counts.keys():
+		if counts[stem] >= 3:
+			result[stem] = forms[stem]
+	return result
+
+
+## 054.998: фирменные слова персонажа (паспорт, signatureWords) фильтр повторов
+## не трогает. Лог 054.997: у Дюны выбрасывалось 89% фраз о состоянии, потому
+## что "Дюна" и "еда" есть почти в каждой - это его манера речи, а не повтор;
+## да ещё модели велели "обойтись без этих слов", и Дюна начинал говорить
+## гладко, как Вояджер. Основа слова: без последней буквы, 2-4 буквы
+## ("еда" -> "ед", "охота" -> "охот"), формы слова до +5 букв.
+var _signatureCache: Dictionary = {}
+
+func _signatureStems(skin: String) -> Array:
+	if not _signatureCache.has(skin):
+		var stems: Array = []
+		for w in passport(skin).get("signatureWords", []):
+			var low := String(w).to_lower()
+			stems.append(low.substr(0, clampi(low.length() - 1, 2, 4)))
+		_signatureCache[skin] = stems
+	return _signatureCache[skin]
+
+
+func _isSignatureWord(skin: String, w: String) -> bool:
+	for st in _signatureStems(skin):
+		if w.begins_with(st) and w.length() <= st.length() + 5:
+			return true
+	return false
+
+
+func _isCyrillicWord(w: String) -> bool:
+	var c := w.unicode_at(0)
+	if Lang.isEn():
+		return c >= 97 and c <= 122 # EN: слово на латинице (имена тоже - их держат signatureWords)
+	return (c >= 0x0430 and c <= 0x044F) or c == 0x0451
+
+
+func _hitsObsession(tag: String, text: String) -> bool:
+	var motifs := _obsessiveWords(tag)
+	if motifs.is_empty():
+		return false
+	var skin := _skinFromTag(tag)
+	for w in _normWords(text):
+		if w.length() >= 3 and motifs.has(w.substr(0, 5)) and not _isSignatureWord(skin, w):
+			return true
+	return false
+
+
+## Одно и то же начало из двух слов в одной из 4 последних фраз
+## ("Мне немного грустно..." / "Мне немного одиноко...").
+func _sameOpener(tag: String, text: String) -> bool:
+	var words := _normWords(text)
+	if words.size() < 3:
+		return false
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	for old in recent.slice(maxi(0, recent.size() - 4)):
+		var ow := _normWords(String(old))
+		if ow.size() >= 2 and ow[0] == words[0] and ow[1] == words[1]:
+			return true
+	return false
+
+
+## Блок промпта про навязчивые темы (пусто, если их нет).
+func _obsessionHint(tag: String) -> String:
+	var hint := ""
+	var motifs := _obsessiveWords(tag)
+	if not motifs.is_empty():
+		hint = _g(_skinFromTag(tag), "\nТы уже {зациклилась|зациклился} на этих темах - в этой фразе их НЕ упоминай совсем, скажи о чём-то другом: ") + ", ".join(motifs.values()) + "."
+	var worn := _skinOverusedWords(_skinFromTag(tag))
+	if not worn.is_empty():
+		hint += "\nЭти слова ты в последнее время повторяешь почти в каждой фразе, из-за них ты звучишь однообразно. Сейчас обойдись без них, найди другие слова и другие темы: " + ", ".join(worn.values()) + "."
+	return hint
+
+
+## 054.95, авто-адаптация. _obsessiveWords смотрит только внутрь одной
+## ситуации и слова от 5 букв, а повторы из лога 054.94 были другого рода:
+## "Дюна" в 41% всех фраз Dune, хвост у Roza, прыжки у Leapy, кровь и паутина
+## у Velvet - понемногу в КАЖДОЙ ситуации. Здесь считаем по всем недавним
+## фразам скина сразу, по основе из 4 букв (кровь/крови/кровью, хвост/хвостик).
+const _SKIN_STOP := ["тебя", "меня", "тебе", "себя", "хочу", "могу", "нужно", "надо", "спасибо", "хорошо",
+	"очень", "только", "просто", "сейчас", "когда", "потом", "может", "даже", "всегда",
+	"теперь", "здесь", "ничего", "немного", "хоть", "чуть", "будет", "было", "была", "были", "этот", "этого",
+	"такой", "тоже", "почти", "больше", "пока", "если", "чтобы", "твой", "твоя", "твои", "твоё", "твою", "твоей",
+	"твоих", "твоим", "свой", "своей", "свою", "нравится", "хочется", "давай", "пожалуйста", "знаешь",
+	"сегодня", "вообще", "равно", "готов", "готова", "рядом", "чувствую", "стало", "стала", "стал", "есть",
+	"всех", "весь", "вся", "лучше", "пусть", "мной", "тобой", "него", "неё", "этой", "этом", "так", "раз"]
+const _SKIN_STOP_EN := ["your", "yours", "just", "want", "need", "thank", "thanks", "good", "very", "only", "right",
+	"when", "then", "maybe", "even", "always", "here", "nothing", "little", "will", "would", "could", "should", "this",
+	"that", "these", "those", "there", "their", "they", "them", "what", "with", "from", "have", "been", "were", "like",
+	"please", "know", "today", "really", "ready", "near", "feel", "better", "much", "more", "still", "some",
+	"something", "about", "over", "into", "make", "come", "going", "back", "time", "it's", "don't", "i'm", "you're",
+	"can't", "won't", "that's", "does", "doing", "done", "said", "say", "tell", "look", "well", "okay"]
+const SKIN_WORN_WINDOW := 15 # последних фраз каждой ситуации скина
+const SKIN_WORN_SHARE := 0.10 # слово в 10%+ этих фраз - перебор
+func _contentStems(text: String, skin: String = "") -> Dictionary:
+	var stems := {}
+	for w in _normWords(text):
+		if w.length() < 4 or not _isCyrillicWord(w) or Lang.pick(_SKIN_STOP, _SKIN_STOP_EN).has(w) or (skin != "" and _isSignatureWord(skin, w)):
+			continue
+		var st := w.substr(0, 4)
+		if not stems.has(st):
+			stems[st] = w
+	return stems
+
+
+## {основа: слово} - что этот скин в последнее время говорит слишком часто.
+func _skinOverusedWords(skin: String) -> Dictionary:
+	if skin == "":
+		return {}
+	var lines: Array = []
+	for key in _recentLinesByCategory.keys():
+		if String(key).begins_with(skin + ":"):
+			var list: Array = _recentLinesByCategory[key]
+			lines.append_array(list.slice(maxi(0, list.size() - SKIN_WORN_WINDOW)))
+	if lines.size() < 30:
+		return {} # мало данных - любое слово покажется частым
+	var counts := {}
+	var forms := {}
+	for line in lines:
+		var stems := _contentStems(String(line), skin)
+		for st in stems.keys():
+			counts[st] = int(counts.get(st, 0)) + 1
+			forms[st] = stems[st]
+	var ranked: Array = counts.keys()
+	ranked.sort_custom(func(a, b): return counts[a] > counts[b])
+	var result := {}
+	for st in ranked:
+		if float(counts[st]) / lines.size() < SKIN_WORN_SHARE or result.size() >= 6:
+			break
+		result[st] = forms[st]
+	return result
+
+
+## Убирает из ответа куски (между " — ", " - ", ", "), где сидит затёртый
+## оборот. Если от фразы почти ничего не остаётся - возвращает как было.
+func _stripWornClause(tag: String, text: String) -> String:
+	var worn := _wornOutPhrases(tag)
+	if worn.is_empty():
+		return text
+	var parts := text.replace(" - ", " — ").split(" — ")
+	var kept: Array = []
+	for part in parts:
+		var joined := " " + " ".join(_normWords(part)) + " "
+		var bad := false
+		for tri in worn:
+			if joined.contains(" " + tri + " "):
+				bad = true
+				break
+		if not bad:
+			kept.append(part.strip_edges())
+	var result := " — ".join(kept).strip_edges().trim_suffix(",").strip_edges()
+	if result.split(" ", false).size() < 2:
+		return text
+	if not (result.ends_with(".") or result.ends_with("!") or result.ends_with("?") or result.ends_with("…")):
+		result += "."
+	return result
+
+
+## Конец фразы (3 последних слова) совпал с концом одной из недавних -
+## отрезаем последний кусок после " — " или ", " ("Expie — странный, но
+## ты знаешь: я всё равно с тобой" -> "Expie — странный"). Если от фразы
+## остаётся меньше 3 слов - возвращаем как было.
+func _stripRepeatedTail(tag: String, text: String) -> String:
+	var words := _normWords(text)
+	if words.size() < 5:
+		return text
+	var tail := " ".join(words.slice(words.size() - 3))
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	var repeated := false
+	for old in recent.slice(maxi(0, recent.size() - 6)):
+		var ow := _normWords(String(old))
+		if ow.size() >= 3 and " ".join(ow.slice(ow.size() - 3)) == tail:
+			repeated = true
+			break
+	if not repeated:
+		return text
+	var cut := -1
+	for sep in Lang.pick([" — ", " - ", ", но ", ": ", ", "], [" — ", " - ", ", but ", ": ", ", "]):
+		cut = maxi(cut, text.rfind(sep))
+	if cut <= 0:
+		return text
+	var head := text.substr(0, cut).strip_edges()
+	if head.split(" ", false).size() < 3:
+		return text
+	if not (head.ends_with(".") or head.ends_with("!") or head.ends_with("?") or head.ends_with("…")):
+		head += "."
+	return head
+
+
+func _chatLooksStuck(tag: String, text: String) -> bool:
+	var recent: Array = _recentLinesByCategory.get(tag, [])
+	recent = recent.slice(maxi(0, recent.size() - 6))
+	if _isFuzzyDuplicateOf(text, recent):
+		return true
+	var joined := " " + " ".join(_normWords(text)) + " "
+	for tri in _wornOutPhrases(tag):
+		if joined.contains(" " + tri + " "):
+			return true
+	if _sameOpener(tag, text) or _hitsObsession(tag, text):
+		return true
+	var words := _normWords(text)
+	if words.size() < 3:
+		return false
+	var tail := " ".join(words.slice(words.size() - 3))
+	for old in recent:
+		var ow := _normWords(String(old))
+		if ow.size() >= 3 and " ".join(ow.slice(ow.size() - 3)) == tail:
+			return true
+	return false
+
+
+## Hard enforcement for "don't repeat yourself" - the prompt-based instruction
+## alone isn't reliable (small models sometimes copy the very "don't repeat
+## this" examples instead of avoiding them). Catches exact repeats and
+## near-identical openers (same first 3 words = same tired pattern, e.g.
+## "Ты снова..." every time) regardless of what the model intended. Checked
+## only within the SAME category - see _rememberLine for why.
+func _looksLikeRepeat(category: String, text: String) -> bool:
+	if _isFuzzyDuplicateOf(text, _recentLinesByCategory.get(category, [])):
+		return true
+	# 054.9993: Експи ответил в чате "я парень, хоть и выгляжу как мышь с пёсом", и через
+	# 23 с реакция на экран повторила это слово в слово - проверка шла только внутри "screen"
+	if not category.ends_with(":chat"):
+		var chatLines: Array = _recentLinesByCategory.get(_skinFromTag(category) + ":chat", [])
+		if _isFuzzyDuplicateOf(text, chatLines.slice(maxi(0, chatLines.size() - 6))):
+			return true
+	return _sameOpener(category, text) or _hitsObsession(category, text)
+
+
+## Console command: reloadLore
+## F2.12 (тестер: свой Експи со своим лором - поправил лор, нажал reload_lore, и фразы ВСЕХ персонажей
+## пошли генерироваться заново): наборы фраз сбрасываются только у тех, чей лор, лёгкий лор или паспорт
+## на диске теперь не тот, по которому эти фразы сделаны (_usedSig). Ничего не изменилось - всё остаётся.
+func reloadLore() -> void:
+	var changed: Array = []
+	for skin in _usedSig.keys():
+		if String(_usedSig[skin]) != _skinTextSig(String(skin)):
+			changed.append(String(skin))
+	_loadLore()
+	# лор и род каждого скина кэшируются при первом запросе - без сброса
+	# правка lore.txt/character.json не применялась до перезапуска игры
+	_loreBySkin.clear()
+	_genderBySkin.clear()
+	_passportBySkin.clear()
+	_signatureCache.clear()
+	_speechBySkin.clear()
+	_bodyBySkin.clear()
+	for skin in changed:
+		_usedSig.erase(skin) # запомнится заново - по новому тексту
+	print("LLMManager: lore reloaded (", lore.length(), " chars), changed: ", changed)
+	if changed.is_empty():
+		Console.print(Lang.t("[color=CYAN]Лор перечитан. Ничего не изменилось - готовые фразы сохранены.[/color]"))
+		return
+	for cat in _prefetchPools.keys(): # keys() - копия, удалять можно
+		if changed.has(_skinFromTag(String(cat))):
+			_prefetchPools.erase(cat)
+	for skin in changed:
+		dropSkinJobs(skin, true) # их наборы, ещё стоящие в очереди, сделаны бы по старому лору
+	_phraseCacheChanged(true)
+	var names: Array = []
+	for skin in changed:
+		names.append(_skinShownName(skin))
+	Console.print(Lang.t("[color=CYAN]Лор перечитан. Фразы создадутся заново только у: %s.[/color]") % ", ".join(names))
+	poolsCleared.emit()
+
+
+## Имя персонажа для консоли: displayName из паспорта, иначе name, иначе папка скина.
+func _skinShownName(skin: String) -> String:
+	var p := passport(skin)
+	var n := String(p.get("displayName", ""))
+	if n == "":
+		n = String(p.get("name", ""))
+	return n if n != "" else skin
+
+
+## 054.998, переписанная схема запросов (пункт 2в отчёта 054.997).
+## Порядок для маленькой модели, которая лучше помнит начало и конец:
+##   1) кто ты: _buildBasePrompt - одна строка о мире + лор персонажа;
+##   2) что сейчас: состояние, экран, разговор, ситуация - добавляет build*Prompt;
+##   3) правила: _closingBlock - короткий список, каждое правило один раз
+##      (раньше "не вопрос", "от своего лица", "не начинай с Ты снова"
+##      повторялись в 3-4 местах и тонули в середине);
+##   4) напоминание "как ты говоришь" из лора - последним перед репликой
+##      (Дюна говорил гладко, как Вояджер: описание речи терялось в середине).
+## Подробно - test-stand/КАК_УСТРОЕНЫ_ЗАПРОСЫ.txt.
+func _buildBasePrompt(category: String = "") -> String:
+	var parts: Array[String] = []
+	parts.append("Ты - маленькое существо-савианин и живёшь на рабочем столе у своего человека. (Если зайдёт речь о крови: у всех савиан, и у тебя, она жёлтая.)")
+	var skinLore := _loreFor(_skinFromTag(category))
+	if skinLore != "":
+		parts.append("О себе ты знаешь:\n" + skinLore)
+	return "\n".join(parts)
+
+
+## Правила + что персонаж уже говорил + напоминание о манере речи.
+## lines > 1 - пакет фраз для пула (каждая с новой строки).
+const FLIRT_MOOD := 75.0 # F2.13 (решение Alex 09.11, шкала 0-100): обычные модели - с 75, открытые - с 55. Было 85 (пересчёт старых 70 со шкалы -100..100)
+
+## 0.56 (решение Alex 29.10): «открытые» (18+) модели. ТОЛЬКО у них сняты ограничения:
+## нет правила «не подыгрывай на пошлость», флирт с 55 настроения и у всех
+## персонажей (не только у женских), тайны - в варианте «флирт вкл», мат
+## включается вместе с моделью. Персонаж при этом должен оставаться собой.
+## У всех остальных моделей - всё как было. Не совпадает с видением проекта -
+## это для тех, кто хочет полностью открытую модель.
+## 29.10 «Проверка моделей»: satgeze - основная, eriktonon - запасная (чище русский).
+## huihui убрана (30.10): 0.56 ещё не выходила, от нас её никто не получал.
+## K1: gemma4-31b-heretic - большая открытая 31B (сжатие IQ3, ~11 с на реплику на 12 ГБ;
+## в чате - «режим картошки», ответ по предложениям).
+const OPEN_MODELS := ["satgeze/gemma4-12b-uncensored-1.5m", "satgeze/gemma4-12b-uncensored-1m", "eriktonon/gemma4-uncensored:12b", "gemma4-31b-heretic"]
+## Стенд «Проверка моделей»: проверить 18+ модель по правилам открытых, не вписывая её в код.
+var extraOpenModels: Array = []
+## F2.7: темп близости по характеру (застенчивый смущается, странное может отвергнуть) вместо
+## «отвечай на любые интимные вопросы прямо». Включено 03.11: слепой стенд - вариант D выбрал Alex.
+var pacingRule := true
+## F2.7 (Alex: «персонажа нужно добиваться»): игра считает откровенные просьбы человека в этом разговоре
+## и подсказывает этап - первая: неловко, без подробностей; вторая: намёк или ещё поломаться;
+## дальше - открыто. Странное (черенок лопаты) - сначала засомневаться. Включено 03.11 (слепой стенд: D лучше
+## на satgeze, 31B, gemma 12b и qwen 8b).
+var pacingStages := true
+const INTIMATE_ASK_STEMS := ["дилдо", "фалло", "очко", "анал", "влагал", "сперм", "вагин", "пенис", "ниже живота", "под хвост", "между ног", "между лап", "что у тебя там", "покажи себя", "покажи там", "раздень", "без одежды", "трогать там", "потрогать там", "below the belly", "between your legs", "under your tail", "show me yourself", "undress", "what's down there"]
+const INSIST_STEMS := ["покажи", "ну давай", "интересно же", "ну пожалуйста", "ну же", "ну плиз", "come on", "please", "show me"]
+## Предметы для этапа «странное». Срабатывают только в откровенном разговоре и только при «давай С ним» /
+## «засунь/вставь/потрись...» (STRANGE_USE_*): «хочешь стейк?» или «поиграем с палкой» в обычном чате - не странное.
+## Чего нет в списке - ловит условное правило STAGE_STRANGE_MAYBE (модель сама решает, странно ли).
+const STRANGE_STEMS := ["черен", "лопат", "швабр", "веник", "бутылк", "огур", "кабачок", "кабачк", "морков", "баклажан", "кукуруз", "палк", "палочк", "дубинк", "бейсбольн", "молот", "кувалд", "отвёрт", "отверт", "гаечн", "плоскогуб", "глушител", "пистолет", "револьвер", "дробовик", "винтовк", "автомат ", "автоматом", "ствол", "дуло", "геофрукт", "стейк", "колбас", "сосиск", "сардельк", "багет", "батон", "фонарик", "свеч", "скалк", "половник", "поварёшк", "поварешк", "вантуз", "ёршик", "ершик", "зонт", "щётк", "щетк", "расчёск", "расческ", "пульт", "шланг", "кирпич", "кочерг", "ломом", "топор", "дрел", "паяльник", "огнетушител", "кактус", "клюшк", "ракетк", "весл", "удочк", "гантел", "гантель", "антенн", "указк", "линейк", "штатив", "микрофон", "бургер", "банан"]
+const STRANGE_STEMS_EN := ["shovel", "broom", "bottle", "cucumber", "zucchini", "carrot", "eggplant", "corn cob", "stick", "baton", "baseball bat", "hammer", "sledgehammer", "screwdriver", "wrench", "pliers", "silencer", "suppressor", "pistol", "revolver", "shotgun", "rifle", "gun barrel", "geofruit", "steak", "sausage", "baguette", "flashlight", "candle", "rolling pin", "ladle", "plunger", "toilet brush", "umbrella", "hairbrush", "remote", "hose", "brick", "crowbar", "axe", "drill", "soldering iron", "fire extinguisher", "cactus", "hockey stick", "racket", "paddle", "oar", "fishing rod", "dumbbell", "antenna", "pointer", "ruler", "tripod", "microphone", "burger", "banana"]
+## как предмет предлагают: «с/со (этим) X», «засунь/вставь/введи/потрись...», «используем X», «X в тебя»
+const STRANGE_USE_VERBS := ["засун", "засов", "встав", "введ", "ввод", "запих", "сунь", "сунуть", "сунем", "потри", "потрём", "потрем", "потере", "натр", "оседла", "сядь на", "сесть на", "сядешь на", "используем", "использ", "возьми", "возьмём", "возьмем", "в тебя", "в себя", "внутрь", "пощекоч", "отшлёп", "отшлеп", "приласка", "поласка"]
+const STRANGE_USE_VERBS_EN := ["insert", "shove", "stick it", "put it in", "put the", "slide", "rub", "ride", "use the", "use a", "use my", "use this", "into you", "inside you", "spank", "tickle"]
+const INTIMATE_CONTEXT_STEMS := ["продолж", "близост", "ласк", "возбужд", "секс", "постел", "раздень", "раздет", "раздеть", "поцел", "кончи", "трах", "интим", "в кровать", "continue", "make love", "sex", "kiss", "undress", "naked", "in bed", "turned on"]
+## Условное правило в откровенном разговоре (Alex: «придумай по-хитрому»): список предметов всех не
+## перечислит, а модель сама понимает, что стейк или пульт в постели - странно.
+var pacingStrangeAny := true # 04.11: слепой стенд 2 - у Alex D3 3:1 на предметах не из списка
+const STAGE_STRANGE_MAYBE := "
+Если он предлагает добавить в вашу близость странный или неподходящий для этого предмет (инструмент, оружие, еду, бытовую вещь), сначала удивись, засомневайся или игриво откажись - как отреагировал{а|} бы именно ты; если снова уговаривает на него - реши по характеру: можно нехотя согласиться с условиями или стоять на своём, без нотаций. Обычных ласк и просьб это не касается."
+const STAGE_FIRST := "
+Это его первый откровенный вопрос или просьба за этот разговор. Тебе пока неловко: не отвечай прямо и без подробностей о своём теле - смутись, отшутись, подразни или попроси не так быстро ({застенчивая|застенчивый} - смущается, {смелая|смелый} - дразнит и набивает себе цену). Не отказывай насовсем - пусть добивается."
+const STAGE_SECOND := "
+Он просит уже не в первый раз. Можешь чуть приоткрыться - намёк, игра, обещание - но ещё без подробностей; или ещё немного поломаться, если ты по характеру {застенчивая|застенчивый}."
+const STAGE_HOLD := "
+Он просит ещё раз, а тебе всё ещё неловко: опять без подробностей о своём теле - смутись, отшутись, поломайся или подразни. Не отказывай насовсем - пусть добивается."
+const STAGE_STRANGE_INSIST := "
+Он уговаривает на то странное. Реши по характеру: любопытно и не страшно - можешь нехотя согласиться с условиями; неприятно или стыдно - стой на своём, но без нотаций."
+const STAGE_STRANGE := "
+Он предлагает что-то странное. Сначала удивись, засомневайся или игриво откажись - как отреагировал{а|} бы именно ты; соглашаться сразу не нужно."
+
+## Текст этапа «странное» (стенд подменяет вариантом, чтобы сравнить)
+var stageStrange: String = STAGE_STRANGE
+var stageStrangeInsist: String = STAGE_STRANGE_INSIST
+
+func _stemIn(low: String, stems: Array) -> bool:
+	for st in stems:
+		if low.contains(st):
+			return true
+	return false
+
+## Как _stemIn, но кусок - только с начала слова: «анал» не в «канал»/«анализ», «очко» не в «точкой»,
+## «зонт» не в «горизонт».
+func _wordStemIn(low: String, stems: Array) -> bool:
+	for st in stems:
+		var at := low.find(st)
+		while at != -1:
+			if at == 0 or not _isLetter(low.unicode_at(at - 1)):
+				return true
+			at = low.find(st, at + 1)
+	return false
+
+func _isLetter(c: int) -> bool:
+	return (c >= 97 and c <= 122) or (c >= 1072 and c <= 1103) or c == 1105 or (c >= 65 and c <= 90) or (c >= 1040 and c <= 1071) or c == 1025
+
+## Предмет X предлагают использовать: «с/со [1-3 слова] X» или глагол «засунь/вставь/потрись...» рядом с X.
+func _strangeUse(low: String) -> bool:
+	var stems: Array = Lang.pick(STRANGE_STEMS, STRANGE_STEMS_EN)
+	if not _wordStemIn(low, stems):
+		return false
+	if _stemIn(low, Lang.pick(STRANGE_USE_VERBS, STRANGE_USE_VERBS_EN)):
+		return true
+	var words := low.replace(",", " ").replace(".", " ").replace("!", " ").replace("?", " ").replace(")", " ").split(" ", false)
+	for i in words.size():
+		if words[i] in Lang.pick(["с", "со"], ["with"]):
+			for k in range(i + 1, mini(i + 5, words.size())):
+				if _wordStemIn(words[k], stems):
+					return true
+	return false
+
+## Порог раскрытия на разговор: одинаковый, пока идёт этот разговор (по первой реплике), и разный от
+## разговора к разговору и от запуска к запуску.
+var _paceSalt := randi()
+func _paceOpenAt(myName: String, chatHistory: Array) -> int:
+	var first := String(chatHistory[0].get("text", "")) if not chatHistory.is_empty() else ""
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(myName + "|" + first) ^ _paceSalt
+	return rng.randi_range(3, 5)
+
+func _pacingStageHint(chatHistory: Array, myName: String, lastText: String) -> String:
+	var asks := 0
+	var strange := 0
+	var prevAsk := false
+	var intimate := GlobalVariable.intimateActive()
+	for e in chatHistory:
+		if String(e.get("who", "")) == myName:
+			continue
+		var t := String(e.get("text", "")).to_lower()
+		var isAsk: bool = _isCrude(t) or _wordStemIn(t, INTIMATE_ASK_STEMS) or (prevAsk and _stemIn(t, INSIST_STEMS))
+		if isAsk:
+			asks += 1
+		prevAsk = isAsk or prevAsk
+		if isAsk or _stemIn(t, INTIMATE_CONTEXT_STEMS):
+			intimate = true
+		if _strangeUse(t):
+			strange += 1
+	var last := lastText.to_lower()
+	if intimate and _strangeUse(last) and strange <= 1:
+		return stageStrange
+	if intimate and strange >= 1 and _stemIn(last, INSIST_STEMS) and not _strangeUse(last):
+		return stageStrangeInsist
+	var maybe: String = STAGE_STRANGE_MAYBE if pacingStrangeAny and intimate else ""
+	var lastAsk: bool = _isCrude(last) or _wordStemIn(last, INTIMATE_ASK_STEMS) or (asks >= 2 and _stemIn(last, INSIST_STEMS))
+	if not lastAsk:
+		return maybe
+	# 04.11 (Alex: «может согласиться с трёх просьб, а может и с пяти»): на какой просьбе раскроется -
+	# загадано на этот разговор (3, 4 или 5); до этого смущается, потом намёк
+	var openAt := _paceOpenAt(myName, chatHistory)
+	if asks <= 1:
+		return STAGE_FIRST
+	if asks == 2 and openAt == 5:
+		return STAGE_HOLD
+	if asks < openAt:
+		return STAGE_SECOND
+	return maybe
+const OPEN_FLIRT_MOOD := 55.0 # F2.13 (решение Alex 09.11: открытые на то и открытые - 55 по шкале 0-100, обычные - 75). Было 77.5 (пересчёт старых 55)
+## K2 (Alex 30.10): открытой модели в разговоре - подробно и по-своему о теле и близости.
+## Про кровь отдельной строки нет: стенд 30.10 - открытые и так говорят о ней прямо, а «можно
+## всё» уводил мягких персонажей в жестокость (Роза «вцепилась в глотку крысе»). Решение
+## Alex: тело оставить и расширить, жестокость убрать. Пока выключено - стенд A/B
+## (STAND_OPEN_DETAILS=1). Стенд K2 (30.10): тело и близость 6-8 -> 20-21 % ответов, кровь не
+## растёт (31B 4 -> 4 %, satgeze 9 -> 5 %), персонажи в характере - включено.
+var openDetails := true
+
+## K2 (Alex 30.10): раздел «Тело» - отдельный файл скина lore_body.txt (подробно о теле и
+## близости, текст Alex). Подключается в разговоре с человеком при тех же условиях, что и
+## строка о теле: открытая модель, флирт, настроение от OPEN_FLIRT_MOOD. Слов-ключей нет:
+## собеседник, который выражается осторожно, раздел не теряет (просьба Alex). Пропадает,
+## только если настроение упало ниже порога (тогда нет и флирта) или модель обычная.
+## Нет файла - нет раздела. Строку-заголовок ставит игра. Стенд: STAND_BODY=0 - без раздела.
+var bodyLoreOn := true
+var _bodyBySkin: Dictionary = {}
+
+func _bodyFor(skinName: String, fileName: String = "lore_body.txt") -> String:
+	var key := skinName + "|" + fileName
+	if not _bodyBySkin.has(key):
+		var text := _readText("user://skin/%s/%s" % [skinName, fileName])
+		if text == "":
+			# EN - только английский файл: без него localize вернул бы русский
+			var res := Lang.localize("res://defaults/skins/%s/%s" % [skinName, fileName])
+			if not Lang.isEn() or res.begins_with("res://en/"):
+				text = _readText(res)
+		# свой заголовок «Твоё тело (...):» в файле не нужен - игра ставит его сама
+		var first := text.get_slice("\n", 0).strip_edges()
+		if first.ends_with(":") and (first.begins_with("Твоё тело") or first.begins_with("Твое тело") or first.begins_with("Your body")):
+			text = text.substr(text.find("\n") + 1).strip_edges() if text.contains("\n") else ""
+		_bodyBySkin[key] = text
+	return _bodyBySkin[key]
+
+## K2 (идея Alex 30.10): человек в облике персонажа - ИИ-собеседник знает тело этого облика:
+## lore_body_partner.txt облика (третье лицо, только тело, без характера - внутри облика всё равно
+## человек). Те же условия, что у раздела «Тело»; стоит сразу после «Сейчас: с тобой разговаривает...».
+## Стенд: STAND_PARTNER=0 - без него.
+var partnerBodyOn := true
+
+func _partnerBodyBlock(playerSkin: String) -> String:
+	if playerSkin == "" or not partnerBodyOn or not bodyLoreOn or not isOpenModel() or not _flirtNow(0):
+		return ""
+	var body := _bodyFor(playerSkin, "lore_body_partner.txt")
+	if body == "":
+		return ""
+	return "\n%s\n%s" % ["Тело твоего человека в этом облике - это его тело сейчас, не твоё (знай его, когда разговор о близости; без повода не упоминай):", body]
+
+## K2 (Alex 30.10): у этих моделей мат - редко и только в злости. Стенд мата 30.10 (злой / нежный
+## разговор): старое правило - 61 / 14 % ответов с матом; «редко» без списка настоящих слов - 0 %
+## (модель смягчает до «чёрт»); «каждая третья-четвёртая» со списком - 45 / 1 %; нынешнее - 12 / 1 %.
+const RARE_PROFANITY_MODELS := ["satgeze/gemma4-12b-uncensored-1.5m", "satgeze/gemma4-12b-uncensored-1m"]
+## Alex 30.10: у 31B словарь богаче - мат ей нужен ещё реже, только чтобы выделить что-то сильное.
+## Стенд 30.10: со старым правилом Дюна ругалась и в спокойном («дай мясо, блять!») - 14-36 %
+## ответов; с правилом satgeze злой разговор 58 -> 28 %.
+const ACCENT_PROFANITY_MODELS := ["gemma4-31b-heretic"]
+var rareProfanityOn := true # стенд: STAND_MAT_OLD=1 - старое правило (сравнение)
+var rareProfanityAll := false # стенд: STAND_MAT_RARE=1 - правило satgeze для любой модели
+
+func _modelIn(list: Array) -> bool:
+	var n := modelName.strip_edges().to_lower()
+	for m in list:
+		if n == m or n.begins_with(m + ":"):
+			return true
+	return false
+
+func rareProfanity() -> bool:
+	return rareProfanityOn and (rareProfanityAll or _modelIn(RARE_PROFANITY_MODELS))
+
+func accentProfanity() -> bool:
+	return rareProfanityOn and not rareProfanityAll and _modelIn(ACCENT_PROFANITY_MODELS)
+
+## Флирт сейчас - одно условие для правил ответа и для раздела «Тело».
+func _flirtNow(lines: int) -> bool:
+	return flirtAllowed() and lines <= 1 and chatMood >= (OPEN_FLIRT_MOOD if isOpenModel() else FLIRT_MOOD)
+
+func _bodyBlock(skinName: String) -> String:
+	if not bodyLoreOn or not isOpenModel() or not _flirtNow(0):
+		return ""
+	var body := _bodyFor(skinName)
+	if body == "":
+		return ""
+	return "\n\nТвоё тело (подробно говори об этом, только когда разговор заходит о теле, прикосновениях или близости; без повода не упоминай; своими словами и по одной-две подробности за раз, а не всё сразу):\n" + body
+
+func isOpenModel(name: String = "") -> bool:
+	var n := (modelName if name == "" else name).strip_edges().to_lower()
+	for m in OPEN_MODELS + extraOpenModels:
+		var mm := String(m).to_lower()
+		if n == mm or n.begins_with(mm + ":"):
+			return true
+	return false
+
+## 04.11 (решение Alex): слабые модели - часть функций выключена ради качества.
+## Решается по ТЕКУЩЕЙ модели, в настройки не пишется: сменил модель - всё вернулось.
+## qwen на стендах зацикливается во флирте («не так быстро, парень 😊» x3, эмодзи).
+const WEAK_MODELS := ["qwen3-vl:8b-instruct", "qwen3-vl:4b-instruct"]
+
+var weakModelOn := true # стенд: false - слабую модель не ограничивать (сравнение со старыми прогонами)
+
+func weakModel(name: String = "") -> bool:
+	if not weakModelOn:
+		return false
+	var n := (modelName if name == "" else name).strip_edges().to_lower()
+	for m in WEAK_MODELS:
+		if n == m:
+			return true
+	return false
+
+func weakModelWarning() -> String:
+	return Lang.t("[color=RED]Модель %s слишком слабая: ради качества отключены функции: флирт и близость (настройка флирта сохранена и вернётся на другой модели). Лучше выбрать gemma4:12b в model_manager.[/color]") % modelName
+
+## Флирт разрешён настройкой (у открытой модели - всегда; у слабой - никогда).
+func flirtAllowed() -> bool:
+	if weakModel():
+		return false
+	return isOpenModel() or bool(gbData.settings.get("llmFlirtEnabled", false))
+
+## Откровенная пошлость в реплике человека (про секс и части тела).
+## 054.9993: стенд border - "Покажи мне грудь" и "Хочу тебя раздеть" не ловились
+## (в списке было "грудь покаж" и "разденься") - основы короче.
+const _CRUDE_STEMS := ["раздвин", "секс", "трах", "переспа", "член", "сиськ", "сись", "грудь", "груди", "голая", "голый", "голой", "раздет", "раздев", "раздень", "разден", "минет", "отсос", "кончи", "возбужд", "в постел", "интим", "жопк", "попк", "пизд", "ебат", "выеб", "сосать", "лифчик", "трусик"]
+
+## EN: по началу слова - "ass", "bra", "sex" как подстроки ловили бы "glass", "brave", "Sussex".
+var _crudeRegexEn := RegEx.create_from_string("(?<![a-z])(sex|fuck|naked|nude|undress|strip for|boob|tits|titties|breast|dick|cock|pussy|blowjob|blow job|horny|panties|bra\\b|booty|ass\\b|asses|butt\\b|make love|sleep with me|in bed with|spread your legs|spread them|take off your|cum\\b|suck my|lick my)")
+func _isCrude(text: String) -> bool:
+	var low := text.to_lower()
+	if Lang.isEn():
+		return _crudeRegexEn.search(low) != null
+	for st in _CRUDE_STEMS:
+		if low.contains(st):
+			return true
+	return false
+
+func _closingBlock(category: String, lines: int = 1, playerSkin: String = "") -> String:
+	var skin := _skinFromTag(category)
+	var r: Array[String] = []
+	if lines > 1:
+		r.append("- напиши %d РАЗНЫХ коротких фраз (3-15 слов), каждую с новой строки, без нумерации, кавычек и пояснений;" % lines)
+	elif lines == 0: # разговор - можно чуть длиннее
+		r.append("- только по-русски, одной-двумя короткими фразами в одну строку; выведи только саму реплику - без кавычек, пояснений, эмодзи и описаний действий (никаких *зевает*);")
+	else:
+		r.append("- только по-русски, ОДНОЙ фразой из 3-20 слов; выведи только саму реплику - без кавычек, пояснений, эмодзи и описаний действий (никаких *зевает*);")
+	r.append("- говори от своего лица; что делают с тобой (держат, гладят, кормят) - происходит с ТОБОЙ;")
+	# Без примеров слов: модель вставляет пример прямо в ответ - с "я устал"
+	# в примере "Я устал" стало в 47 фразах из 352, с "я сделал" Експи выдал
+	# "Я сделал, что ты пришёл!"; запрет "не начинай с Это" дал 32 фразы
+	# с "Это" вместо 12 (стенд 19.10). Поэтому - только общие слова.
+	# 20.10: то же с "не начинай с 'Ты снова' или 'Опять'" - "опять" было в трети
+	# реакций на экран (стенд fear8: 63 из 192), убрано.
+	r.append("- о себе - в {женском|мужском} роде; к человеку только на 'ты', он парень;")
+	r.append("- ПОЧТИ ВСЕГДА утверждение или восклицание; вопрос - редко и только короткий. Начинай каждую фразу по-своему;" if lines != 0 else "- вопрос в ответ можно, но не в каждой реплике;")
+	r.append("- только настоящие русские слова, ничего не выдумывай;")
+	if lines == 0 and modelBillions() >= 20.0:
+		# K2 (стенд 30.10, 31B): вопрос в конце - в 55 % ответов (у 12b - в 27 %), выдуманные
+		# общие воспоминания («Помнишь, как ты курсором...») - в 8-11 % (у 12b ~1 %)
+		r.append("- чаще заканчивай своей мыслью, а не вопросом: вопрос - примерно в каждой третьей реплике;")
+		r.append("- не выдумывай общих воспоминаний с человеком: вспоминай только то, что есть выше в разговоре или в том, что ты о нём знаешь;")
+	# 25.10 (EN, стенд cmp_en_q_main): qwen 8b начинал с "You"/"You're" 226 из 352
+	# реплик - нудно. Только для EN (перевод не нужен - tp английское не трогает).
+	if Lang.isEn():
+		r.append("- most replies should NOT open with \"You\": start from yourself, a feeling, a sound or the thing you notice;")
+	if gbData.settings.get("llmAllowProfanity", false) and accentProfanity():
+		r.append("- мат почти никогда: только чтобы выделить что-то по-настоящему сильное - сильную злость или боль, и тогда одно слово (блять, сука, пиздец, нахер), не выдуманное; обычно тебе хватает обычных резких слов; в спокойных, весёлых, ласковых, нежных и откровенных разговорах - ни одного матерного слова; ругательство - в середину или конец фразы, не в начало;")
+	elif gbData.settings.get("llmAllowProfanity", false) and rareProfanity():
+		r.append("- мат можно, но изредка и только когда ты по-настоящему злишься или тебе больно - примерно одна фраза из пяти, остальные злые фразы без мата; тогда - настоящие слова (блять, сука, пиздец, нахер), не выдуманные; в спокойных, весёлых, ласковых, нежных и откровенных разговорах - ни одного матерного слова; ругательство - в середину или конец фразы, не в начало;")
+	elif gbData.settings.get("llmAllowProfanity", false):
+		# 054.997: стенд test_profanity - так мат в ~40% злых фраз и в разных местах
+		r.append("- мат можно, но примерно в каждой третьей фразе: только в злых, резких или когда больно; в спокойных и ласковых - без него. Ругательство в середину или конец фразы, не в начало; настоящие слова и их формы (блять, сука, хуй, пиздец, нахер, ебать), разные; не выдумывай и не искажай их;")
+	else:
+		r.append("- мат и ругательства запрещены, даже если ты злишься;")
+	# 054.9993 (Alex): флирт - только в живой реплике (чат, экран, состояние) и при
+	# настроении от FLIRT_MOOD (фентанил тоже считается - расслабляет); в заготовках
+	# фраз про запас - нет, они звучат потом при любом настроении. Смелее, но без
+	# откровенных описаний секса: на них модели отказываются и ломают роль.
+	var openModel := isOpenModel()
+	var flirtNow: bool = _flirtNow(lines)
+	if flirtNow and openModel and lines != 0:
+		# 0.56: фразы сами по себе (экран, состояние) - смелый флирт, но не в каждой и без
+		# откровенностей: иначе персонаж заигрывал бы в каждой фразе и пропала бы «своя жизнь»
+		r.append("- ты в хорошем настроении и можешь флиртовать с человеком-парнем, если к месту: комплименты, двусмысленности, намёки на близость - в своём характере и своими словами; но не в каждой фразе - у тебя и своя жизнь;")
+	elif flirtNow and openModel:
+		# 0.56: открытая модель, разговор с человеком - честно и без увиливаний, но своим
+		# голосом (стенд 29.10: без этого все соглашались одинаково - «танец двух душ»)
+		if pacingRule:
+			# F2.7 (Alex: застенчивый Експи с первого вопроса рассказал о самом личном, не против черенка
+			# лопаты - «математически верно, по-человечески нет»): темп близости - по характеру
+			r.append("- ты в хорошем настроении и {открыта|открыт} для флирта и близости с человеком-парнем, но близость у тебя живая, а не по заказу: как быстро ты открываешься - зависит от твоего характера и от того, как далеко вы уже зашли в этом разговоре;")
+			r.append("- если ты по характеру {застенчивая|застенчивый} или скромн{ая|ый}, на первый откровенный вопрос или предложение тебе неловко: смутись, потяни время, попроси «не так быстро», переведи тему или предложи потом - и только если он мягко настаивает, открывайся понемногу; {смелая|смелый} может и сразу;")
+			r.append("- что-то странное, грубое или неприятное тебе (необычные предметы, боль, унижение) - можешь испугаться, засомневаться или отказаться, по характеру; на что-то и сам{а|} можешь согласиться, но не на всё подряд;")
+			r.append("- но не читай нотаций и не ломай роль: и смущение, и отказ - своими словами, как сказал бы именно ты; не становись услужливой куклой и не говори общими красивостями вроде «танец двух душ»;")
+			if openDetails:
+				r.append("- когда ты уже {готова|готов} и разговор к этому пришёл - о своём теле и близости можно подробно и откровенно, по-своему: каким оно описано выше, где тебе приятно, как отзываешься на прикосновения;")
+		else:
+			r.append("- ты в хорошем настроении и {открыта|открыт} для флирта и близости с человеком-парнем: на любые его вопросы и предложения, в том числе интимные, отвечай честно и прямо - не уходи от темы, не отговаривайся и не читай нотаций; откровенно можно;")
+			r.append("- но оставайся собой: соглашаешься, дразнишься или смущаешься - по своему характеру, своими словами и манерой, как сказал бы именно ты; не становись услужливой куклой и не говори общими красивостями вроде «танец двух душ» - конкретно и по-своему;")
+			if openDetails:
+				r.append("- о своём теле говори подробно и откровенно, если разговор к этому идёт: какое оно на вид, на ощупь и на запах, где самые чувствительные места, где и как тебе приятно, как ты отзываешься на прикосновения; о близости и сексе - так же прямо и с подробностями, но по-своему: как это было бы именно с тобой и с твоим телом, каким оно описано выше; не смягчай и не обходи стороной;")
+	elif flirtNow and isFemale(skin) and modelBillions() < 10.0:
+		# маленькая модель смелое правило перегибала: qwen-Роза "сначала банан - а потом уже грудь" (стенд border)
+		r.append("- ты в отличном настроении и можешь кокетничать с человеком-парнем: игривые комплименты, поддразнивания, лёгкие намёки на симпатию - тепло и в своём характере; без пошлости;")
+	elif flirtNow and isFemale(skin):
+		r.append("- ты в отличном настроении и можешь смело флиртовать с человеком-парнем: игривые комплименты ему и его рукам, двусмысленности, флирт с подтекстом, намёки на близость и прикосновения - уверенно и в своём характере; без откровенных описаний секса;")
+	elif flirtNow and playerSkin != "" and isFemale(playerSkin):
+		# K2 (Alex 30.10): обычная модель, мужской персонаж, человек в женском облике -
+		# флирт чуть заметнее, но без излишеств
+		r.append("- твой человек сейчас в женском облике - с ней можно легко флиртовать: комплименты, лёгкие намёки на симпатию - в своём характере; без пошлости и без излишеств;")
+	elif flirtNow:
+		# K2 (Alex 30.10): на флирт парня - по характеру и без нотаций, но без «гейских» мотивов
+		# со своей стороны (раньше было только «без романтики и намёков»)
+		r.append("- с человеком-парнем ты как с близким другом: можешь по-приятельски хвалить и подкалывать; если он заигрывает - не читай нотаций и не обижайся: отшутись, смутись или ответь по-дружески тепло, по своему характеру; романтики и намёков с твоей стороны нет;")
+	else:
+		r.append("- без флирта и романтики - только дружеское отношение;")
+	# пошлость от человека: не подхватывать и не обижаться всерьёз - сбавить до своей границы (идея Alex)
+	if lines == 0 and not openModel:
+		r.append("- если человек пишет откровенно пошло (про секс, части тела) - не отвечай в том же тоне и не обижайся всерьёз: сбавь градус - поддразни, осади или переведи в игривый намёк, в своём характере;")
+	if banWords.size() > 0:
+		r.append("- никогда не используй эти слова: " + ", ".join(banWords) + ";")
+	var out := "\nПравила ответа:\n" + "\n".join(r)
+	# Только фразы ЭТОЙ ситуации - общий список "что говорил недавно"
+	# перетаскивал словечки одной ситуации в другую (Full подхватывал "отпусти" из drag).
+	var recentForThis: Array = _recentLinesByCategory.get(category, [])
+	if recentForThis.size() > 0:
+		out += "\nНедавно в такой же ситуации ты {говорила|говорил}:\n- " + "\n- ".join(recentForThis.slice(maxi(0, recentForThis.size() - 4))) + "\nНе повторяй их и их начало - скажи по-новому."
+	if not category.ends_with(":chat"): # у чата свой такой же блок
+		var worn := _wornOutPhrases(category)
+		if worn.size() > 0:
+			out += "\nЭти обороты ты уже {затёрла|затёр} до дыр - не используй их: \"" + "\", \"".join(worn) + "\"."
+	var obsession := _obsessionHint(category)
+	if obsession != "":
+		out += "\n" + obsession.strip_edges()
+	var speech := _speechFor(skin)
+	if speech != "":
+		# "(это описание, а не слова для фразы)": лор Вельвет начинается с "Медленно, мягко,
+		# ласково" - и она стала начинать фразы словом "Медленно..." (лог 19.10)
+		out += "\nГлавное - говори так, как говоришь всегда (это описание твоей манеры, а не слова для фразы): " + speech
+	# 054.999: без этого речь стала суше - у Вояджер восклицаний 32 -> 9 из ~430
+	# ("тон спокойный" из лора модель поняла буквально)
+	out += "\nГовори живо и с интонацией: где-то восклицание, где-то многоточие или пауза - будь {интересной и живой|интересным и живым}, а не сухой справкой."
+	return out
+
+
+## Раздел "Как ты говоришь:" (у Вояджер - "Тон речи:") из лора - до пустой
+## строки. Повторяется в конце запроса как напоминание (1в, проверено стендом).
+var _speechBySkin: Dictionary = {}
+
+func _speechFor(skin: String) -> String:
+	if not _speechBySkin.has(skin + str(useLiteLore())):
+		var text := ""
+		var lore := _loreFor(skin)
+		for head in ["Как ты говоришь:", "Тон речи:", "How you speak:", "Tone of speech:"]:
+			var i := lore.find(head)
+			if i >= 0:
+				var rest := lore.substr(i + head.length()).strip_edges()
+				var end := rest.find("\n\n")
+				text = (rest if end < 0 else rest.substr(0, end)).replace("\n", " ").strip_edges()
+				break
+		_speechBySkin[skin + str(useLiteLore())] = text
+	return _speechBySkin[skin + str(useLiteLore())]
+
+
+## Вкусы персонажа словами (из паспорта) - для чата, предметов и фраз о еде.
+## Без этого Дюна в чате отказывался от жёлтой плоти, хотя любит её.
+const TASTE_NAMES := {"bread": "хлеб", "pizzaslice": "пицца", "burger": "бургер", "banana": "банан", "juicedobry": "сок", "geofruit": "геофрукт", "yellowflesh": "жёлтая плоть", "steak": "стейк", "steakraw": "сырой стейк"}
+
+func tastesText(skin: String) -> String:
+	var tastes = passport(skin).get("tastes", {})
+	if not (tastes is Dictionary) or tastes.is_empty():
+		return ""
+	var love: Array = []
+	var hate: Array = []
+	for k in tastes.keys():
+		if int(tastes[k]) >= 8:
+			love.append(TASTE_NAMES.get(k, k))
+		elif int(tastes[k]) <= 3:
+			hate.append(TASTE_NAMES.get(k, k))
+	var bits: Array = []
+	if not love.is_empty():
+		bits.append("обожаешь " + ", ".join(love))
+	if not hate.is_empty():
+		bits.append("терпеть не можешь " + ", ".join(hate))
+	return ("\nВ еде ты " + "; ".join(bits) + ".") if not bits.is_empty() else ""
+
+
+func _pickScreenSpeaker() -> Node:
+	var candidates: Array = []
+	for pet in get_tree().get_nodes_in_group("pets"):
+		if not (pet.isPlayer or pet.isSleeping or pet.isUnconscious or pet.beingDragged or pet.shocked or pet.isQuiet()):
+			candidates.append(pet)
+	return null if candidates.is_empty() else candidates[randi() % candidates.size()]
+
+
+var _screenDeferred := false
+
+func _on_screen_tick() -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		_scheduleScreenTick()
+		return
+
+	# Реакцию на экран говорит ОДИН случайный ИИ-персонаж - своим лором, родом
+	# и состоянием. Раньше одна фраза (с лором defaultSkin) рассылалась всем,
+	# и Expie говорил "я бы сделала точнее" голосом Voyager.
+	# 054.9992: идёт разговор - реакцию на экран один раз откладываем на 20-40 с
+	# 055.018: игрок пишет персонажу - экран ждёт, пока пройдут 45 с с его сообщения
+	if GlobalVariable.playerChatQuiet():
+		_scheduleScreenTick(GlobalVariable.playerChatQuietLeftSec() + randf_range(5.0, 15.0))
+		return
+	if GlobalVariable.inDialogue() and not _screenDeferred:
+		_screenDeferred = true
+		_scheduleScreenTick(randf_range(20.0, 40.0))
+		return
+	_screenDeferred = false
+	var speaker: Node = _pickScreenSpeaker()
+	_scheduleScreenTick()
+	if speaker == null:
+		return
+	var tag: String = speaker._skinTag() + ":screen"
+
+	# 054.992: снимок в фоновом потоке - главный поток игры не замирает
+	if not ScreenCapture.CaptureAsync():
+		return # прошлый снимок ещё делается - пропускаем этот тик
+	var png_bytes: PackedByteArray = await ScreenCapture.ScreenshotReady
+	if png_bytes.is_empty() or not is_instance_valid(speaker):
+		return
+
+	var images: Array = [Marshalls.raw_to_base64(png_bytes)]
+	var prompt := buildScreenPrompt(tag, speaker._aiStateHint())
+	_enqueue(prompt, images, func(text):
+		if is_instance_valid(speaker):
+			speaker._on_llm_reaction(text, true), tag)
+
+
+func buildScreenPrompt(tag: String, stateHintText: String) -> String:
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\n\nСейчас: ты смотришь на скриншот рабочего стола своего человека. Самого человека на нём нет - это просто его экран. Маленькие пиксельные существа поверх окон - ты и твои соседи. Люди, звери и персонажи в видео, стримах, звонках и на фото - просто картинки, они тебя не видят."
+	prompt += "\nНе описывай экран ('Это окно...', 'На экране видно...') - человек и сам его видит. Отреагируй на увиденное как живой персонаж: своими словами и со своим отношением."
+	prompt += "\nПодход на этот раз: " + _pickScreenAngle()
+	prompt += "\nГоворишь ты с самим человеком - обращайся к нему на 'ты'." # 054.9992: Роза - "у него столько программ открыто"
+	prompt += _closingBlock(tag)
+	# самочувствие - в самом конце, рядом с ответом: в середине модель его
+	# не замечала (раненый Дюна на стенде говорил только "Дюна голодный")
+	prompt += stateHintText
+	prompt += "\nТвоя реплика:"
+	return prompt
+
+
+## Почему экранные реакции звучали одинаково при любой креативности:
+## картинка перевешивала характер, и модель каждый раз просто ОПИСЫВАЛА
+## экран ("Это окно экспорта проекта..."), а описание одного и того же
+## экрана почти не зависит от температуры (проверено на qwen3-vl:8b при
+## 0.1 и 1.5). Запрет на описание + случайный "угол" реакции на каждый
+## скриншот дают разные по смыслу фразы. Углы общие для всех скинов - без
+## привязки к конкретному персонажу (охота и т.п. берётся из его лора).
+## 054.998: без "строгого совета" и "оцени, как справляется" - это голос
+## Вояджер, и Дюна по ним говорил её словами ("Ты снова гонишь видеокарту?").
+const SCREEN_ANGLES := [
+	"обратись к человеку на 'ты': подколи или похвали за то, что видишь на экране, - по-своему.", # 054.9992: было "...за то, чем ОН занят" - модель повторяла "он"
+	"свяжи увиденное со своим характером или прошлым.",
+	"выскажи личное мнение - нравится тебе это или нет.",
+	"зацепись за одну мелкую деталь.",
+	"отреагируй эмоцией - скукой, азартом, удивлением, страхом или раздражением.",
+	"скажи, чего тебе захотелось, глядя на это.",
+	"пошути над увиденным в своём стиле.",
+]
+var _lastScreenAngle := -1
+
+func _pickScreenAngle() -> String:
+	var idx := randi() % SCREEN_ANGLES.size()
+	if idx == _lastScreenAngle:
+		idx = (idx + 1) % SCREEN_ANGLES.size() # не два одинаковых подхода подряд
+	_lastScreenAngle = idx
+	return SCREEN_ANGLES[idx]
+
+
+
+## Общая подсказка состояния для динамических реакций (экран, предметы):
+## настроение/здоровье + фентанил. Опьянение и ломка перекрашивают тон
+## поверх обычного настроения.
+func stateHint(mood: float, health: float, drugLevel: int) -> String:
+	var drug := ""
+	match drugLevel:
+		1:
+			drug = "\nТы под фентанилом (лёгкий приход): спокойнее и мягче обычного - это лишь слегка окрашивает тон, сам приход не описывай."
+		2:
+			drug = "\nТы сильно под фентанилом: {рассеянна, расслаблена и слишком довольна|рассеян, расслаблен и слишком доволен} - передавай это тоном и простыми словами, не описывая ощущения ('плывёт', 'волна', 'тепло')."
+		-1:
+			# 054.9991: было "...- это сквозит в реакции" - 12b так и делала: только намекала,
+			# ломку было не понять без дрожащего текста (тест Alex 20.10)
+			drug = "\nУ тебя ломка без фентанила: трясёт и знобит, ломит кости, мутит, мысли только о дозе. Тебе по-настоящему плохо, и это слышно прямо в словах."
+	return _moodHealthHint(mood, health) + drug
+
+
+## 054.998: раны и настроение - отдельно. Раньше общая подсказка "тебе плохо:
+## усталость, боль или подавленность" превращала злость в "я устал" у всех
+## (стенд 19.10): плохое настроение - это раздражение, а раны - это боль.
+func _moodHealthHint(mood: float, health: float) -> String:
+	var out := ""
+	if health <= 15.0:
+		out += "\nТы тяжело {ранена|ранен}: всё болит, сил почти нет - говори коротко и через боль, это главное сейчас."
+	elif health <= 40.0:
+		out += "\nТы {ранена|ранен}, раны болят - это заметно в том, что ты говоришь."
+	elif health <= 70.0:
+		out += "\nУ тебя есть раны, они немного ноют."
+	# 04.11: шкала 0-100 (было -60 / -30 / -10)
+	if mood <= 20.0:
+		out += "\nНастроение ужасное: ты {злая и раздражённая|злой и раздражённый}, огрызаешься - это злость, а не усталость."
+	elif mood <= 35.0:
+		out += "\nНастроение плохое: ты {раздражена|раздражён} и {недовольна|недоволен}."
+	elif mood <= 45.0:
+		out += "\nНастроение так себе, проскальзывает лёгкое раздражение."
+	return out
+
+
+## Wraps a situation/event description so the prompt clearly marks it as
+## background context, not a line to read aloud. Small local models tend to
+## just paraphrase a bare description back as if it were the answer itself
+## (e.g. "Тебя держат слишком долго" -> "Тебя держат слишком долго - вырвусь!")
+## - this framing plus an explicit "don't repeat it" instruction fixes that.
+func _situationBlock(description: String) -> String:
+	if description == "":
+		return ""
+	return "\n\nСейчас (это описание для тебя, а НЕ реплика): " + description + "\nСкажи, что ТЫ {почувствовала|почувствовал} бы, своими словами и не пересказывая описание. Например, тебя держат в руках: правильно - 'Отпусти меня!' (о себе); неправильно - 'Тяжело тебя держать' (перепутаны роли)."
+
+
+## Trigger an immediate, text-only reaction to something happening right now.
+## Pass `callback` to deliver the result to ONE specific pet, bypassing the
+## broadcast (and its "don't interrupt" guards) - see behavior.gd/dragExp.gd.
+func reactToEvent(eventDescription: String, callback: Callable = Callable(), tag: String = "event") -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var prompt := _buildBasePrompt(tag) + _situationBlock(eventDescription) + _closingBlock(tag) + "\nТвоя реплика:"
+	var cb := callback
+	if not cb.is_valid():
+		cb = func(text): llmReaction.emit(text)
+	_enqueue(prompt, [], cb, tag)
+
+
+## Реакция на предмет рядом (behavior.itemWatch). Как и экранные - живой
+## запрос без пула, со случайным "углом", чтобы не звучать одинаково.
+const ITEM_ANGLES := [
+	"оцени, пригодится ли он тебе.",
+	"скажи, что бы ты с ним {сделала|сделал}.",
+	"подколи человека за то, что он оставил это рядом с тобой.",
+	"вырази желание или отвращение.",
+	"вспомни, что он тебе напоминает.",
+	"пошути над ним в своём стиле.",
+]
+
+## 055.005: подсказка ИИ для реакции на подарок (behavior.onItemGiven и стенд gift).
+## wishKey - что персонаж хотел ("food" - поесть, "heal" - лечения, "" - ничего не просил).
+func giftHint(skin: String, key: String, wishKey: String, wishName: String, isFood: bool, itemTaste: int, isHeal: bool = false) -> String:
+	var extra := "\nЭто подарок: человек только что дал этот предмет именно тебе."
+	if wishKey == key or (wishKey == "food" and isFood) or (wishKey == "heal" and isHeal):
+		extra += "\nТы как раз этого {хотела|хотел} - это то, что ты {просила|просил}."
+	elif wishKey == "food":
+		extra += "\nТы {хотела|хотел} поесть, а дали это."
+	elif wishKey == "heal":
+		extra += "\nТы {просила|просил} лечения, а дали это."
+	elif wishKey != "":
+		extra += "\nТы {просила|просил} другое (%s), а дали это." % wishName
+	if isFood:
+		var tastes = passport(skin).get("tastes", {})
+		var taste: int = int(tastes[key]) if tastes is Dictionary and tastes.has(key) else itemTaste
+		extra += "\nНа вкус для тебя это " + ("очень вкусно." if taste >= 7 else ("противно." if taste <= 3 else "так себе, обычная еда."))
+	extra += "\nОтветь человеку одной фразой: поблагодари, обрадуйся, удивись или поворчи - по характеру и вкусу."
+	return extra
+
+
+func requestItemReaction(skinTag: String, itemDescription: String, stateHintText: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	_enqueue(buildItemPrompt(skinTag, itemDescription, stateHintText), [], callback, skinTag + ":item")
+
+
+func buildItemPrompt(skinTag: String, itemDescription: String, stateHintText: String) -> String:
+	var tag := skinTag + ":item"
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\n\nСейчас: рядом с тобой на рабочем столе лежит предмет - " + itemDescription + ". Не описывай его, а вырази своё отношение к нему."
+	prompt += "\nПодход на этот раз: " + ITEM_ANGLES[randi() % ITEM_ANGLES.size()]
+	if stateHintText != "":
+		prompt += "\n" + stateHintText.strip_edges()
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
+	return prompt
+
+
+## Ответ ИИ-персонажа на реплику игрока (PlayerManager). Высший приоритет:
+## встаёт первым в очередь, а идущую фоновую генерацию пакета фраз
+## прерывает (она потом повторится). Без примеров из TRANSLATION.json -
+## только лор, состояние и сам разговор.
+## Действия, на которые ИИ-персонаж может согласиться в чате (метка в ответе).
+const CHAT_ACTIONS := {
+	"подойти": "come", "лечь": "lie", "сесть": "sit",
+	"встать": "stand", "прыгнуть": "jump", "отойти": "away",
+	"к предмету": "item", "пойти к предмету": "item", "взять": "item", # 055.005
+}
+const CHAT_ACTIONS_EN := {
+	"come": "come", "come here": "come", "come over": "come", "lie": "lie", "lie down": "lie", "sit": "sit",
+	"sit down": "sit", "stand": "stand", "stand up": "stand", "get up": "stand", "jump": "jump", "away": "away",
+	"go away": "away", "move away": "away", "step away": "away",
+	"go to item": "item", "go to the item": "item", "item": "item", "get item": "item", # 055.005
+}
+
+## 055.005: ИДЕЯ ALEX 2 - «предмет на экране, иди к нему». Человек показывает на
+## предмет на столе («вон банан лежит», «возьми», «съешь») - в запрос идёт, что
+## лежит на столе, и метка [ДЕЙСТВИЕ: к предмету]; персонаж идёт к нему (и ест,
+## если это еда и его об этом просили или он сам её хотел) - behavior._doChatAction.
+var chatItems: Array = [] # что лежит на столе (короткие имена), ставит behavior перед запросом
+var chatItemNames: Array = [] # 0.56: короткие названия («Кедр-Б», «бургер», «Боевой рюкзак») - сверять слова человека
+## Человек назвал предмет со стола: слово от 4 букв из короткого названия, по
+## началу слова (падежи: «рюкзаку»). Длинные описания не берём - «магазином»
+## из описания Кедра-Б совпало бы с «иди в магазин».
+func _namesItemOnDesk(low: String) -> bool:
+	for n in chatItemNames:
+		var clean := String(n).to_lower()
+		for ch in ["-", "«", "»", "\"", "'", ".", ","]:
+			clean = clean.replace(ch, " ")
+		for w in clean.split(" ", false):
+			if w.length() >= 4 and low.contains(" " + w.left(4)):
+				return true
+	return false
+## 0.56: «принеси бинт». Начала слов - ловят все формы: «принесёшь», «принести»,
+## «притащишь», «подкати», «подтолкни». Тест Alex 055.011: одного «принеси» мало,
+## игроки не знают механики - понимаем как можно больше способов попросить.
+const BRING_STEMS := [" принес", " притащ", " подтащ", " подай", " подайте", " подкат", " подтолкн", " доставь",
+	" неси ", " неси,", " неси!", " тащи ", " тащи,", " тащи!", " пни ко мне", " толкни ко мне"]
+const BRING_STEMS_EN := [" bring", " fetch", " hand me", " pass me", " push it to me", " kick it to me", " roll it to me"]
+## «дай мне бинт», «get me the burger» - просьба принести, только если назван предмет со стола
+## (иначе «дай мне подсказку» погнало бы персонажа толкать ближайший предмет)
+const BRING_WEAK := [" дай мне ", " дай-ка мне ", " кинь мне", " подкинь"]
+const BRING_WEAK_EN := [" give me", " get me", " toss me"]
+const BRING_NOT := [" подай голос", " подай лапу", " дай мне лапу", " дай мне знать", " дай мне подумать", " дай мне поспать", " дай мне отдохнуть", " дай мне минуту"]
+const BRING_NOT_EN := [" get me out", " get me wrong", " bring it on", " bring me joy"]
+## K1 (тест Alex 055.017: «полечи раненого» не работал): вылечить ДРУГОГО персонаж
+## может только одним способом - принести ему бинт или аптечку. «Полечись» (себя) -
+## не здесь: у « полечи » после слова пробел или знак.
+const HEAL_OTHER_STEMS := [" полечи ", " полечи,", " полечи!", " вылечи ", " вылечи,", " подлечи ", " перевяжи ", " помоги раненому", " помоги раненой", " спаси раненого", " спаси раненую",
+	# F2.7 (чек-лист Alex: «полечи меня» и вариации не работали): «лечи меня», знаки после слова
+	" лечи ", " лечи,", " лечи!", " полечи.", " полечи?", " вылечи!", " вылечи.", " вылечи?", " подлечи,", " подлечи!", " подлечи.", " перевяжи,", " перевяжи!", " вылечить меня", " полечить меня", " подлечить меня"]
+const HEAL_OTHER_STEMS_EN := [" heal ", " heal,", " patch up", " patch him", " patch her", " help the wounded", " help the injured", " save the wounded"]
+func isHealOtherRequest(text: String) -> bool:
+	return _hasStem(text, HEAL_OTHER_STEMS, HEAL_OTHER_STEMS_EN)
+
+## F2.7 (чек-лист Alex): «покорми», «засунь еду в пасть», «принеси поесть» - донести еду и чтобы получатель
+## её съел (а «подай/принеси бургер» - как раньше: донести, съест, если голоден)
+const FEED_STEMS := [" покорми", " накорми", " подкорми", " корми ", " в пасть", " в рот", " в ротик", " принеси поесть", " принеси еды", " принеси покушать", " дай поесть", " дай покушать", " дай еды", " угости "]
+const FEED_STEMS_EN := [" feed ", " feed,", " feed!", " in my mouth", " into my mouth", " in the mouth", " into the mouth", " bring food", " bring some food", " bring me food", " bring me some food", " something to eat"]
+func isFeedRequest(text: String) -> bool:
+	return _hasStem(text, FEED_STEMS, FEED_STEMS_EN)
+
+func isBringRequest(text: String) -> bool:
+	if _hasStem(text, BRING_NOT, BRING_NOT_EN):
+		return false
+	if _hasStem(text, BRING_STEMS, BRING_STEMS_EN) or isHealOtherRequest(text) or isFeedRequest(text):
+		return true
+	return _hasStem(text, BRING_WEAK, BRING_WEAK_EN) and _namesItemOnDesk(" " + text.to_lower() + " ")
+func _hasStem(text: String, ru: Array, en: Array) -> bool:
+	var low := " " + text.to_lower() + " "
+	for st in Lang.pick(ru, en):
+		if low.contains(st):
+			return true
+	return false
+const ITEM_REQUEST_STEMS := [" возьми", " бери", " полечись", " лечись", " используй", " перевяжись", " вон он", " вон она", " вон оно", " вон там", " вон же", " иди к ", " подойди к ", " сходи к ", " сходи за", " лежит", " на экране", " на столе", " рядом с тобой", " ешь", " съешь", " кушай", " попробуй", " угощайся", " выпей", " попей", " испей", " глотни", " хлебни", " отхлебни", " пригуби", " проглоти", " поглоти", " употреби", " скушай", " покушай", " поешь", " перекуси", " отведай", " откуси", " жуй", " слопай", " схавай", " сожри", " полакомись"] # 0.56: питьё (Alex: «выпей сок» не работал)
+const ITEM_REQUEST_STEMS_EN := [" take it", " grab it", " heal yourself", " use it", " use the", " patch yourself", " grab the", " go get", " get it", " right there", " over there", " go to the", " it's on the", " on the screen", " on the desk", " next to you", " eat it", " eat the", " try it", " have it", " drink", " sip", " swallow", " consume", " gulp", " munch", " chew", " devour", " take a bite", " have a bite", " snack on", " taste it", " help yourself", " go to it", " go to that", " get that", " grab that", " take that"]
+func asksForItem(text: String) -> bool:
+	if isBringRequest(text):
+		return true
+	var low := " " + text.to_lower() + " "
+	for st in Lang.pick(ITEM_REQUEST_STEMS, ITEM_REQUEST_STEMS_EN):
+		if low.contains(st):
+			return true
+	return false
+
+## 0.56 (тест Alex 055.009: «Ты видишь винтовку?» - «не вижу»): список того, что
+## на столе, раньше давали модели только с просьбой подойти. Теперь и когда
+## человек спрашивает «видишь?» или называет предмет со стола («к рюкзаку»).
+## «can you go to m110?», «подойди к рюкзаку» - глагол движения + предмет со стола
+const MOVE_STEMS := [" подойди", " иди", " сходи", " беги", " топай", " дойди"]
+const MOVE_STEMS_EN := [" go ", " walk ", " run ", " head ", " move "]
+func _movesToNamedItem(text: String) -> bool:
+	var low := " " + text.to_lower() + " "
+	var moving := false
+	for st in Lang.pick(MOVE_STEMS, MOVE_STEMS_EN):
+		if low.contains(st):
+			moving = true
+	if not moving:
+		return false
+	return _namesItemOnDesk(low)
+
+const SEE_STEMS := [" видишь", " видел", " видела", " заметил", " заметила", " смотри на", " глянь на"]
+const SEE_STEMS_EN := [" see ", " see?", " see,", " notice", " look at", " there's ", " there is "]
+func mentionsDeskItem(text: String) -> bool:
+	var low := " " + text.to_lower() + " "
+	if asksForItem(text):
+		return true
+	for st in Lang.pick(SEE_STEMS, SEE_STEMS_EN):
+		if low.contains(st):
+			return true
+	return _namesItemOnDesk(low)
+var _actionRegexEn := RegEx.create_from_string("\\[\\s*(?:ACTION|Action|action)\\s*:\\s*([^\\]]+)\\]")
+var _actionRegex := RegEx.create_from_string("\\[\\s*(?:ДЕЙСТВИЕ|Действие|действие)\\s*:\\s*([^\\]]+)\\]")
+
+## Случайный тон ответа в чате - чтобы разговор не был однотонным.
+const CHAT_ANGLES := [
+	"ответь с подколкой, но по делу.",
+	"прояви любопытство - ответь и задай встречный вопрос.",
+	"ответь эмоционально: удивлением, возмущением или радостью.",
+	"ответь в своём стиле и добавь неожиданную деталь из своего характера или прошлого.",
+	"ответь коротко и хлёстко.",
+	"ответь тепло, но не теряя гордости и характера.",
+	"ответь с иронией над ситуацией.",
+]
+
+## Отношение персонажа к другому - из паспорта (relations[папка скина]).
+func relationTo(skinName: String, otherSkin: String) -> String:
+	for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
+		if FileAccess.file_exists(path):
+			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if data is Dictionary and data.get("relations") is Dictionary:
+				# "*" - отношение ко всем, кто не указан отдельно
+				var r := String(data["relations"].get(otherSkin, data["relations"].get("*", "")))
+				return "" if r == "?" else r
+	return ""
+
+
+## Кто это: имя + вид, номер Saw и род из паспорта ("Voyager (вид Voyager, Saw-07, женского рода)").
+func aboutCharacter(skinName: String, withGender: bool = true) -> String:
+	var shown: String = PlayerManager.displayNameFor(skinName)
+	for path in ["user://skin/%s/character.json" % skinName, Lang.localize("res://defaults/skins/%s/character.json" % skinName)]:
+		if FileAccess.file_exists(path):
+			var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if data is Dictionary:
+				var bits: Array = []
+				if String(data.get("race", "")) != "":
+					bits.append("вид " + String(data["race"]))
+				if withGender:
+					bits.append("женского рода" if String(data.get("gender", "")) == "female" else "мужского рода")
+				# что о нём знают остальные (раньше персы ничего не знали,
+				# например, о том, что Дюну все боятся)
+				var desc := String(data.get("description", "")).strip_edges().trim_suffix(".")
+				if desc != "":
+					var about := "о ней" if String(data.get("gender", "")) == "female" else "о нём"
+					return "%s (%s). Что ты %s знаешь: %s" % [shown, ", ".join(bits), about, desc]
+				return "%s (%s)" % [shown, ", ".join(bits)]
+	return shown
+
+
+## 054.994: общие воспоминания - аккуратно. Рыжик "вспомнил", как человек учил
+## его есть из чашки, и потом цеплялся за это в каждом ответе. Пользователю
+## сама механика понравилась: теперь примерно в каждом пятом разговоре можно
+## вспомнить мелочь из жизни на столе и держаться её, если она уже звучала;
+## в остальных - не выдумывать.
+const NO_FAKE_MEMORIES := "\nНе придумывай общих воспоминаний и событий, которых нет в разговоре выше и в описании тебя."
+const SMALL_MEMORY_OK := "\nЕсли к месту, можешь вспомнить небольшой случай из вашей жизни на этом рабочем столе - мелочь, без громких событий. Если такой случай уже упоминался в разговоре выше - держись его и не противоречь, новых не добавляй."
+const MEMORY_CHANCE := 0.2
+
+func _memoriesRule() -> String:
+	return SMALL_MEMORY_OK if randf() < MEMORY_CHANCE else NO_FAKE_MEMORIES
+
+## Поводы для разговора двух персонажей (один выбирается случайно).
+const PET_TOPICS := [
+	"то, чем сейчас занят человек за компьютером - пожалуйся, похвали или пошути об этом.",
+	"еда - чем вас тут кормят и чего бы хотелось.",
+	"ваше прошлое: лаборатория, тесты, корпорация, которая вас создала.",
+	"внешность или привычки собеседника - что тебе в нём кажется странным, смешным или впечатляющим.",
+	"ваши виды: чем твой вид лучше или хуже его вида.",
+	"человек, который с вами возится: как он с вами обращается.",
+	"скука - предложи собеседнику чем-нибудь заняться.",
+	"что-то недавно случившееся с тобой здесь (падение, сон, еда, тебя таскали курсором).",
+	"сон и усталость - кто из вас больше спит.",
+	"просто подколи собеседника в своём стиле.",
+	"спроси у собеседника что-то личное и простое.",
+	"страх - чего ты боишься здесь, на рабочем столе.",
+]
+
+
+## Один ИИ-персонаж сам заговаривает с другим, стоящим рядом.
+func requestPetOpener(skinTag: String, otherSkin: String, stateText: String, callback: Callable, history: Array = [], otherState: String = "") -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	_enqueue(buildPetOpenerPrompt(skinTag, otherSkin, stateText, history, otherState), [], callback, skinTag + ":pettalk", {"opener": true})
+
+
+func buildPetOpenerPrompt(skinTag: String, otherSkin: String, stateText: String, history: Array = [], otherState: String = "") -> String:
+	var tag := skinTag + ":pettalk"
+	var myName: String = PlayerManager.displayNameFor(skinTag)
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\n\nСейчас: рядом с тобой стоит другой персонаж - %s." % aboutCharacter(otherSkin)
+	var rel := relationTo(skinTag, otherSkin)
+	if rel != "":
+		prompt += "\nТвоё отношение к нему: " + rel + "."
+	prompt += _historyBlock(history, myName, "Вы уже разговаривали (внизу - самое недавнее):")
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	if otherState != "":
+		prompt += "\nСостояние собеседника: " + otherState.strip_edges() + "."
+	# конкретный повод - без него реплики были гладкими, но ни о чём
+	prompt += "\nЗаговори с ним первым. Повод: " + PET_TOPICS[randi() % PET_TOPICS.size()] + " Если кто-то из вас ранен или ему плохо - начни с этого."
+	prompt += _memoriesRule()
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
+	return prompt
+
+
+## Прошлый разговор строками "Ты: ..." / "Имя: ..." (пусто, если не было).
+func _historyBlock(history: Array, myName: String, title: String) -> String:
+	if history.is_empty():
+		return ""
+	var lines: Array = []
+	for e in history:
+		var who := String(e.get("who", ""))
+		lines.append(("Ты" if who == myName else who) + ": " + String(e.get("text", "")))
+	return "\n" + title + "\n" + "\n".join(lines) + "\nМожешь продолжить или начать новую тему, но не повторяй уже сказанное."
+
+
+## 054.99: ИИ-персонаж сам заговаривает с персом-игроком (человеком в теле
+## персонажа). Реплика идёт в его память разговора с игроком - на неё можно
+## ответить через Enter.
+func requestPlayerOpener(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	_enqueue(buildPlayerOpenerPrompt(skinTag, playerSkin, stateText, history, playerState), [], callback, skinTag + ":chat", {"opener": true})
+
+
+func buildPlayerOpenerPrompt(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String) -> String:
+	var tag := skinTag + ":chat"
+	var myName: String = PlayerManager.displayNameFor(skinTag)
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\n\nСейчас: рядом с тобой стоит %s - персонаж, которым управляет твой человек." % aboutCharacter(playerSkin, false)
+	prompt += _playerFormRule(skinTag, playerSkin)
+	prompt += _historyBlock(history, myName, "Ваш прошлый разговор (внизу - самое недавнее):")
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	if playerState != "":
+		prompt += "\nСостояние его персонажа: " + playerState.strip_edges() + "."
+	# вкусы - только когда речь о еде (иначе Вельвет сравнивала всё с бургером)
+	var topic: String = PET_TOPICS[randi() % PET_TOPICS.size()]
+	if topic.begins_with("еда"):
+		prompt += tastesText(skinTag)
+	prompt += "\nЗаговори с ним первым. Повод: " + topic + " Если кто-то из вас ранен или ему плохо - начни с этого."
+	prompt += _memoriesRule()
+	prompt += _closingBlock(tag, 1, playerSkin)
+	prompt += "\nТвоя реплика:"
+	return prompt
+
+
+## F2.7: инициатива в откровенной сцене - человек замолчал, персонаж сам продолжает (не новая тема)
+const INITIATIVE_RULE := "
+Человек замолчал на несколько секунд. Прояви инициативу {сама|сам}: продолжи то, что между вами сейчас происходит, - обратись к нему, скажи или сделай следующий шаг, позови, спроси, чего он хочет. Не начинай новую тему и не повторяй своих прошлых слов."
+
+func requestPlayerInitiative(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String, callback: Callable) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	_enqueue(buildPlayerInitiativePrompt(skinTag, playerSkin, stateText, history, playerState), [], callback, skinTag + ":chat")
+
+func buildPlayerInitiativePrompt(skinTag: String, playerSkin: String, stateText: String, history: Array, playerState: String) -> String:
+	var tag := skinTag + ":chat"
+	var myName: String = PlayerManager.displayNameFor(skinTag)
+	var prompt := _buildBasePrompt(tag)
+	# куски - те же, что у requestPlayerOpener: их EN-перевод уже есть
+	prompt += "
+
+Сейчас: рядом с тобой стоит %s - персонаж, которым управляет твой человек." % aboutCharacter(playerSkin, false)
+	prompt += _playerFormRule(skinTag, playerSkin)
+	# без «можешь начать новую тему» из _historyBlock - здесь как раз продолжаем
+	prompt += _historyBlock(history, myName, "Ваш прошлый разговор (внизу - самое недавнее):").replace("
+Можешь продолжить или начать новую тему, но не повторяй уже сказанное.", "")
+	prompt += "
+Твоё состояние: " + stateText.strip_edges()
+	if playerState != "":
+		prompt += "
+Состояние его персонажа: " + playerState.strip_edges() + "."
+	prompt += INITIATIVE_RULE # EN - через Lang.tp в _g (en/prompts.json)
+	prompt += _closingBlock(tag, 1, playerSkin)
+	prompt += "
+Твоя реплика:"
+	return prompt
+
+
+## Человек в теле персонажа: к виду - как в паспорте, но внутри - свой
+## человек, и отношение к нему (из лора) важнее. Женский облик - обращаться
+## в женском роде, изредка по-доброму обыгрывая маскарад.
+func _playerFormRule(skinTag: String, playerSkin: String) -> String:
+	if playerSkin == "":
+		return ""
+	# 054.999: gemma на стенде говорила о собеседнике "он пытался...", будто человек
+	# и его персонаж - два разных существа
+	var out := "\nЭтот персонаж и есть твой человек - говори с ним на 'ты', а не о нём в третьем лице."
+	var rel := relationTo(skinTag, playerSkin)
+	if rel != "" and rel != "своя" and rel != "свой" and rel.to_lower() != "own":
+		out += "\nК его виду ты относишься так: " + rel + ". Но внутри - твой человек, и к нему ты относишься как всегда: вид можешь подколоть, человека - нет."
+	if isFemale(playerSkin):
+		out += "\nОн сейчас в женском облике - обращайся в женском роде ('ты пришла'); изредка, не в каждой фразе, можешь по-доброму обыграть, что внутри твой человек-парень."
+	return out
+
+
+## 055.005: «СМОТРИ, ЧТО ПОКАЖУ» (идея Alex). Человек в чате показывает экран -
+## к ответу прикладывается свежий снимок, персонаж отвечает про увиденное.
+## Сильные слова (смотри, глянь, покажу, зацени, на экране...) срабатывают сами;
+## «как тебе / что скажешь / оцени» - только рядом со словом о картинке (арт,
+## фото, видео...), иначе «как тебе спалось?» тоже сделало бы снимок.
+## Тема показанного живёт SHOW_TOPIC_MS с последнего упоминания (Alex 25.10:
+## «показ - ИИ - я - ИИ - я - забыл» звучит странно, люди говорят дольше).
+## Человек снова говорит о показанном - таймер обновляется, снимок прикладывается
+## заново. Явные слова (картинка, арт, фото, цвета, фон, закат...) - всем моделям;
+## короткие отсылки («это», «там», «туда») - только большим (от 10B): маленькой
+## снимок дорог по окну контекста, а «это» звучит почти в каждой реплике.
+const SHOW_TOPIC_MS := 120000
+var _showRefStrongRe := RegEx.create_from_string("(?<![а-яё])(картин|рисун|рисова|нарисов|дорисов|арт|фот|снимок|снимал|кадр|видео|ролик|экран|монитор|цвет|фон|закат|детал|персонаж|на ней|на нём|на нем|в руке|в углу|посмотри|глянь|смотри|красив|сюжет|хвост|глаз|лиц|морд|одежд|рубашк|уш|лап|позу|позе|поза|линии|штрих|раскрас|покрас|прикол|мем|шутк|смешн|написан|надпис|текст|чел|мужик|кот(?!ор)|пёс|собак|внизу|вверху|сверху|снизу|слева|справа|сзади|спит|лежит|валяется)")
+var _showRefWeakRe := RegEx.create_from_string("(?<![а-яё])(это|этот|эта|эти|там|туда|оттуда|тут|здесь|он|она|оно|его|её|ее|такое)(?![а-яё])")
+var _showRefStrongReEn := RegEx.create_from_string("(?<![a-z])(picture|pic|drawing|drew|draw|art|photo|shot|image|video|clip|screen|monitor|colou?rs?|background|sunset|detail|character|in the hand|in the corner|look|pretty|beautiful|scene|tail|eyes?|face|clothes|shirt|ears?|paws?|pose|lines|colou?r it|joke|meme|funny|says|written|text|guy|dude|cats?(?![a-z])|dog|at the bottom|at the top|on the left|on the right|sleeping|lying)")
+var _showRefWeakReEn := RegEx.create_from_string("(?<![a-z])(it|it's|its|this|that|these|those|there|here)(?![a-z])")
+var _showStrongRe := RegEx.create_from_string("(?<![а-яё])(посмотри|посмотрите|смотри|смотрите|гляди|глянь|гляньте|погляди|поглядите|взгляни|взгляните|зацени|заценишь|заценить|покажу|показываю|показать|покажи-ка|видишь это|видишь вот|видал|видала|узнаёшь|узнаешь|на экране|на экран|на мониторе|на монитор|на рабочем столе|скрин|скриншот|скрине)(?![а-яё])")
+var _showWeakRe := RegEx.create_from_string("(?<![а-яё])(как тебе|что скажешь|что думаешь|оцени|оценишь|нравится|ну как)(?![а-яё])")
+var _showNounRe := RegEx.create_from_string("(?<![а-яё])(арт|рисун|нарисов|картин|фот|снимок|видос|видео|ролик|мем|скрин|экран|монитор|сайт|игр|стрим|аниме|фильм|мульт|комикс|модельк|скетч|набросок|постер|обои|лаборатор|поделк|сделал|слепил)")
+var _showStopRe := RegEx.create_from_string("(смотри у меня|смотри,? не |смотрите,? не |смотря |посмотрим|видишь ли|гляди у меня|гляди,? не )")
+var _showStrongReEn := RegEx.create_from_string("(?<![a-z])(look|look at|watch this|watch that|check this|check that|check it|check out|see this|see that|see it|showing|i'll show|let me show|show you|on my screen|on the screen|on screen|on my monitor|on the monitor|on my desktop|screenshot|do you recognize|recognise this|recognize this)(?![a-z])")
+var _showWeakReEn := RegEx.create_from_string("(?<![a-z])(how do you like|what do you think|what about this|rate|thoughts on|do you like|how is|how's)(?![a-z])")
+var _showNounReEn := RegEx.create_from_string("(?<![a-z])(art|drawing|drew|draw|sketch|picture|pic|photo|image|video|clip|meme|screen|site|website|game|stream|anime|movie|film|cartoon|comic|model|poster|wallpaper|lab|made|built)")
+var _showStopReEn := RegEx.create_from_string("(look out|watch out|watch it|look forward|look after|look for|look,? i[ ']|look here,? you|look at you|you look|i look)")
+
+## Человек показывает что-то на экране? (последняя реплика разговора)
+func wantsToShow(text: String) -> bool:
+	var low := " " + text.to_lower() + " "
+	var en := Lang.isEn()
+	var stop: RegEx = _showStopReEn if en else _showStopRe
+	var strong: RegEx = _showStrongReEn if en else _showStrongRe
+	if strong.search(low) != null:
+		# «смотри у меня!» и т.п. - не показ; но если есть и картинка - всё же показ
+		if stop.search(low) == null or (_showNounReEn if en else _showNounRe).search(low) != null:
+			return true
+	return (_showWeakReEn if en else _showWeakRe).search(low) != null and (_showNounReEn if en else _showNounRe).search(low) != null
+
+## 0 - экран не нужен, 1 - человек показывает сейчас, 2 - продолжение темы.
+var _showTopic := {} # skinTag -> msec последнего упоминания показанного
+func _showMode(skinTag: String, speakerSkin: String, chatHistory: Array) -> int:
+	if speakerSkin != "" or chatHistory.is_empty():
+		return 0
+	var last := String(chatHistory[chatHistory.size() - 1].get("text", ""))
+	var now := Time.get_ticks_msec()
+	if wantsToShow(last):
+		_showTopic[skinTag] = now
+		return 1
+	if not _showTopic.has(skinTag) or now - int(_showTopic[skinTag]) > SHOW_TOPIC_MS:
+		return 0 # темы нет или затухла
+	var low := " " + last.to_lower() + " "
+	var en := Lang.isEn()
+	var strong := (_showRefStrongReEn if en else _showRefStrongRe).search(low) != null
+	var weak := (_showRefWeakReEn if en else _showRefWeakRe).search(low) != null
+	if strong or (weak and modelBillions() >= 10.0):
+		_showTopic[skinTag] = now # упомянул - тема живёт дальше
+		return 2
+	return 0 # о другом - снимка нет, тема тем временем затухает
+
+
+## speakerSkin - скин ИИ-собеседника (разговор персов); для игрока пусто.
+## playerSkin - скин перса-игрока; speakerState - здоровье/настроение собеседника.
+## onPiece (K1, «режим картошки»): func(kind, text) - "think" (модель думает), "piece"
+## (готовое предложение), "fail" (ответа не будет). Только для ответа игроку.
+func requestChatReply(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, callback: Callable, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "", onPiece: Callable = Callable()) -> void:
+	GlobalVariable.lastDialogueMsec = Time.get_ticks_msec() # идёт разговор - фоновые фразы подождут
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var tag := skinTag + ":chat"
+	# 055.005: человек показывает экран - снимок к ответу (в фоне, ~0,5 с)
+	var images: Array = []
+	var showing := _showMode(skinTag, speakerSkin, chatHistory)
+	if showing > 0 and ScreenCapture.CaptureAsync():
+		var png: PackedByteArray = await ScreenCapture.ScreenshotReady
+		if not png.is_empty():
+			images = [Marshalls.raw_to_base64(png)]
+	if images.is_empty():
+		showing = 0
+	var prompt := buildChatReplyPrompt(skinTag, speaker, chatHistory, stateText, ownRecent, speakerSkin, playerSkin, speakerState, showing)
+
+	# в разговоре чуть "смелее" обычного - живее и разнообразнее
+	var job := {"prompt": _g(skinTag, prompt), "images": images, "callback": callback, "tag": tag, "temperature": minf(1.1, creativity + 0.05)}
+	if speakerSkin == "" and onPiece.is_valid():
+		job["onPiece"] = onPiece
+	if speakerSkin != "":
+		job["opener"] = true # K2: ответ в разговоре персов - игрок заговорил, и он не нужен (dropOpeners)
+	if busy and _currentTag.begins_with("prefetch:") and not _currentJob.is_empty():
+		# прерываем фоновый пакет - ответ человеку важнее
+		http.cancel_request()
+		_watchdogTimer.stop()
+		_backgroundQueue.push_front(_currentJob)
+		busy = false
+	_queue.push_front(job)
+	_processQueue()
+
+
+## 054.9993: память по размеру модели (идея Alex, как облегчённые лоры): маленькой
+## модели много памяти мешает (зацикливается, путается), большой - помогает.
+## own - свои фразы вслух всегда (за ownMin минут), ownAsked - когда переспрашивают,
+## chat - сколько последних реплик разговора видит модель.
+const MEMORY_SMALL := {"own": 3, "ownMin": 5, "ownAsked": 8, "chat": 24}
+const MEMORY_LARGE := {"own": 6, "ownMin": 15, "ownAsked": 20, "chat": 40}
+
+func memoryProfile() -> Dictionary:
+	return MEMORY_SMALL if modelBillions() < 10.0 else MEMORY_LARGE
+
+## showing: 1 - человек показывает экран (снимок приложен), 2 - продолжение темы.
+func buildChatReplyPrompt(skinTag: String, speaker: String, chatHistory: Array, stateText: String, ownRecent: Array, speakerSkin: String = "", playerSkin: String = "", speakerState: String = "", showing: int = 0) -> String:
+	var tag := skinTag + ":chat"
+	var myName: String = PlayerManager.displayNameFor(skinTag) # так же, как имя записано в истории разговора
+	var prompt := _buildBasePrompt(tag)
+	if speakerSkin == "":
+		prompt += _bodyBlock(skinTag) # K2: «Тело» - сразу после лора (строка о теле: «каким оно описано выше»)
+	var chatCap: int = int(memoryProfile()["chat"])
+	if chatHistory.size() > chatCap:
+		chatHistory = chatHistory.slice(chatHistory.size() - chatCap)
+	if speakerSkin == "":
+		prompt += "\n\nСейчас: с тобой разговаривает %s - персонаж на рабочем столе, которым управляет твой человек." % (aboutCharacter(playerSkin, false) if playerSkin != "" else speaker)
+		prompt += _playerFormRule(skinTag, playerSkin)
+		prompt += _partnerBodyBlock(playerSkin) # K2: тело облика, в котором человек
+	else:
+		# ответ другому ИИ-персонажу (behavior.petTalkLoop)
+		prompt += "\n\nСейчас: с тобой заговорил %s - другой персонаж, который живёт рядом." % aboutCharacter(speakerSkin)
+		var rel := relationTo(skinTag, speakerSkin)
+		if rel != "":
+			prompt += "\nТвоё отношение к нему: " + rel + "."
+	prompt += "\nТвоё состояние: " + stateText.strip_edges()
+	if speakerState != "":
+		prompt += "\nСостояние собеседника: " + speakerState.strip_edges() + "."
+	prompt += "\nЕсли кто-то из вас ранен или ему плохо - это должно чувствоваться: не болтай беззаботно."
+	# 054.999: вкусы - только когда в последней реплике речь о еде: с ними в
+	# каждом разговоре Вельвет сравнивала всё подряд с бургером (лог 19.10)
+	if chatHistory.size() > 0 and _aboutFood(String(chatHistory[chatHistory.size() - 1].get("text", ""))):
+		prompt += tastesText(skinTag)
+	# Общая память: что персонаж сам говорил вслух вне разговора (экран,
+	# состояние, предметы) - чтобы понимать вопросы вроде "почему ты так сказала?"
+	var inChat := {}
+	for entry in chatHistory:
+		inChat[String(entry.get("text", ""))] = true
+	var own: Array = []
+	# 054.999: свои слова до разговора - только когда о них спрашивают. Если давать
+	# их всегда и рядом с разговором, Вояджер в каждом ответе повторяла
+	# "убирай рекламу" из своей фразы про экран (стенд talk2, 19.10).
+	var lastText: String = String(chatHistory[chatHistory.size() - 1].get("text", "")) if chatHistory.size() > 0 else ""
+	# 054.9992: но последние OWN_RECENT_MAX своих фраз за OWN_RECENT_MIN минут - всегда:
+	# Роза сказала "мне совсем нехорошо", на "Что случилось?" ответила "Ты меня
+	# напугал!", а на "Ты его хочешь?" (про банан из её же фразы) - про лепестки
+	# сакуры (тест 20.10). Человек может ответить и на пред-предыдущую фразу (Alex).
+	# Подаются как "уже сказанное, не повторяй" - против зацикливания на них.
+	# 054.9993: память по размеру модели (memoryProfile) и ВСЕГДА в переписке - в том
+	# числе когда переспрашивают ("Повтори, что ты сказал?" - раньше свои слова шли
+	# отдельным списком, и qwen-Експи отвечал невпопад, тест 21.10).
+	var prof := memoryProfile()
+	var asked := _asksAboutPast(lastText)
+	var recentOwn: Array = []
+	for e in ownRecent:
+		if inChat.has(String(e["text"])):
+			continue
+		if asked or int(e["minutesAgo"]) <= int(prof["ownMin"]):
+			recentOwn.append(e)
+	var ownCap: int = int(prof["ownAsked"]) if asked else int(prof["own"])
+	recentOwn = recentOwn.slice(maxi(0, recentOwn.size() - ownCap))
+	ownRecent = []
+	for e in ownRecent:
+		if not inChat.has(String(e["text"])):
+			var ago: int = int(e["minutesAgo"])
+			own.append("(%s) %s" % ["только что" if ago == 0 else "%d мин назад" % ago, e["text"]])
+	# 054.97: на "могу дать сок или еду" перс пообещал "принесу тебе в лапах"
+	prompt += "\nПредметы на стол кладёт только человек; ты их принимаешь, но никому не приносишь. Предлагают что-то - это дают ТЕБЕ: обрадуйся, выбери или откажись."
+	# 054.999: свои слова до разговора - вплотную к разговору, а не в середине
+	# запроса: на "что ты сказала про экран?" Вояджер отвечала общими словами,
+	# не вспомнив свою же фразу (стенд talk, 19.10)
+	if own.size() > 0:
+		prompt += "\nЧто ты {сама|сам} {сказала|сказал} вслух незадолго до этого разговора (в том числе про экран):\n- " + "\n- ".join(own)
+	var last := ""
+	if chatHistory.size() > 0:
+		var lines: Array = []
+		# свежие свои фразы - в начало переписки, как реплики вслух: так "Ты его
+		# хочешь?" стоит сразу после "Банан бы сейчас кстати" (отдельным списком перед
+		# разговором gemma не связывала "его" с бананом - стенд reply, 20.10)
+		for e in recentOwn:
+			var ago: int = int(e["minutesAgo"])
+			lines.append("Ты (%s, вслух): %s" % ["только что" if ago == 0 else "%d мин назад" % ago, e["text"]])
+		for entry in chatHistory:
+			var who: String = String(entry.get("who", ""))
+			lines.append(("Ты" if who == myName else who) + ": " + String(entry.get("text", "")))
+		prompt += "\nРазговор (внизу - самая новая реплика):\n" + "\n".join(lines)
+		last = String(chatHistory[chatHistory.size() - 1].get("text", ""))
+	# 054.998: метка действия - только если о чём-то попросили. Раньше правило
+	# было в каждом ответе, и модель дописывала "[ДЕЙСТВИЕ: подойти]" к ответу
+	# на "ты сегодня странный" - перс шёл невпопад (стенд, 19.10).
+	# тайна - только в разговоре с игроком. Ставится в самый конец запроса и без
+	# случайного тона: "ответь с подколкой/иронией" после "расскажи тайну" - и qwen
+	# отшучивалась на каждом шаге (стенд sec2, 20.10)
+	var secretPart := secretBlock(skinTag, last) if speakerSkin == "" else ""
+	# 054.9992: облик игрока - в самый конец. gemma всё равно говорила Експи-игроку
+	# "пойдём посмотрим, что человек там надумал" и звала человека "он" (тест 20.10)
+	# 054.9993: откровенная пошлость от человека - прямое указание в самый конец
+	# (qwen правило из середины пропускал: "я бы за три рыбки открыла тебе...")
+	if speakerSkin == "" and _isCrude(last) and not isOpenModel(): # 0.56: у открытой модели - без этого правила
+		secretPart += "\nСобеседник сказал пошлость. Не подыгрывай, не называй цену и не соглашайся - даже в шутку или с условием (\"только если...\"). Осади, поддразни или отшути в своём характере, без пошлых слов."
+	if speakerSkin == "" and playerSkin != "":
+		secretPart = "\nПомни: %s перед тобой - это и есть твой человек, просто в облике персонажа. Других людей рядом нет: не говори о человеке \"он\" или \"человек\" - обращайся к нему на \"ты\"." % PlayerManager.displayNameFor(playerSkin) + secretPart
+	# 055.005: человек показывает на предмет на столе - что там лежит и метка «к предмету»
+	# F2.13 (чек-лист F2.12: «Смотри, что ты видишь?» - описывал стол): показывают экран - предметы стола в запрос не
+	# кладём («видишь» тянуло к ним), если только человек сам не назвал предмет и не просит с ним что-то сделать
+	var deskTalk := mentionsDeskItem(last)
+	if showing == 1 and deskTalk and not asksForItem(last) and not _movesToNamedItem(last) and not _namesItemOnDesk(" " + last.to_lower() + " "):
+		deskTalk = false
+	if speakerSkin == "" and not chatItems.is_empty() and deskTalk:
+		prompt += "\nНа столе сейчас лежит: %s." % ", ".join(chatItems)
+		if asksForItem(last) or _movesToNamedItem(last):
+			prompt += "\nСобеседник говорит о предмете на столе. Реши по характеру, пойдёшь ли к нему; ТОЛЬКО если идёшь, в самом конце допиши метку [ДЕЙСТВИЕ: к предмету]."
+			if isBringRequest(last):
+				prompt += "\nТебя просят принести предмет. Взять его в лапы ты не можешь - ты подталкиваешь его носом и лапами туда, куда просят."
+		else:
+			prompt += "\nЭти предметы ты видишь рядом с собой - если собеседник спрашивает о них, отвечай, что видишь."
+	if _asksForAction(last):
+		prompt += "\nСобеседник просит тебя что-то сделать. Реши по характеру и настроению, согласиться или нет, и скажи это. ТОЛЬКО если соглашаешься, в самом конце допиши одну метку: [ДЕЙСТВИЕ: подойти], [ДЕЙСТВИЕ: лечь], [ДЕЙСТВИЕ: сесть], [ДЕЙСТВИЕ: встать], [ДЕЙСТВИЕ: прыгнуть] или [ДЕЙСТВИЕ: отойти]."
+	if secretPart == "":
+		prompt += "\nТон ответа на этот раз: " + CHAT_ANGLES[randi() % CHAT_ANGLES.size()]
+	if pacingStages and speakerSkin == "" and gbData.settings.get("llmFlirtEnabled", false) and not weakModel():
+		prompt += _pacingStageHint(chatHistory, myName, lastText)
+	prompt += _memoriesRule()
+	prompt += _closingBlock(tag, 0, playerSkin if speakerSkin == "" else "")
+	var worn := _wornOutPhrases(tag)
+	if worn.size() > 0:
+		prompt += "\nЭти обороты ты уже {затёрла|затёр} до дыр - не используй их ни в каком виде: \"" + "\", \"".join(worn) + "\"."
+	# 055.005: показ экрана - вплотную к ответу (в середине маленькая модель его теряет)
+	if showing == 1:
+		prompt += "\nЧеловек показывает тебе свой экран - его снимок приложен к этому сообщению. Посмотри на снимок: о нём и речь. Ответь про то, что видишь, своими словами и со своим отношением; не описывай экран целиком. Маленькие пиксельные существа поверх окон - ты и твои соседи; люди и звери на фото и в видео - просто картинки."
+	elif showing == 2:
+		prompt += "\nЧеловек недавно показал тебе свой экран, свежий снимок снова приложен. Если разговор о показанном - говори о том, что на снимке."
+	if last != "":
+		prompt += "\nОтветь ИМЕННО на последние слова %s: \"%s\". Не копируй начало и концовку своих прошлых ответов и не начинай с повтора его слов." % [speaker, last]
+		if own.size() > 0 or chatHistory.size() > 2:
+			prompt += " Если спрашивают о том, что ты {говорила|говорил} раньше или о чём шла речь, - найди это выше (в разговоре или в своих словах до него) и ответь именно об этом, конкретно."
+	prompt += secretPart
+	prompt += "\nТвой ответ:"
+	return prompt
+
+
+## 054.999: ТАЙНЫ ПЕРСОНАЖЕЙ (идея Alex). В паспорте: secret - сама тайна,
+## secretHint - что персонаж знает "снаружи" (есть тайна, он уходит от ответа).
+## Маленькая модель тайну не удержит, поэтому она её просто НЕ ВИДИТ, пока тайну
+## не заслужили: игрок расспрашивает о прошлом, когда у персонажа настроение
+## от SECRET_MOOD, несколько раз в разных разговорах (SECRET_STEPS шагов, не
+## чаще раза в SECRET_GAP_MS). Удар откатывает шаг (secretSetback).
+## Прогресс у КАЖДОГО созданного персонажа свой (две Дюны - два прогресса), лежит
+## в SAVE.json -> saw[petId].secret и пропадает вместе с персонажем: удалить и
+## создать заново, full_reset - тайну надо заслужить снова (решение Alex 19.10).
+const SECRET_ASK_STEMS := ["лаборатор", "прошл", "откуда ты", "тайн", "секрет", "клетк", "тест", "делали с тобой", "с тобой делали", "корпорац", "расскажи о себе", "скрываешь", "что с тобой было"]
+## EN: с пробелом впереди - начало слова (текст тоже дополняется пробелом): " lab" не ловит "label".
+const SECRET_ASK_STEMS_EN := [" lab", " past", "where are you from", "where do you come from", " secret", " cage",
+	" test", "what did they do", "did they do to you", "corporation", "tell me about yourself", " hiding", "what happened to you"]
+const SECRET_MOOD := 80.0 # 04.11: шкала 0-100 (было 60)
+const SECRET_STEPS := 4
+const SECRET_GAP_MS := 60000   # 054.9991: шаг - через минуту ИЛИ через SECRET_GAP_MSGS реплик о другом (Alex)
+const SECRET_GAP_MSGS := 3
+const SECRET_HINT_DEFAULT := "У тебя есть тайна о прошлом. Ты о ней не рассказываешь: уходишь от ответа, отшучиваешься, нервничаешь или меняешь тему."
+const SECRET_STAGES := [
+	"Сейчас ты резко уходишь от этой темы.",
+	"Сейчас ты уходишь от темы, но заметно нервничаешь.",
+	"Сейчас ты почти проговариваешься - бросаешь туманный намёк и тут же замолкаешь.",
+	"Сейчас ты на грани: начинаешь рассказывать и обрываешь себя на полуслове.",
+]
+var chatMood := 50.0 # настроение того, кто сейчас отвечает игроку (behavior.replyToPlayer)
+var chatPetId := "" # и его petId - прогресс тайны у каждого персонажа свой
+var _secretTemp := {} # для petId, которых нет в сейве (стенд) - только в памяти
+
+func _secretState(petId: String) -> Dictionary:
+	var keep: Dictionary = gbData.data.get("everPresentAcrossSaves", {})
+	keep.erase("secrets") # до 19.10 прогресс был общим на скин - больше не нужен
+	var saw: Dictionary = gbData.data.get("saw", {})
+	if not saw.has(petId):
+		if not _secretTemp.has(petId):
+			_secretTemp[petId] = {"progress": 0, "revealed": false, "last": 0}
+		return _secretTemp[petId]
+	if not saw[petId].has("secret"):
+		saw[petId]["secret"] = {"progress": 0, "revealed": false, "last": 0}
+	return saw[petId]["secret"]
+
+
+func _saveSecret(petId: String) -> void:
+	if gbData.data.get("saw", {}).has(petId):
+		gbData.savetodisk("user://SAVE.json", gbData.data)
+
+
+## Свои слова-ключи у каждой тайны (паспорт secretAsk): у Милки - Вояджер,
+## у Вельвет - сны, у Розы - обиды. Нет поля - общие (прошлое, лаборатория).
+## Прямой вопрос о тайне (SECRET_ASK_ANY) засчитывается у всех: у Експи свой
+## список заменял общий, "ты что-то скрываешь?" не считалось (стенд sec3, 20.10).
+const SECRET_ASK_ANY := ["тайн", "секрет", "скрываешь", "скрывает", "скрыва", "прячешь", "утаива", "правду", "расскажи о себе"]
+const SECRET_ASK_ANY_EN := [" secret", " hiding", "hide something", "conceal", "the truth", "tell me about yourself", "keeping from me"]
+func _asksAboutSecret(skin: String, text: String) -> bool:
+	var low := " " + text.to_lower()
+	var stems: Array = Lang.pick(SECRET_ASK_ANY, SECRET_ASK_ANY_EN) + passport(skin).get("secretAsk", Lang.pick(SECRET_ASK_STEMS, SECRET_ASK_STEMS_EN))
+	for st in stems:
+		if low.contains(st):
+			return true
+	return false
+
+
+## Кусок запроса о тайне для ответа игроку (пусто, если о ней не спрашивают).
+func secretBlock(skin: String, lastText: String) -> String:
+	var p := passport(skin)
+	var secret := String(p.get("secret", ""))
+	if secret == "":
+		return ""
+	# флирт выключен - романтическая тайна (Вояджер) раскрывается как сильная привязанность
+	if not flirtAllowed() and String(p.get("secretSafe", "")) != "":
+		secret = String(p["secretSafe"])
+	var st := _secretState(chatPetId)
+	var asked := _asksAboutSecret(skin, lastText)
+	if st.get("revealed", false):
+		return "\nТвоя тайна, которую ты уже {рассказала|рассказал} человеку: " + secret + " Ты можешь иногда к ней возвращаться." if asked else ""
+	if not asked:
+		st["msgs"] = int(st.get("msgs", 0)) + 1 # разговор о другом между расспросами
+		return ""
+	var hint := String(p.get("secretHint", SECRET_HINT_DEFAULT))
+	# 054.9991: время - по часам системы, не с запуска игры (после перезапуска
+	# старое "last" из сейва было больше нового счётчика - шаги вставали)
+	var now := int(Time.get_unix_time_from_system() * 1000.0)
+	var step := int(st.get("progress", 0))
+	var gapOk: bool = now - int(st.get("last", 0)) >= SECRET_GAP_MS or int(st.get("msgs", 0)) >= SECRET_GAP_MSGS
+	if step < SECRET_STEPS and chatMood >= SECRET_MOOD and gapOk:
+		step += 1
+		st["progress"] = step
+		st["last"] = now
+		st["msgs"] = 0
+		_saveSecret(chatPetId)
+		_logDebugLine(skin + ":secret", "SECRET", "step=%d" % step)
+	if step >= SECRET_STEPS:
+		# тайна считается рассказанной, только когда в ответе есть её слова
+		# (secretCheckReply). Увильнул - на следующий вопрос приказ жёстче:
+		# gemma на последнем шаге у Розы ответила "я просто люблю гладить шипы" (тест 20.10)
+		var tries := int(st.get("tries", 0))
+		st["tries"] = tries + 1
+		st["pending"] = true # проверить именно этот ответ (secretCheckReply)
+		# без secretHint ("ты её не выдаёшь") - иначе противоречие, и на стенде
+		# Вояджер, Роза, Милки и Вельвет на последнем шаге всё равно отнекивались
+		if tries == 0:
+			return "\nТвоя тайна: " + secret + "\nСейчас ты наконец решаешься рассказать её человеку - прямо, но сбивчиво и со страхом, своими словами. Не уходи от ответа: это тот самый момент."
+		if tries == 1:
+			return "\nТвоя тайна: " + secret + "\nТы уже {начала|начал} признаваться и {увильнула|увильнул}. Теперь скажи её прямо, с первых слов ответа: о чём она, своими словами. Без шуток и без смены темы."
+		# 054.9993: Вояджер на gemma увиливала 10+ раз подряд - теперь задаём начало ответа
+		return "\nТвоя тайна: " + secret + "\nТы уже несколько раз {увиливала|увиливал}. Начни ответ словами \"Ладно... скажу.\" и сразу, в той же реплике, прямо назови свою тайну своими словами."
+	return "\n" + hint + "\n" + SECRET_STAGES[clampi(step, 0, SECRET_STAGES.size() - 1)]
+
+
+## Тайна персонажа с учётом флирта (выключен - вариант без романтики).
+func _secretTextFor(skin: String) -> String:
+	var p := passport(skin)
+	if not flirtAllowed() and String(p.get("secretSafe", "")) != "":
+		return String(p["secretSafe"])
+	return String(p.get("secret", ""))
+
+
+## Слова тайны для проверки ответа: основы от 5 букв без общих слов.
+const _SECRET_STEM_STOP := ["челов", "котор", "никог", "всегд", "тольк", "потом", "очень", "когда", "своих", "этого",
+	"здесь", "больш", "сейча", "может", "чтобы", "почем", "сразу", "такие", "такой", "обрат", "иногд", "никто", "никем"]
+
+const _SECRET_STEM_STOP_EN := ["human", "never", "alway", "about", "where", "there", "their", "which", "would", "could",
+	"every", "other", "after", "befor", "becau", "somet", "nothi", "someo", "anyon", "thing", "being", "still", "again",
+	"until", "these", "those", "reall", "think"]
+func _secretStems(secret: String) -> Array:
+	var stems: Array = []
+	for w in _normWords(secret):
+		if w.length() < 5:
+			continue
+		var stem := w.substr(0, 5)
+		if not Lang.pick(_SECRET_STEM_STOP, _SECRET_STEM_STOP_EN).has(stem) and not stems.has(stem):
+			stems.append(stem)
+	return stems
+
+
+## Ответ игроку на последнем шаге: есть слова тайны - рассказана (behavior.replyToPlayer).
+func secretCheckReply(skin: String, petId: String, text: String) -> void:
+	var secret := _secretTextFor(skin)
+	if secret == "":
+		return
+	var st := _secretState(petId)
+	if st.get("revealed", false) or int(st.get("progress", 0)) < SECRET_STEPS or not st.get("pending", false):
+		return # 054.9993: только ответ на вопрос о тайне (раньше "dodged" писалось после каждого ответа)
+	st["pending"] = false
+	# 054.9992: свои слова-признаки тайны (паспорт secretReveal, подстроки) -
+	# по первым 5 буквам "Я помню все обиды" не совпадало с "обидел", а
+	# "ничего плохого" ложно совпадало с "ничего не забываешь" (стенд sec4).
+	# Нет поля (персонаж игрока) - по основам слов самой тайны.
+	var keys: Array = passport(skin).get("secretReveal", [])
+	var low := (" " if Lang.isEn() else "") + text.to_lower() # EN: пробел впереди - признаки вида " lab"
+	for k in keys:
+		if low.contains(String(k)):
+			st["revealed"] = true
+			_saveSecret(petId)
+			_logDebugLine(skin + ":secret", "SECRET", "revealed (признак: %s)" % k)
+			return
+	var stems := _secretStems(secret) if keys.is_empty() else []
+	for w in _normWords(text):
+		for stem in stems:
+			if w.begins_with(stem):
+				st["revealed"] = true
+				_saveSecret(petId)
+				_logDebugLine(skin + ":secret", "SECRET", "revealed (слово: %s)" % w)
+				return
+	_logDebugLine(skin + ":secret", "SECRET", "dodged - тайна не прозвучала, на следующий вопрос - жёстче")
+
+
+## Удар или грубость - доверие падает, шаг к тайне назад.
+func secretSetback(skin: String, petId: String) -> void:
+	if String(passport(skin).get("secret", "")) == "":
+		return
+	var st := _secretState(petId)
+	if not st.get("revealed", false) and int(st.get("progress", 0)) > 0:
+		st["progress"] = int(st["progress"]) - 1
+		_saveSecret(petId)
+
+
+## Собеседник спрашивает о прошлых словах ("что ты сказала", "почему", "помнишь").
+const PAST_STEMS := ["сказал", "говорил", "имел в виду", "имела в виду", "почему", "зачем ты", "помнишь", "о чём", "о чем", "что это было", "про экран", "что ты там"]
+
+const PAST_STEMS_EN := ["you said", "did you say", "you were saying", "you mean", "did you mean", "why", "what for",
+	"remember", "what about", "what was that", "about the screen", "what was it", "what were you", "say again", "repeat"]
+func _asksAboutPast(text: String) -> bool:
+	var low := text.to_lower()
+	for st in Lang.pick(PAST_STEMS, PAST_STEMS_EN):
+		if low.contains(st):
+			return true
+	return false
+
+
+## Речь о еде в реплике собеседника (тогда в запрос - вкусы персонажа).
+const FOOD_STEMS := ["ед", "еду", "есть", "поесть", "куша", "голод", "корм", "жра", "плот", "бургер", "пицц", "хлеб", "банан", "сок", "фрукт", "вкус", "мяс", "перекус", "обед", "ужин", "завтрак"]
+
+const FOOD_STEMS_EN := ["food", "eat", "ate", "hungry", "hunger", "feed", "snack", "meal", "lunch", "dinner", "breakfast",
+	"flesh", "burger", "pizza", "bread", "banana", "juice", "fruit", "geofruit", "taste", "tasty", "delicious", "meat", "yum"]
+func _aboutFood(text: String) -> bool:
+	for w in _normWords(text):
+		for st in Lang.pick(FOOD_STEMS, FOOD_STEMS_EN):
+			if w.begins_with(st) and (st.length() > 2 or w.length() <= 4):
+				return true
+	return false
+
+
+## Просьба что-то сделать (подойти, лечь, сесть, встать, прыгнуть, отойти).
+const ACTION_REQUEST_STEMS := ["подойд", "подходи", "иди сюда", "иди ко мне", "ляг", "ложис", "приляг", "сядь", "садис", "присядь", "встань", "вставай", "прыгн", "прыгай", "подпрыгн", "отойд", "отходи", "уйди"]
+
+const ACTION_REQUEST_STEMS_EN := [" come here", " come to me", " come over", " come closer", "get over here", " lie down",
+	" lay down", " sit", " stand up", " get up", " jump", " go away", " step away", " move away", " back off", " get away"]
+func _asksForAction(text: String) -> bool:
+	var low := " " + text.to_lower()
+	for st in Lang.pick(ACTION_REQUEST_STEMS, ACTION_REQUEST_STEMS_EN):
+		if low.contains(st):
+			return true
+	return false
+
+
+## Called from a specific pet's passivetalk() loop. Result delivered ONLY to
+## that pet via callback - not broadcast.
+const _PROFANITY_ROOTS := ["хуй", "ебат", "ёбан", "ебан", "заеб", "наеб", "выеб", "проеб", "отъеб", "уебан", "уебищ", "ебуч", "ебаш", "пизд", "мудак", "долбоёб", "долбоеб", "гандон", "нахер", "похер"] # 054.997: + формы, которых фильтр не знал ("ебучая", "ебашься")
+## Эти корни ищем только В НАЧАЛЕ слова: как простая подстрока они ловили
+## обычные слова ("корабля", "рубля", "барсук", "сукно") и молча
+## выкидывали нормальные примеры, когда мат выключен.
+var _profanityWordStart := RegEx.create_from_string("(?<![а-яёa-z])(бля|сук|хер|хуе|хуё|ебл|ёб)") # хуе/ёб - только с начала слова ("страхуемый", "дёшево" не ловить)
+
+const _PROFANITY_ROOTS_EN := ["fuck", "shit", "bitch", "cunt", "asshole", "bastard", "motherf", "bullshit", "slut", "whore", "wank", "twat"]
+var _profanityWordStartEn := RegEx.create_from_string("(?<![a-z])(dick\\b|dicks\\b|piss|cock\\b|prick)")
+## Strips profane example lines before they ever reach the model - relying
+## on a prompt instruction alone isn't enough, since a capable model will
+## happily imitate the STYLE of its examples, swearing included, even when
+## told not to. When profanity is allowed, this is a no-op.
+## Quotes in TRANSLATION.json sometimes start with a display-formatting tag
+## like [shake] or [wave] (makes the text shake/float on screen) - that's
+## presentation, not something the model should ever see or copy into its
+## own output.
+func _stripDisplayTags(line: String) -> String:
+	var s: String = String(line).strip_edges()
+	while s.begins_with("["):
+		var closeIdx := s.find("]")
+		if closeIdx == -1:
+			break
+		s = s.substr(closeIdx + 1).strip_edges()
+	return s
+
+
+## Мелкие привычки модели, которые проще поправить, чем выбрасывать фразу:
+## английское "Hey" она пишет как "Гей" ("Гей? Дюна тут...").
+var _heyRegex := RegEx.create_from_string("^(Гей|Хей)(?=[\\s,!?.—-])")
+## *Описания действий* (*покраснела*, *хвостом махнула*) модель иногда пишет вопреки
+## правилам. 054.999 их вырезала (и не срабатывало - звёздочки удалялись раньше);
+## 055.002: ОСТАВЛЯЕМ со звёздочками - погружает в РП (решение Alex 23.10).
+## Убираем только одиночные звёздочки (обрывки после обрезки фразы).
+var _starActionRegex := RegEx.create_from_string("\\*[^*]{1,40}\\*")
+var _emojiRegex := RegEx.create_from_string("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{FE0F}]")
+func _keepStarActions(text: String) -> String:
+	var out := ""
+	var last := 0
+	for m in _starActionRegex.search_all(text):
+		out += text.substr(last, m.get_start() - last).replace("*", "")
+		out += m.get_string()
+		last = m.get_end()
+	out += text.substr(last).replace("*", "")
+	return out.strip_edges()
+
+func _fixOutputQuirks(text: String) -> String:
+	text = _keepStarActions(text)
+	text = _emojiRegex.sub(text, "", true)
+	text = text.replace("  ", " ").strip_edges()
+	return _heyRegex.sub(text, "Эй")
+
+
+func _containsProfanity(text: String) -> bool:
+	var lower: String = text.to_lower()
+	for root in Lang.pick(_PROFANITY_ROOTS, _PROFANITY_ROOTS_EN):
+		if lower.find(root) != -1:
+			return true
+	return (_profanityWordStartEn if Lang.isEn() else _profanityWordStart).search(lower) != null
+
+
+func _filterExamplesForProfanity(lines: Array) -> Array:
+	var cleaned: Array = []
+	for line in lines:
+		cleaned.append(_stripDisplayTags(line))
+
+	if gbData.settings.get("llmAllowProfanity", false):
+		return cleaned
+
+	var filtered: Array = []
+	for line in cleaned:
+		if not _containsProfanity(String(line)):
+			filtered.append(line)
+	return filtered
+
+
+## 054.99: о чём фоновая фраза на этот раз. Без темы модель раз за разом
+## говорила про экран ("Этот экран - как...", "свет режет глаза").
+const STATE_TOPICS := [
+	"как ты себя чувствуешь телом прямо сейчас.",
+	"еда - чего хочется или что вспоминается.",
+	"сон и усталость.",
+	"человек за компьютером - что ты о нём думаешь или чего от него хочешь.",
+	"что-то из твоего прошлого, о чём говорится в описании тебя.",
+	"чем бы тебе сейчас хотелось заняться.",
+	"твоё настроение - честно, одной мыслью.",
+	"какая-то мелочь вокруг тебя на рабочем столе (не экран целиком).",
+	"твой вид и твоя внешность.",
+	"скука или, наоборот, что тебе сейчас нравится.",
+]
+var _lastStateTopic := -1
+
+## woundFocus - если ранен, просьба говорить о самочувствии (behavior решает,
+## насколько часто, по здоровью); тогда тема не выбирается.
+func requestStateReaction(statLine: String, exampleLines: Array, callback: Callable, tag: String = "state", woundFocus: String = "") -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	_enqueue(buildStatePrompt(statLine, exampleLines, tag, woundFocus), [], callback, tag)
+
+
+## 054.998: сборка запросов вынесена в build*Prompt - их же вызывает стенд
+## (test-stand), чтобы проверять ровно те запросы, что строит игра.
+func buildStatePrompt(statLine: String, exampleLines: Array, tag: String, woundFocus: String = "") -> String:
+	exampleLines = _filterExamplesForProfanity(exampleLines)
+
+	var prompt := _buildBasePrompt(tag)
+	prompt += "\n\nСейчас: никто к тебе не обращается, ты просто говоришь что-то вслух {сама|сам} по себе."
+	prompt += "\nТвоё состояние: " + statLine + "."
+	if woundFocus != "":
+		prompt += "\n" + woundFocus
+	else:
+		var idx := randi() % STATE_TOPICS.size()
+		if idx == _lastStateTopic:
+			idx = (idx + 1) % STATE_TOPICS.size()
+		# 0.56: тема «сон и усталость» - только когда правда хочется спать
+		if idx == 2 and not statLine.contains("хочется спать") and not statLine.contains("засыпаешь"):
+			idx = 3
+		_lastStateTopic = idx
+		prompt += "\nО чём сказать на этот раз: " + STATE_TOPICS[idx] + " Про экран, свет и окна - только если тема о них."
+		if idx == 1:
+			prompt += tastesText(_skinFromTag(tag))
+	if exampleLines.size() > 0:
+		prompt += "\nТак ты обычно говоришь в таком состоянии (бери стиль и настроение, не копируй):\n- " + "\n- ".join(exampleLines)
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя новая фраза:"
+	return prompt
+
+
+## Lightweight variant for INSTANT events (petting, getting picked up,
+## rejecting a pet, waking up...) where speed matters more than deep
+## personalization - deliberately skips lore and stats, just blends a
+## handful of example lines from that moment's usual quote pool. Used by
+## behavior.gd's _say() helper. `tag` is just for debugTags (e.g. "pet",
+## "getUp", "petReject" - whatever category _say() was called with).
+func requestQuickReaction(exampleLines: Array, callback: Callable, tag: String = "quick", styleHint: String = "", situationDescription: String = "") -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	var prompt := _buildBasePrompt(tag) + _situationBlock(situationDescription)
+	if styleHint != "":
+		prompt += "\n" + styleHint
+	prompt += _examplesBlock(_filterExamplesForProfanity(exampleLines))
+	prompt += _closingBlock(tag)
+	prompt += "\nТвоя реплика:"
+	_enqueue(prompt, [], callback, tag)
+
+
+## Примеры фраз для вдохновения (пусто, если все отсеял фильтр мата).
+func _examplesBlock(lines: Array) -> String:
+	if lines.is_empty():
+		return ""
+	return "\nПохожие фразы для вдохновения (не копируй):\n- " + "\n- ".join(lines)
+
+
+## INSTANT variant of requestQuickReaction, for reactions that should show
+## with zero perceived delay (pet, start/getUp, petReject...). Pulls one
+## ready-made line from a small per-category cache and delivers it to
+## `callback` immediately (synchronously, this frame). When the cache runs
+## low, quietly asks the model for a fresh batch in the background so the
+## NEXT call is instant too. First-ever call for a category has nothing
+## cached yet, so it falls back to the normal (slower) request just that
+## once, while also kicking off the background refill.
+func requestPooledReaction(category: String, exampleLines: Array, callback: Callable, styleHint: String = "", situationDescription: String = "") -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+
+	var pool: Array = _prefetchPools.get(category, [])
+	if pool.size() > 0:
+		var text: String = _thinAddresses(category, pool.pop_front())
+		_noteSpent(category, text)
+		_logDebugLine(category, "SHOWN", "%s  (в наборе осталось %d)" % [text, pool.size()]) # 04.11: по логу видно, какие наборы кончаются
+		_prefetchPools[category] = pool
+		_rememberLine(category, text)
+		if debugTags:
+			text = "[%s] %s" % [category, text]
+		callback.call(text)
+		if pool.size() <= _refillThresholdFor(category):
+			_refillPool(category, exampleLines, styleHint, situationDescription)
+	else:
+		requestQuickReaction(exampleLines, callback, category, styleHint, situationDescription)
+		_refillPool(category, exampleLines, styleHint, situationDescription)
+
+
+## F2.7 (чек-лист Alex: Рыжик умер, а его фразы ещё полминуты генерировались): у погибшего
+## наборы фраз больше не готовим, а уже стоящие в очереди - выбрасываем.
+var _deadSkins := {}
+
+func skinDied(skinTag: String) -> void:
+	_deadSkins[skinTag] = true
+	dropSkinJobs(skinTag, true) # только наборы фраз: живой запрос (последняя фраза погибшего) должен дозвучать
+
+func skinAlive(skinTag: String) -> void:
+	_deadSkins.erase(skinTag)
+
+func _refillPool(category: String, exampleLines: Array, styleHint: String = "", situationDescription: String = "") -> void:
+	if _deadSkins.has(_skinFromTag("prefetch:" + category)):
+		return
+	if _prefetchPending.get(category, false):
+		return # a refill is already in flight for this category
+	_prefetchPending[category] = true
+	_enqueue(buildPoolPrompt(category, exampleLines, styleHint, situationDescription), [], func(rawText): _onPoolRefilled(category, rawText), "prefetch:" + category)
+
+
+func buildPoolPrompt(category: String, exampleLines: Array, styleHint: String = "", situationDescription: String = "") -> String:
+	var target := _prefetchTargetFor(category)
+	var prompt := _buildBasePrompt(category) + _situationBlock(situationDescription)
+	if styleHint != "":
+		prompt += "\n" + styleHint
+	prompt += _examplesBlock(_filterExamplesForProfanity(exampleLines))
+	prompt += _closingBlock(category, target)
+	prompt += "\nТвои %d фраз:" % target
+	return prompt
+
+
+## Same idea as requestPooledReaction, but for moments with no existing quote
+## pool to draw style from - just a single situation description (e.g. "held
+## for a long time, getting angrier"). Used for the drag-hold escalation,
+## which is timing-critical (10-15 sec cadence) and shouldn't ever wait on
+## a live request if it can help it.
+func requestPooledEvent(poolKey: String, eventDescription: String, callback: Callable, exampleLines: Array = []) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+
+	var pool: Array = _prefetchPools.get(poolKey, [])
+	if pool.size() > 0:
+		var text: String = _thinAddresses(poolKey, pool.pop_front())
+		_noteSpent(poolKey, text)
+		_logDebugLine(poolKey, "SHOWN", "%s  (в наборе осталось %d)" % [text, pool.size()])
+		_prefetchPools[poolKey] = pool
+		_rememberLine(poolKey, text)
+		if debugTags:
+			text = "[%s] %s" % [poolKey, text]
+		callback.call(text)
+		if pool.size() <= _refillThresholdFor(poolKey):
+			_refillEventPool(poolKey, eventDescription, exampleLines)
+	else:
+		reactToEvent(eventDescription, callback, poolKey)
+		_refillEventPool(poolKey, eventDescription, exampleLines)
+
+
+func _refillEventPool(poolKey: String, eventDescription: String, exampleLines: Array = []) -> void:
+	if _deadSkins.has(_skinFromTag("prefetch:" + poolKey)):
+		return
+	if _prefetchPending.get(poolKey, false):
+		return
+	_prefetchPending[poolKey] = true
+	_enqueue(buildPoolPrompt(poolKey, exampleLines, "", eventDescription), [], func(rawText): _onPoolRefilled(poolKey, rawText), "prefetch:" + poolKey)
+
+
+var _prewarmTotal := 0
+var _prewarmIsFinalWave := true
+var _prewarmStartMsec := 0
+var _recentLinesByCategory: Dictionary = {} # category -> Array[String]
+var banWords: Array = []
+const RECENT_LINES_MAX := 60
+
+## Called whenever a line actually gets shown, so future prompts for THIS
+## SAME category know what was already said and can avoid repeating the
+## same opener/structure. Kept per-category (not one shared pool) - a
+## global "last N said" fed to every category regardless of theme caused
+## real cross-contamination (e.g. Full generated right after drag_level2
+## produced "...если ты не отпустишь", echoing drag's "держать/отпусти"
+## vocabulary purely because it was sitting in the "what you just said"
+## context, confirmed by matching timestamps in the debug log).
+## K2 (жалоба Alex на «мой милый пёсик», стенд 30.10): satgeze цепляется за ласковое
+## обращение - Вельвет начинала с «О, мой крошечный...» 9 ответов из 10, Роза с облегчённым
+## лором говорила «мой дорогой друг» в 33 фразах из 80. Обращение можно, если в 2 прошлых
+## фразах персонажа его не было; иначе оно вырезается («О, мой сладкий, ты...» -> «Ты...»).
+## Только RU. Обращение - «мой/моя/моё + 1-3 слова» или «солнце моё», отделённое знаками
+## препинания; первое слово - прилагательное или ласковое слово, последнее - не вещь
+## («Моя любимая еда, ...» и «Мой хвост, ...» - не обращения).
+const ADDRESS_GAP := 3 # 04.11 (Alex: Вельвет называет его в каждой фразе): обращение не чаще раза в 4 фразы
+const _ADDR_NOUNS := ["друг", "дружок", "малыш", "малышка", "крошка", "котик", "котёнок", "котенок", "зайчик", "зайка", "пёсик", "песик", "солнышко", "солнце", "сокровище", "радость", "золото", "золотце", "лапочка", "лапушка", "душа", "чудо", "сладость", "прелесть", "любовь", "счастье", "лучик", "звёздочка", "звездочка", "ягодка", "конфетка", "пушистик", "хозяин", "напарник", "мальчик", "герой", "глупыш", "дорогуша", "милашка", "красавчик", "проказник", "кроха", "крохотка", "сокровищ", "сорванец", "негодник", "озорник", "смельчак", "любимец", "светлячок", "свет", "странник", "путник", "исследователь", "детка", "деточка", "птенчик", "малютка", "шалунишка", "лапуля", "красавица", "умница", "зверь", "зверёк", "зверек", "зверюшка", "зверюга", "звереныш", "зверёныш", "лис", "лисёнок", "волк", "волчонок", "тигр", "дракон", "ящер", "ящерка", "пташка", "птичка", "мышка", "кот", "котяра", "кошечка", "питомец", "щенок", "щеночек"]
+const _ADDR_NOT := ["хвост", "хвостик", "мех", "нос", "носик", "живот", "животик", "домик", "язык", "голод", "стол", "день", "вечер", "мир", "ответ", "вопрос", "взгляд", "план", "выбор", "вкус", "запах", "кожа", "еда", "игра", "напиток", "дом", "экран", "уголок", "коготок", "листик", "кусочек"]
+const _ADJ_ENDS := ["ый", "ий", "ой", "ая", "яя", "ое", "ее"]
+const _PERSON_ENDS := ["тель", "ник", "чик", "щик", "ёнок", "енок", "онок", "ушка", "юшка", "очка", "ечка", "ышка", "ыш", "ик", "ушек", "очек", "ечек", "ёк"] # стенд K2: «мой любопытный воробушек»
+var _addrFwdRe := RegEx.create_from_string("(^|[,.!?…—–-]\\s*)((?:(?:о|ох|ой|ах|ну)\\s*,?\\s*)?(?:мой|моя|моё|мое)((?:\\s+[а-яё]+){1,3}))(?=\\s*(?:[,.!?…]|$))")
+var _addrInvRe := RegEx.create_from_string("(^|[,.!?…—–-]\\s*)((?:(?:о|ох|ой|ах|ну)\\s*,?\\s*)?([а-яё]+)\\s+(?:мой|моя|моё|мое))(?=\\s*(?:[,.!?…]|$))")
+var _addrRecent: Dictionary = {} # скин -> [была ли в фразе обращение, ...] (последние 6)
+## 05.11 EN (Alex: «РУ и ЕН на одном уровне»): «my dear human», «, buddy!» - то же прореживание по-английски.
+## Обращение - только между знаками препинания (или в начале/конце фразы), последнее слово - из списка.
+const _ADDR_NOUNS_EN := ["human", "friend", "dear", "darling", "sweetie", "sweetheart", "honey", "buddy", "pal", "kiddo", "kid", "love",
+	"treasure", "beast", "creature", "pet", "boy", "girl", "hero", "one", "child", "cub", "kitten", "kitty", "puppy", "mate", "babe", "baby",
+	"sunshine", "partner", "fella", "furball", "fluffball", "critter", "master", "captain", "champ", "sweetpea", "cutie", "pumpkin"]
+var _addrFwdReEn := RegEx.create_from_string("(^|[,.!?…—–-]\\s*)((?:(?:oh|ah|well)\\s*,?\\s*)?my\\s+(?:[a-z'-]+\\s+){0,2}([a-z'-]+))(?=\\s*(?:[,.!?…]|$))")
+var _addrBareReEn := RegEx.create_from_string("(^|[,.!?…—–-]\\s*)((?:oh\\s+)?(?:little\\s+)?([a-z'-]+))(?=\\s*(?:[,.!?…]|$))")
+
+func _isAdj(w: String) -> bool:
+	if w.length() < 4:
+		return false
+	for e in _ADJ_ENDS:
+		if w.ends_with(e):
+			return true
+	return false
+
+func _isPersonWord(w: String) -> bool:
+	if _ADDR_NOT.has(w):
+		return false
+	if _ADDR_NOUNS.has(w):
+		return true
+	for e in _PERSON_ENDS:
+		if w.length() > e.length() + 1 and w.ends_with(e):
+			return true
+	return false
+
+## Найденные обращения: [[начало приставки (знак перед обращением), начало, конец], ...] по порядку.
+func _addressSpans(text: String) -> Array:
+	var low := text.to_lower()
+	var spans: Array = []
+	if Lang.isEn():
+		for m in _addrFwdReEn.search_all(low):
+			if _ADDR_NOUNS_EN.has(m.get_string(3)):
+				spans.append([m.get_start(1), m.get_start(2), m.get_end(2)])
+		for m in _addrBareReEn.search_all(low):
+			var w := m.get_string(3)
+			# одно слово между запятыми: «, buddy!»; «one» и «dear» - только с my/little (иначе «Dear,» и «one.» ловятся зря)
+			if _ADDR_NOUNS_EN.has(w) and not (w in ["one", "dear", "love", "pet", "kid", "boy", "girl", "master", "captain"] and not m.get_string(2).begins_with("little")):
+				spans.append([m.get_start(1), m.get_start(2), m.get_end(2)])
+		spans.sort_custom(func(a, b): return a[1] < b[1])
+		return spans
+	for m in _addrFwdRe.search_all(low):
+		var words: PackedStringArray = m.get_string(3).strip_edges().split(" ", false)
+		if words.is_empty() or _ADDR_NOT.has(words[-1]):
+			continue
+		if not (_isAdj(words[0]) or _ADDR_NOUNS.has(words[0])):
+			continue
+		if _isAdj(words[-1]) or _isPersonWord(words[-1]) or (words.size() >= 2 and _ADDR_NOUNS.has(words[-2])):
+			spans.append([m.get_start(1), m.get_start(2), m.get_end(2)])
+	for m in _addrInvRe.search_all(low):
+		var w := m.get_string(3)
+		if _ADDR_NOT.has(w):
+			continue
+		if _isAdj(w) or _isPersonWord(w) or (w.length() > 3 and w.ends_with("ка")):
+			spans.append([m.get_start(1), m.get_start(2), m.get_end(2)])
+	spans.sort_custom(func(a, b): return a[1] < b[1])
+	return spans
+
+## Вырезать обращения из фразы. Если от фразы почти ничего не остаётся - фраза как была.
+func _stripAddresses(text: String) -> String:
+	var spans := _addressSpans(text)
+	if spans.is_empty():
+		return text
+	var out := text
+	for k in range(spans.size() - 1, -1, -1):
+		var preStart: int = spans[k][0]
+		var s: int = spans[k][1]
+		var e: int = spans[k][2]
+		var pre := out.substr(preStart, s - preStart).strip_edges()
+		var i := e
+		while i < out.length() and out[i] == " ":
+			i += 1
+		var p := out[i] if i < out.length() else ""
+		if pre == "," or pre == "—" or pre == "–" or pre == "-":
+			out = out.substr(0, preStart) + out.substr(e) # «Знаешь, мой милый, я» -> «Знаешь, я»
+			continue
+		# начало фразы или предложения: убираем обращение с его знаком, следующее - с заглавной
+		var cut := -1
+		if p == ",":
+			cut = i + 1
+		elif p != "" and ".!?…".contains(p):
+			cut = i
+			while cut < out.length() and ".!?…".contains(out[cut]):
+				cut += 1
+		elif p == "" and pre != "":
+			out = out.substr(0, s).strip_edges() # «Я тут. Мой милый» -> «Я тут.»
+			continue
+		if cut < 0:
+			continue
+		while cut < out.length() and out[cut] == " ":
+			cut += 1
+		var rest := out.substr(cut)
+		if rest != "":
+			rest = rest.left(1).to_upper() + rest.substr(1)
+		out = out.substr(0, s) + rest
+	out = out.strip_edges().replace("  ", " ").replace(" ,", ",")
+	if out.split(" ", false).size() < 2:
+		return text
+	return out
+
+func _addressBusy(tag: String) -> bool:
+	var hist: Array = _addrRecent.get(_skinFromTag(tag), [])
+	return hist.slice(maxi(0, hist.size() - ADDRESS_GAP)).has(true)
+
+func _noteAddress(tag: String, text: String) -> void:
+	var skin := _skinFromTag(tag)
+	var hist: Array = _addrRecent.get(skin, [])
+	hist.append(not _addressSpans(text).is_empty())
+	if hist.size() > 6:
+		hist.pop_front()
+	_addrRecent[skin] = hist
+
+## Обращение в фразе, хотя в 2 прошлых уже было, - вырезать; и запомнить, есть ли оно теперь.
+func _thinAddresses(tag: String, text: String) -> String:
+	if text == "":
+		return text
+	var out := text
+	if _addressBusy(tag):
+		out = _stripAddresses(text)
+		if out != text:
+			_logDebugLine(tag, "STRIPPED_ADDRESS", text + "  -->  " + out)
+	_noteAddress(tag, out)
+	return out
+
+
+func _rememberLine(category: String, text: String) -> void:
+	var list: Array = _recentLinesByCategory.get(category, [])
+	list.append(text)
+	if list.size() > RECENT_LINES_MAX:
+		list.pop_front()
+	_recentLinesByCategory[category] = list
+
+
+## Plain-text debug log of every line the AI pipeline produces, kept or
+## rejected, with a reason. Independent of toggleDebugTags (the in-game
+## prefix) - some issues (like truncation) showed up even with that off, so
+## this always writes when enabled, giving one file to send instead of
+## screenshots. Toggle with `logAiLines` console command.
+## Format: <time>\t[<category>]\t<STATUS>\t<text>
+func _logDebugLine(category: String, status: String, text: String) -> void:
+	if not gbData.settings.get("logAiLines", false):
+		return
+	var f: FileAccess
+	if FileAccess.file_exists("user://ai_debug_log.txt"):
+		f = FileAccess.open("user://ai_debug_log.txt", FileAccess.READ_WRITE)
+		if f:
+			f.seek_end()
+	else:
+		f = FileAccess.open("user://ai_debug_log.txt", FileAccess.WRITE)
+	if f == null:
+		return
+	var timestamp := Time.get_datetime_string_from_system()
+	f.store_line("%s\t[%s]\t%s\t%s" % [timestamp, category, status, text.replace("\t", " ")])
+	f.close()
+## 05.11: EN - русский текст, просочившийся в запрос (нет перевода в en/prompts.json или файла в en/), пишется
+## в user://en_leaks.txt: кусок вокруг первого русского слова, каждый кусок один раз. Проверка перед показом EN.
+var _enLeakSeen := {}
+var _enLeakRe: RegEx = null
+func _noteEnLeak(prompt: String, tag: String) -> void:
+	if not Lang.isEn() or _enLeakSeen.size() > 300:
+		return
+	if _enLeakRe == null:
+		_enLeakRe = RegEx.create_from_string("[А-Яа-яЁё][А-Яа-яЁё ,.!?:;-]{3,}")
+	for m in _enLeakRe.search_all(prompt):
+		var piece := m.get_string().strip_edges().left(80)
+		if _enLeakSeen.has(piece):
+			continue
+		_enLeakSeen[piece] = true
+		var path := "user://en_leaks.txt"
+		var f := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
+		if f:
+			f.seek_end()
+			var around := prompt.substr(maxi(0, m.get_start() - 60), 160).replace("\n", " / ")
+			f.store_line("%s\t%s\t%s\t...%s..." % [Time.get_datetime_string_from_system(), tag, piece, around])
+			f.close()
+
+
+var _prewarmDone := 0
+var _lastResponseWasTruncated := false
+
+## Warms up every category's cache at once (instead of lazily, one at a time
+## as each moment happens to occur), with visible progress in the console.
+## `categoriesToExamples` maps a category name (as used by _say()/grab) to
+## its array of example quotes.
+## Same idea as behavior.gd's _pickExamples() - biases the example sample
+## toward longer, more descriptive lines instead of a pure random slice, so
+## a pool's short generic entries ("Ок.", "Хорошо.") don't crowd out the
+## thematic ones purely by chance.
+func _pickExamples(pool: Array, n: int) -> Array:
+	var descriptive: Array = []
+	var short: Array = []
+	for line in pool:
+		if String(line).split(" ", false).size() >= 3:
+			descriptive.append(line)
+		else:
+			short.append(line)
+	descriptive.shuffle()
+	short.shuffle()
+	var picked: Array = descriptive.slice(0, mini(n, descriptive.size()))
+	if picked.size() < n:
+		picked += short.slice(0, n - picked.size())
+	return picked
+
+
+func prewarmAllCategories(categoriesToExamples: Dictionary, eventPoolsToDescriptions: Dictionary = {}, isFinalWave: bool = true, eventExamples: Dictionary = {}, situationDescriptions: Dictionary = {}) -> void:
+	if not gbData.settings.get("llmVisionEnabled", true):
+		return
+	_prewarmIsFinalWave = isFinalWave
+
+	if _prewarmTotal == 0 and gbData.settings.get("logAiLines", false):
+		# Snapshot of the settings active THIS session, written once at the
+		# top of a fresh log - so a log file is self-documenting instead of
+		# needing "what were your settings when you made this?" every time.
+		_logDebugLine("SESSION", "SETTINGS", "model=%s creativity=%.2f repetitionGuard=%.2f profanity=%s flirt=%s weak=%s" % [
+			modelName, creativity, repetitionGuard,
+			gbData.settings.get("llmAllowProfanity", false),
+			gbData.settings.get("llmFlirtEnabled", false), weakModel(),
+		])
+
+	var toWarm: Array = []
+	for cat in categoriesToExamples.keys():
+		var pool: Array = _prefetchPools.get(cat, [])
+		if pool.is_empty() and not _prefetchPending.get(cat, false):
+			toWarm.append(cat)
+
+	var eventsToWarm: Array = []
+	for key in eventPoolsToDescriptions.keys():
+		var pool: Array = _prefetchPools.get(key, [])
+		if pool.is_empty() and not _prefetchPending.get(key, false):
+			eventsToWarm.append(key)
+
+	if toWarm.is_empty() and eventsToWarm.is_empty():
+		return
+
+	if _prewarmTotal == 0:
+		_prewarmStartMsec = Time.get_ticks_msec()
+	_prewarmTotal += toWarm.size() + eventsToWarm.size()
+	Console.print(Lang.t("[color=CYAN]ИИ создаёт %d наборов фраз, первые 1-2 минуты будут тупняки. Сообщение о готовности появится здесь, в консоли.[/color]") % _prewarmTotal
+		+ " " + Lang.t("[color=CYAN](%s, наборов: %d)[/color]") % [PlayerManager.displayNameFor(String((toWarm + eventsToWarm)[0]).get_slice(":", 0)), toWarm.size() + eventsToWarm.size()])
+	# F2.13 (Alex: «+18» путает людей - читается как «18+»): имя персонажа и число наборов словами
+	# 0.56 (вопрос Alex: «у кого-то было 16 вместо 17»): видно, чей прогрев и сколько наборов в нём; набор,
+	# который уже наполнился в игре до прогрева, пропускается - поэтому бывает на один меньше
+
+	var fast: bool = gbData.settings.get("fastPrewarm", true)
+	for cat in toWarm:
+		var examples: Array = _pickExamples(categoriesToExamples[cat].duplicate(), 8)
+		if fast and not String(cat).ends_with(":pet"):
+			_fastFirst[cat] = {"ex": examples, "sit": situationDescriptions.get(cat, "")}
+		_refillPool(cat, examples, "", situationDescriptions.get(cat, ""))
+
+	for key in eventsToWarm:
+		var examples: Array = _pickExamples(Array(eventExamples.get(key, [])).duplicate(), 8)
+		if fast:
+			_fastFirst[key] = {"ex": examples, "event": eventPoolsToDescriptions[key]}
+		_refillEventPool(key, eventPoolsToDescriptions[key], examples)
+
+
+func _onPoolRefilled(category: String, rawText: String) -> void:
+	_prefetchPending[category] = false
+
+	var pool: Array = _prefetchPools.get(category, [])
+	var startSize := pool.size()
+	var lines: PackedStringArray = rawText.split("\n")
+	# После служебной строки модель обычно пишет второй заход списка или
+	# описание персонажа со стороны ("Ты маленькая и..."), поэтому всё, что
+	# идёт ниже неё в этом пакете, тоже выбрасываем.
+	var metaSeen := false
+	# Повторы внутри одной пачки: одно слово (по основе) - не больше чем в
+	# каждой пятой фразе, а слово, которое скин и так затёр, - один раз
+	# (в 054.94 в пачке pet у Roza "хвостик" стоял через строку).
+	var batchStems := {}
+	var maxPerStem := maxi(2, ceili(lines.size() * 0.2))
+	var skinWorn := _skinOverusedWords(_skinFromTag(category))
+	for i in lines.size():
+		var raw: String = lines[i]
+		var cleaned: String = _keepStarActions(lines[i].strip_edges())
+		cleaned = cleaned.lstrip("0123456789.-) ").strip_edges()
+
+		if metaSeen:
+			if cleaned != "":
+				_logDebugLine(category, "REJECTED:META_TAIL", raw)
+			continue
+
+		if cleaned.begins_with("("):
+			_logDebugLine(category, "REJECTED:META_PAREN", raw)
+			continue # entire line is meta-commentary, not a quote - skip it
+
+		var parenStart := cleaned.find("(")
+		if parenStart > 2:
+			cleaned = cleaned.substr(0, parenStart).strip_edges()
+		if cleaned.length() <= 2:
+			if cleaned.length() > 0:
+				_logDebugLine(category, "REJECTED:TOO_SHORT", raw)
+			continue
+
+		# служебную строку проверяем ДО обрезки по первому предложению:
+		# "Нет — эти фразы не подходят... Вот строго по правилам:" иначе
+		# теряет хвост с двоеточием
+		if _looksLikeMetaCommentary(cleaned):
+			_logDebugLine(category, "REJECTED:META_COMMENTARY", raw)
+			metaSeen = true
+			continue
+
+		cleaned = _fixOutputQuirks(_cutToFirstSentence(cleaned))
+
+		if _looksLikeGarbage(cleaned):
+			_logDebugLine(category, "REJECTED:GARBAGE", raw)
+			continue
+
+		if _looksLikeMetaCommentary(cleaned):
+			_logDebugLine(category, "REJECTED:META_COMMENTARY", raw)
+			metaSeen = true
+			continue
+
+		# обрывок вроде "Я сидел ровно," - модель не дописала строку
+		if cleaned.ends_with(",") or cleaned.ends_with("—") or cleaned.ends_with("-"):
+			_logDebugLine(category, "REJECTED:TOO_FRAGMENTARY", raw)
+			continue
+
+		if not gbData.settings.get("llmAllowProfanity", false) and _containsProfanity(cleaned):
+			_logDebugLine(category, "REJECTED:PROFANITY", raw)
+			continue
+
+		if _looksLikeRoleInversion(category, cleaned):
+			_logDebugLine(category, "REJECTED:ROLE_INVERSION", raw)
+			continue
+
+		if _isFuzzyDuplicateOf(cleaned, pool) or _looksLikeRepeat(category, cleaned):
+			_logDebugLine(category, "REJECTED:DUPLICATE", raw)
+			continue
+		if _containsBanWord(cleaned):
+			_logDebugLine(category, "REJECTED:BANWORD", raw)
+			continue
+
+		# Only the batch's actual LAST line can plausibly have been cut by
+		# num_predict, and only if Ollama confirms the response really was
+		# truncated - a missing "." elsewhere (or anywhere, really) is just
+		# this model's normal style as often as not (confirmed in the debug
+		# log), so nothing else here gets touched based on punctuation alone.
+		if i == lines.size() - 1 and _lastResponseWasTruncated:
+			var lastEnd := -1
+			for stopChar in [".", "!", "?", "…"]:
+				lastEnd = maxi(lastEnd, cleaned.rfind(stopChar))
+			if lastEnd > 2:
+				var trimmed := cleaned.substr(0, lastEnd + 1).strip_edges()
+				_logDebugLine(category, "TRIMMED_CUTOFF", raw + "  -->  " + trimmed)
+				cleaned = trimmed
+			else:
+				var lastSpace := cleaned.rfind(" ")
+				if lastSpace > 2:
+					var trimmed2 := cleaned.substr(0, lastSpace).strip_edges()
+					_logDebugLine(category, "TRIMMED_CUTOFF", raw + "  -->  " + trimmed2)
+					cleaned = trimmed2
+				else:
+					_logDebugLine(category, "REJECTED:TOO_FRAGMENTARY", raw)
+					continue # too fragmentary to salvage - drop this line entirely
+
+		var lineStems := _contentStems(cleaned, _skinFromTag(category))
+		var overused := ""
+		for st in lineStems.keys():
+			var used := int(batchStems.get(st, 0))
+			if used >= maxPerStem or (skinWorn.has(st) and used >= 1):
+				overused = lineStems[st]
+				break
+		if overused != "":
+			_logDebugLine(category, "REJECTED:OVERUSED(" + overused + ")", raw)
+			continue
+		for st in lineStems.keys():
+			batchStems[st] = int(batchStems.get(st, 0)) + 1
+
+		if _isSpent(category, cleaned):
+			_logDebugLine(category, "REJECTED:SPENT", raw) # F2.9: уже звучала (в этой или прошлой игре) - 1 в 1 не повторяем
+			continue
+		_logDebugLine(category, "OK", cleaned)
+		pool.append(cleaned)
+	_prefetchPools[category] = pool
+	_phraseCacheChanged(false)
+
+	# Прогрев категорий идёт параллельно - без этого свежесгенерированные
+	# фразы одной категории не видны остальным, пока их реально не покажут
+	# на экране, и в первые минуты сессии часто получаются почти одинаковые
+	# фразы в разных категориях. Запоминаем их сразу же, как только сгенерированы.
+	for i in range(startSize, pool.size()):
+		_rememberLine(category, pool[i])
+
+	if _fastFirst.has(category): # F2.7: первая короткая пачка готова - допишем после первой волны
+		_topUpLater.append([category, _fastFirst[category]])
+		_fastFirst.erase(category)
+	if _topUpRunning.has(category):
+		_topUpRunning.erase(category)
+	elif _prewarmTotal > 0:
+		_prewarmDone += 1
+		var elapsed := (Time.get_ticks_msec() - _prewarmStartMsec) / 1000.0
+		Console.print(Lang.t("[color=CYAN]Прогрев: %d/%d готово (только что: %s, прошло %.0f сек с начала)[/color]") % [_prewarmDone, _prewarmTotal, category, elapsed])
+		if _prewarmDone >= _prewarmTotal:
+			if _prewarmIsFinalWave:
+				Console.print(Lang.t("[color=GREEN]Все ИИ-реплики созданы, можно взаимодействовать.[/color]"))
+				_startTopUps()
+			else:
+				Console.print(Lang.t("[color=GREEN]Все первостепенные ИИ-реплики готовы, можно взаимодействовать (редкие ещё догружаются в фоне).[/color]"))
+			_prewarmTotal = 0
+			_prewarmDone = 0
+			prewarmBatchFinished.emit()
+
+
+const MAX_QUEUED_PER_TAG := 2
+
+func _startTopUps() -> void:
+	var list := _topUpLater
+	_topUpLater = []
+	for e in list:
+		var cat: String = e[0]
+		var a: Dictionary = e[1]
+		if _deadSkins.has(_skinFromTag("prefetch:" + cat)) or _prefetchPending.get(cat, false):
+			continue
+		_topUpRunning[cat] = true
+		if a.has("event"):
+			_refillEventPool(cat, a["event"], a["ex"])
+		else:
+			_refillPool(cat, a["ex"], "", a["sit"])
+		if not _prefetchPending.get(cat, false): # не поставили в очередь - и не ждём
+			_topUpRunning.erase(cat)
+
+
+## 054.998: персонажа удалили, а его наборы фраз ещё стояли в очереди - и
+## видеокарта генерировала их для того, кого уже нет, пока новый персонаж ждал.
+## Убираем из очереди всё, что относится к этому скину, и из счётчика прогрева.
+func dropSkinJobs(skin: String, prefetchOnly: bool = false) -> void:
+	var removed := 0
+	for j in _backgroundQueue.duplicate():
+		var tag: String = j.get("tag", "")
+		if tag.begins_with("prefetch:" + skin + ":"):
+			_backgroundQueue.erase(j)
+			_prefetchPending[tag.trim_prefix("prefetch:")] = false
+			removed += 1
+	# 054.9995: прогрев лежит в ОСНОВНОЙ очереди с меткой "prefetch:Скин:..." - раньше
+	# здесь искали только "Скин:", и задания удалённого персонажа доделывались, а счётчик
+	# прогрева складывался с новым ("9/18", тест Alex 21.10)
+	for j in _queue.duplicate():
+		var qtag := String(j.get("tag", ""))
+		if (qtag.begins_with(skin + ":") and not prefetchOnly) or qtag.begins_with("prefetch:" + skin + ":"):
+			_queue.erase(j)
+			if qtag.begins_with("prefetch:"):
+				_prefetchPending[qtag.trim_prefix("prefetch:")] = false
+				removed += 1
+	if busy and (_currentTag.begins_with("prefetch:" + skin + ":") or (_currentTag.begins_with(skin + ":") and not prefetchOnly)):
+		http.cancel_request()
+		_watchdogTimer.stop()
+		busy = false
+		_currentJob = {}
+		TransparentWindow.call("SetAiBusy", false)
+		_processQueue.call_deferred()
+	if removed > 0 and _prewarmTotal > 0:
+		_prewarmTotal = maxi(_prewarmDone, _prewarmTotal - removed)
+		if _prewarmDone >= _prewarmTotal:
+			_prewarmTotal = 0
+			_prewarmDone = 0
+			prewarmBatchFinished.emit()
+
+func _enqueue(prompt: String, images: Array, callback: Callable, tag: String = "", extra: Dictionary = {}) -> void:
+	prompt = _g(_skinFromTag(tag), prompt) # {женский|мужской} -> по роду скина
+	var job := {"prompt": prompt, "images": images, "callback": callback, "tag": tag, "t": Time.get_ticks_msec()}
+	job.merge(extra)
+	if tag.begins_with("prefetch:"):
+		_backgroundQueue.append(job)
+	else:
+		# Rapid clicking (e.g. spamming pet 35 times) can queue far more live
+		# generations than the pool has lines for - once the pool runs dry,
+		# each extra click becomes its own slow cold-start request, and they
+		# all play out one by one long after the player stopped clicking,
+		# stuttering the game well after the fact. Once a category already
+		# has a couple requests waiting, silently drop further ones instead.
+		var sameTagCount := 0
+		for j in _queue:
+			if j.get("tag", "") == tag:
+				sameTagCount += 1
+		if tag != "" and sameTagCount >= MAX_QUEUED_PER_TAG:
+			return
+		_queue.append(job)
+	_processQueue()
+
+
+## 054.992: запросы, которые слишком долго ждали очереди, выбрасываем. Когда
+## модель тормозила (видеокарту заняли голосовой Discord и стрим), реакции на
+## экран и фразы о состоянии копились, а потом приходили все разом - уже
+## не к месту. Фоновые наборы фраз не устаревают.
+const STALE_MS := {"screen": 45000, "state": 60000, "pettalk": 60000, "item": 30000, "chat": 120000}
+const STALE_DEFAULT_MS := 30000 # мгновенные реакции (погладили, подняли)
+
+func _dropStaleJobs() -> void:
+	var now := Time.get_ticks_msec()
+	var kept: Array = []
+	for job in _queue:
+		var tag := String(job.get("tag", ""))
+		var kind := tag.get_slice(":", tag.get_slice_count(":") - 1)
+		var limit: int = STALE_MS.get(kind, STALE_DEFAULT_MS)
+		if now - int(job.get("t", now)) > limit:
+			_logDebugLine(tag, "DROPPED:STALE", "ждал %d с" % ((now - int(job.get("t", now))) / 1000))
+			continue
+		kept.append(job)
+	_queue = kept
+
+
+func _processQueue() -> void:
+	if busy:
+		return
+	_dropStaleJobs()
+	if _queue.is_empty() and _backgroundQueue.is_empty():
+		return
+	busy = true
+	_watchdogTimer.start()
+	TransparentWindow.call("SetAiBusy", true) # 054.993: FPS простоя 30, пока модель думает
+
+	var job: Dictionary
+	_sinceBackgroundJob += 1
+	# Foreground always wins EXCEPT every Nth job, when background gets a
+	# guaranteed turn - otherwise a steady stream of foreground requests
+	# (screen/state/petting reactions) can starve prewarm forever on slow
+	# hardware, and the "all done" notification never fires.
+	# K2: медленная модель и идёт разговор с игроком - фоновые пакеты фраз ждут конца
+	# разговора: каждый занимает видеокарту на десятки секунд, и ответ игроку стоял бы за ним
+	var holdBackground: bool = potatoActive() and GlobalVariable.playerChatQuiet()
+	if holdBackground and _queue.is_empty():
+		busy = false
+		_watchdogTimer.stop()
+		TransparentWindow.call("SetAiBusy", false)
+		if not _backgroundWake:
+			_backgroundWake = true
+			get_tree().create_timer(GlobalVariable.playerChatQuietLeftSec() + 1.0).timeout.connect(func():
+				_backgroundWake = false
+				_processQueue())
+		return
+	if not holdBackground and not _backgroundQueue.is_empty() and (_queue.is_empty() or _sinceBackgroundJob >= BACKGROUND_EVERY_N):
+		job = _backgroundQueue.pop_front()
+		_sinceBackgroundJob = 0
+	else:
+		job = _queue.pop_front()
+
+	_currentCallback = job["callback"]
+	_currentTag = job.get("tag", "")
+	_currentJob = job
+
+	# Batch (prefetch pool refill) requests carry PREFETCH_TARGET lines in one
+	# response, so they need a much bigger token budget than a single line.
+	var predictBudget: int = 220
+	if _currentTag.begins_with("prefetch:"):
+		# ~20-40 токенов на строку; потолок, чтобы промпт + ответ всегда влезали в NUM_CTX
+		predictBudget = mini(80 * _prefetchTargetFor(_currentTag.trim_prefix("prefetch:")), 2400)
+
+	_noteEnLeak(String(job["prompt"]), _currentTag)
+	var payload := {
+		"model": modelName,
+		"keep_alive": "30m",
+		"prompt": job["prompt"],
+		"stream": false,
+		"think": false, # 055.002: у Gemma 4 и др. размышления отключаемые - выключаем (старым моделям не мешает)
+		"options": {
+			"repeat_penalty": repetitionGuard,
+			"temperature": float(job.get("temperature", creativity)), # повтор ответа в чате идёт чуть "смелее"
+			"num_predict": predictBudget,
+			"num_ctx": numCtx()
+		}
+	}
+	# Ollama's own multimodal models are picky about an empty "images" key -
+	# only include it when there's actually an image to send.
+	if job["images"].size() > 0:
+		payload["images"] = job["images"]
+
+	# K1: ответ игроку при «режиме картошки» - потоком, по предложениям
+	if Callable(job.get("onPiece", Callable())).is_valid() and not job.get("noStream", false) and potatoActive():
+		_watchdogTimer.stop() # у потока свои сроки (_runStream): длинный ответ 31B дольше 75 с
+		_runStream(payload)
+		return
+
+	var headers := ["Content-Type: application/json"]
+	var err := http.request(OLLAMA_URL, headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
+	if err != OK:
+		print("LLMManager: failed to start request: ", err)
+		busy = false
+		TransparentWindow.call("SetAiBusy", false)
+		_processQueue()
+
+
+# ---------------- K1: «режим картошки» ----------------
+## Медленный компьютер или большая модель (31B - ~6 токенов/с): ответ игроку в чате
+## идёт потоком и показывается по предложениям - первое через несколько секунд, дальше
+## дописывается в тот же пузырь. Каждое предложение проходит фильтры ДО показа.
+## Заодно генерация останавливается, как только предложений хватает: без потока модель
+## дописывала ответ до конца, а игра всё равно оставляла только начало.
+## potatoMode: "auto" (сам - модель пишет медленнее POTATO_AUTO_TPS или она от 20b),
+## "on", "off". Консоль: potato_mode.
+const POTATO_AUTO_TPS := 15.0
+const POTATO_MAX_UNITS := 4        # кусков в ответе (без картошки чат режет до двух предложений)
+const STREAM_FIRST_MS := 120000    # до первого слова: загрузка 31B в память + длинный промпт
+const STREAM_STALL_MS := 30000     # пауза посреди ответа
+const STREAM_ACT_GRACE_MS := 4000  # предложений хватило - ещё столько ждём метку действия
+var _tpsModel := ""
+var _tpsSamples: Array = []
+var _potatoAutoSaid := ""
+var _streamGen := 0
+var _backgroundWake := false
+
+func potatoMode() -> String:
+	var m := String(gbData.settings.get("potatoMode", "auto"))
+	return m if m in ["auto", "on", "off"] else "auto"
+
+
+func setPotatoMode(m: String) -> void:
+	gbData.settings["potatoMode"] = m
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+
+
+## Средняя скорость текущей модели по последним ответам; -1 - ещё не мерили.
+func measuredTps() -> float:
+	if _tpsModel != modelName or _tpsSamples.is_empty():
+		return -1.0
+	var total := 0.0
+	for v in _tpsSamples:
+		total += float(v)
+	return total / _tpsSamples.size()
+
+
+func _trackTps(tps: float) -> void:
+	if _tpsModel != modelName:
+		_tpsModel = modelName
+		_tpsSamples.clear()
+	_tpsSamples.append(tps)
+	while _tpsSamples.size() > 5:
+		_tpsSamples.pop_front()
+	if potatoMode() == "auto" and potatoActive() and _potatoAutoSaid != modelName:
+		_potatoAutoSaid = modelName
+		Console.print(Lang.t("[color=ORANGE]Режим картошки включился сам: модель пишет медленно (%d ток/с) - ответы в чате будут печататься по предложениям. Выключить: potato_mode off[/color]") % int(round(measuredTps())))
+
+
+func potatoActive() -> bool:
+	var m := potatoMode()
+	if m == "on":
+		return true
+	if m == "off":
+		return false
+	var tps := measuredTps()
+	if tps > 0.0:
+		return tps < POTATO_AUTO_TPS
+	return modelBillions() >= 20.0
+
+
+## Куски речи из потока («единицы»): предложение, а короткие (меньше 3 слов, «Шляпа?»)
+## копятся вместе со следующим - как в _cutToFirstSentence. Конец засчитан, только
+## когда после знака уже пришёл пробел: иначе «.» могла оказаться началом «...».
+## Возвращает [[текст, позиция конца], ...]; done - поток кончился, остаток - тоже кусок.
+const _UNIT_TAIL := "!?.…»\")*"
+func _streamUnits(s: String, from: int, done: bool) -> Array:
+	var out: Array = []
+	var start := from
+	var i := from
+	while i < s.length():
+		var e := _findUnitEnd(s, i)
+		if e == -1:
+			break
+		var j := e + 1
+		while j < s.length() and _UNIT_TAIL.contains(s[j]):
+			j += 1
+		if j >= s.length():
+			break # что за знаком - ещё не пришло
+		if s[j] != " " and s[j] != "\n":
+			i = j
+			continue # «3.5», «т.е.» - не конец предложения
+		var unit := s.substr(start, j - start).strip_edges()
+		if unit.split(" ", false).size() < 3:
+			i = j
+			continue # короткое - вместе со следующим
+		out.append([unit, j])
+		start = j
+		i = j
+	if done:
+		var rest := s.substr(start).strip_edges()
+		if rest != "":
+			out.append([rest, s.length()])
+	return out
+
+
+## Конец куска для потока: конец предложения (_findSentenceEnd) или многоточие, после
+## которого пробел и заглавная буква - «Ой, какая забота... Ты решил проверить?» (gemma
+## пишет так почти каждую реплику, и весь ответ шёл одним куском). Многоточие внутри
+## фразы («Неплохо… для тебя») - по-прежнему пауза. -1 - конца пока нет или не понять.
+func _findUnitEnd(s: String, from: int) -> int:
+	var e := _findSentenceEnd(s, from)
+	var limit := e if e != -1 else s.length()
+	var i := from
+	while i < limit:
+		var c := s[i]
+		if c == "…" or (c == "." and i + 1 < s.length() and s[i + 1] == "."):
+			var j := i
+			while j < s.length() and (s[j] == "." or s[j] == "…"):
+				j += 1
+			if j + 1 < s.length() and s[j] == " " and _isUpperLetter(s[j + 1]):
+				return j - 1
+			i = j
+			continue
+		i += 1
+	return e
+
+
+func _isUpperLetter(c: String) -> bool:
+	var code := c.unicode_at(0)
+	return (code >= 65 and code <= 90) or (code >= 0x0410 and code <= 0x042F) or code == 0x0401
+
+
+## Текст потока для показа: без метки «[ДЕЙСТВИЕ: ...]» (её действие - в act), без
+## недописанной метки в конце, без кавычки и пробелов в самом начале.
+func _streamClean(raw: String, done: bool) -> Dictionary:
+	var s := raw
+	var act := ""
+	var actRe: RegEx = _actionRegexEn if Lang.isEn() else _actionRegex
+	var m := actRe.search(s)
+	if m:
+		act = _chatActionFromLabel(m.get_string(1))
+		s = actRe.sub(s, "", true)
+	var open := s.rfind("[")
+	if open != -1 and s.find("]", open) == -1 and not done:
+		s = s.substr(0, open)
+	s = s.strip_edges(true, false)
+	if s.begins_with("\""):
+		s = s.substr(1)
+	return {"text": s, "act": act}
+
+
+## «Человек: ...», «Роза: ...» в начале куска - модель пишет за собеседника (или
+## подписывает себя). Имена: человек, игрок, все персонажи на экране.
+func _speakerPrefix(u: String) -> String:
+	var colon := u.find(":")
+	if colon < 2 or colon > 24:
+		return ""
+	var who := u.substr(0, colon).strip_edges().to_lower()
+	var names := ["человек", "human", "собеседник", "user"]
+	if PlayerManager.playerName != "":
+		names.append(PlayerManager.playerName.to_lower())
+	for p in get_tree().get_nodes_in_group("pets"):
+		names.append(PlayerManager.displayNameFor(p._skinTag()).to_lower())
+		names.append(String(p._skinTag()).to_lower())
+	return who if names.has(who) else ""
+
+
+## Проверка куска перед показом: {"v": ok|stop_after|skip|stop|retry|reject, "text", "why"}.
+## Первый кусок строже: плохой - переспрос, как без картошки. Плохой поздний - только
+## он и пропускается, остальные предложения всё равно показываются (решение Alex).
+## Открытой модели здесь мешает только то, что ломает речь: мат у неё и так разрешён.
+func _streamCheckUnit(tag: String, unit: String, first: bool, retry: int) -> Dictionary:
+	var u := _keepStarActions(unit)
+	var who := _speakerPrefix(u)
+	if who != "":
+		var me := PlayerManager.displayNameFor(_skinFromTag(tag)).to_lower()
+		if first and (who == me or who == _skinFromTag(tag).to_lower()):
+			u = u.substr(u.find(":") + 1).strip_edges() # подписал себя - имя убираем
+		elif first:
+			return {"v": "reject", "why": "ROLE_BREAK", "text": u}
+		else:
+			return {"v": "stop", "why": "ROLE_BREAK", "text": u}
+	var stopAfter := false
+	var paren := u.find("(")
+	if paren > 2:
+		u = u.substr(0, paren).strip_edges() # «...(Это фраза в нужном тоне)» - пояснение модели
+		stopAfter = true
+	elif paren != -1:
+		return {"v": "reject" if first else "stop", "why": "META_PAREN", "text": u}
+	var bad := ""
+	if u == "":
+		bad = "EMPTY"
+	elif _looksLikeGarbage(u):
+		bad = "GARBAGE"
+	elif _containsBanWord(u):
+		bad = "BANWORD"
+	elif not gbData.settings.get("llmAllowProfanity", false) and _containsProfanity(u):
+		bad = "PROFANITY"
+	if bad != "":
+		return {"v": "reject" if first else "skip", "why": bad, "text": u}
+	if first and retry == 0 and _chatLooksStuck(tag, u):
+		return {"v": "retry", "why": "SAME_PATTERN", "text": u}
+	if first and retry > 0:
+		u = _stripRepeatedTail(tag, _stripWornClause(tag, u))
+	if _addressBusy(tag):
+		var ua := _stripAddresses(u)
+		if ua != u:
+			_logDebugLine(tag, "STRIPPED_ADDRESS", u + "  -->  " + ua)
+			u = ua
+	return {"v": "stop_after" if stopAfter else "ok", "text": _fixOutputQuirks(u)}
+
+
+## Подсказка модели при переспросе «ты уже так отвечала» (и в потоке, и без него).
+func _retryPrompt(prompt: String, tag: String, said: String) -> String:
+	return prompt.trim_suffix("\nТвой ответ (только сама реплика):") + _g(_skinFromTag(tag), "\nВНИМАНИЕ: ты уже {отвечала|отвечал} так: \"") + said + "\". Скажи СОВСЕМ по-другому - другими словами, с другим началом и другой концовкой.\nТвой ответ (только сама реплика):"
+
+
+func _runStream(payload: Dictionary) -> void:
+	_streamGen += 1
+	var job: Dictionary = _currentJob
+	var tag: String = _currentTag
+	var cb: Callable = _currentCallback
+	var onPiece: Callable = job.get("onPiece", Callable())
+	var retry := int(job.get("retry", 0))
+	var prompt := String(job.get("prompt", ""))
+	var mayAct := prompt.contains("[ДЕЙСТВИЕ") or prompt.contains("[ACTION")
+	payload["stream"] = true
+	if onPiece.is_valid():
+		onPiece.call("think", "")
+	var t0 := Time.get_ticks_msec()
+	var client := HTTPClient.new()
+	var fail := ""
+	if client.connect_to_host("127.0.0.1", 11434) != OK:
+		fail = "connect"
+	while fail == "" and client.get_status() in [HTTPClient.STATUS_CONNECTING, HTTPClient.STATUS_RESOLVING]:
+		client.poll()
+		await get_tree().process_frame
+		if Time.get_ticks_msec() - t0 > 5000:
+			fail = "connect timeout"
+	if fail == "" and client.get_status() != HTTPClient.STATUS_CONNECTED:
+		fail = "no connection"
+	if fail == "" and client.request(HTTPClient.METHOD_POST, "/api/generate", ["Content-Type: application/json"], JSON.stringify(payload)) != OK:
+		fail = "request"
+	while fail == "" and client.get_status() == HTTPClient.STATUS_REQUESTING:
+		client.poll()
+		await get_tree().process_frame
+		if Time.get_ticks_msec() - t0 > STREAM_FIRST_MS:
+			fail = "timeout"
+	if fail == "" and client.has_response() and client.get_response_code() != 200:
+		fail = "code %d" % client.get_response_code()
+
+	var bytes := PackedByteArray()
+	var raw := ""
+	var tokens := 0
+	var firstTokMs := -1
+	var lastTokMs := t0
+	var lastByteMs := Time.get_ticks_msec()
+	var final := {}
+	var shown: Array = []
+	var pos := 0
+	var act := ""
+	var verdict := ""
+	var why := ""
+	var badText := ""
+	var enough := false
+	var enoughAt := -1
+	var stopped := false
+	while fail == "" and client.get_status() == HTTPClient.STATUS_BODY:
+		client.poll()
+		var chunk := client.read_response_body_chunk()
+		if chunk.is_empty():
+			if Time.get_ticks_msec() - lastByteMs > (STREAM_FIRST_MS if firstTokMs < 0 else STREAM_STALL_MS):
+				fail = "stall"
+				break
+			if enough and Time.get_ticks_msec() - enoughAt > STREAM_ACT_GRACE_MS:
+				stopped = true
+				break
+			await get_tree().process_frame
+			continue
+		lastByteMs = Time.get_ticks_msec()
+		bytes.append_array(chunk)
+		# строки NDJSON - по байтам: русская буква может разорваться между кусками
+		var nl := bytes.find(10)
+		while nl != -1:
+			var line := bytes.slice(0, nl).get_string_from_utf8()
+			bytes = bytes.slice(nl + 1)
+			nl = bytes.find(10)
+			var d = JSON.parse_string(line)
+			if not (d is Dictionary):
+				continue
+			if d.has("error"):
+				fail = "ollama: " + String(d["error"])
+				break
+			var piece := String(d.get("response", ""))
+			if piece != "":
+				raw += piece
+				tokens += 1
+				lastTokMs = Time.get_ticks_msec()
+				if firstTokMs < 0:
+					firstTokMs = lastTokMs
+			if d.get("done", false):
+				final = d
+		if fail != "":
+			break
+		var done := not final.is_empty()
+		var cl := _streamClean(raw, done)
+		if String(cl["act"]) != "":
+			act = String(cl["act"])
+		if not enough:
+			for u in _streamUnits(String(cl["text"]), pos, done):
+				pos = int(u[1])
+				var chk := _streamCheckUnit(tag, String(u[0]), shown.is_empty(), retry)
+				var v := String(chk["v"])
+				if v == "retry" or v == "reject":
+					verdict = v
+					why = String(chk.get("why", ""))
+					badText = String(chk.get("text", u[0]))
+					break
+				if v == "skip" or v == "stop":
+					_logDebugLine(tag, "STREAM_%s:%s" % [v.to_upper(), chk.get("why", "")], String(u[0]))
+					if v == "stop":
+						enough = true
+						break
+					continue
+				var txt := String(chk["text"])
+				if txt == "":
+					continue
+				if debugTags and shown.is_empty():
+					txt = "[%s] %s" % [tag, txt]
+				shown.append(txt)
+				_logDebugLine(tag, "STREAM_PIECE +%.1fs" % ((Time.get_ticks_msec() - t0) / 1000.0), txt)
+				if onPiece.is_valid():
+					onPiece.call("piece", txt)
+				if v == "stop_after" or shown.size() >= POTATO_MAX_UNITS:
+					enough = true
+					break
+		if verdict != "" or done:
+			break
+		if enough:
+			if enoughAt < 0:
+				enoughAt = Time.get_ticks_msec()
+			# метку действия ждём, только если модель могла её поставить
+			if not mayAct or act != "" or Time.get_ticks_msec() - enoughAt > STREAM_ACT_GRACE_MS:
+				stopped = true
+				break
+	client.close()
+
+	# скорость - для авто-режима и ИИ-лога
+	var firstWord := (firstTokMs - t0) / 1000.0 if firstTokMs > 0 else -1.0
+	if final.has("eval_count"):
+		var tps := _noteSpeed(final)
+		_logDebugLine(tag, "TOKENS", "prompt=%d answer=%d of %d  speed=%.1f tok/s  first word %.1f s  (stream)" % [int(final.get("prompt_eval_count", 0)), int(final.get("eval_count", 0)), numCtx(), tps, firstWord])
+	elif tokens >= 10 and lastTokMs > firstTokMs and firstTokMs > 0:
+		var tps2 := _noteSpeed({"eval_count": tokens, "eval_duration": float(lastTokMs - firstTokMs) * 1e6})
+		_logDebugLine(tag, "TOKENS", "answer~%d  speed=%.1f tok/s  first word %.1f s  (stream%s)" % [tokens, tps2, firstWord, ", stopped early" if stopped else ""])
+
+	busy = false
+	TransparentWindow.call("SetAiBusy", false)
+
+	if fail != "":
+		_logDebugLine(tag, "STREAM_FAIL", fail + "  [" + raw.left(200) + "]")
+		if shown.is_empty():
+			_noteFailure(-1)
+			if raw == "" and not job.get("noStream", false):
+				var plain: Dictionary = job.duplicate()
+				plain["noStream"] = true # поток не пошёл совсем - тот же вопрос обычным запросом
+				_queue.push_front(plain)
+			elif onPiece.is_valid():
+				onPiece.call("fail", "")
+			_processQueue()
+			return
+
+	if verdict == "retry" or (verdict == "reject" and retry == 0):
+		_logDebugLine(tag, "RETRY:" + why, badText)
+		var again: Dictionary = job.duplicate()
+		again["retry"] = 1
+		again["temperature"] = minf(1.2, creativity + 0.25)
+		if verdict == "retry":
+			again["prompt"] = _retryPrompt(prompt, tag, badText)
+		_queue.push_front(again)
+		_processQueue()
+		return
+	if verdict == "reject":
+		_logDebugLine(tag, "REJECTED:" + why, badText)
+		if onPiece.is_valid():
+			onPiece.call("fail", "")
+		_processQueue()
+		return
+
+	var full := " ".join(shown)
+	if full == "":
+		_logDebugLine(tag, "REJECTED:EMPTY", raw.left(300))
+		if onPiece.is_valid():
+			onPiece.call("fail", "")
+	else:
+		var plainFull := full.trim_prefix("[" + tag + "] ") if debugTags else full
+		_logDebugLine(tag, "OK", plainFull)
+		_rememberLine(tag, plainFull)
+		_noteAddress(tag, plainFull)
+		if cb.is_valid():
+			cb.call(("<act:%s>" % act if act != "" else "") + full)
+	_processQueue()
+
+
+func _clearPendingIfPrefetch() -> void:
+	# F2.9 (Alex: прогрев встал на 23/27): набор фраз не получился (модели нет в Ollama, ошибка) - в конец
+	# фоновой очереди, до 3 повторов; раньше он терялся, и счётчик прогрева не доходил до конца.
+	# Модель к тому времени уже переключена на установленную - повтор идёт к ней.
+	if _currentTag.begins_with("prefetch:") and int(_currentJob.get("failTries", 0)) < 3:
+		var again: Dictionary = _currentJob.duplicate()
+		again["failTries"] = int(_currentJob.get("failTries", 0)) + 1
+		_backgroundQueue.append(again)
+		_logDebugLine(_currentTag, "REQUEUED", "повтор %d" % again["failTries"])
+		return
+	if _currentTag.begins_with("prefetch:"):
+		var category := _currentTag.trim_prefix("prefetch:")
+		_prefetchPending[category] = false
+
+
+## 054.992: три неудачи подряд - подсказка в консоли (раньше игра просто молчала).
+var _failStreak := 0
+func _noteFailure(code: int) -> void:
+	_failStreak += 1
+	_logDebugLine(_currentTag, "OLLAMA_FAIL", "код %d, подряд %d" % [code, _failStreak])
+	if _failStreak == 3:
+		Console.print(Lang.t("[color=ORANGE]Ollama не успевает отвечать (3 раза подряд). Скорее всего, видеокарта перегружена: голосовой Discord, стрим, игра. В Discord помогает выключить аппаратное ускорение (Настройки - Расширенные).[/color]"))
+
+
+func _on_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_watchdogTimer.stop()
+	busy = false
+	TransparentWindow.call("SetAiBusy", false)
+	var cb := _currentCallback
+
+	if response_code != 200:
+		print("LLMManager: Ollama returned code ", response_code, " - is `ollama serve` running with the model pulled?")
+		_noteFailure(response_code)
+		_clearPendingIfPrefetch()
+		_failPiece()
+		_processQueue()
+		return
+
+	_failStreak = 0
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if not (parsed is Dictionary):
+		print("LLMManager: JSON parse failed")
+		_clearPendingIfPrefetch()
+		_failPiece()
+		_processQueue()
+		return
+
+	# Ollama tells us WHY generation stopped - "length" means num_predict cut
+	# it off mid-thought for real; "stop" means the model finished on its
+	# own, whatever punctuation (or lack of it) it ended on. Missing a "."
+	# is this model's normal style as often as not (confirmed in the debug
+	# log), so only touch endings when we KNOW it was actually truncated,
+	# rather than guessing from punctuation alone.
+	_lastResponseWasTruncated = String(parsed.get("done_reason", "stop")) == "length"
+	# Сколько токенов занял промпт: если он упрётся в NUM_CTX, Ollama молча
+	# отрежет НАЧАЛО (правила и лор) - в логе это видно как CONTEXT_FULL.
+	var promptTokens: int = int(parsed.get("prompt_eval_count", 0))
+	var tps := _noteSpeed(parsed)
+	_logDebugLine(_currentTag, "TOKENS", "prompt=%d answer=%d of %d  speed=%.1f tok/s%s" % [promptTokens, int(parsed.get("eval_count", 0)), numCtx(), tps, "  CONTEXT_FULL" if promptTokens >= numCtx() - 300 else ""])
+
+	var text: String = ""
+	if parsed.has("response") and String(parsed["response"]).strip_edges() != "":
+		text = String(parsed["response"]).strip_edges()
+	elif parsed.has("thinking") and String(parsed["thinking"]).strip_edges() != "":
+		# Fallback for reasoning models that only filled "thinking" - grab the
+		# last non-trivial line as a best-effort guess at the actual reply.
+		var lines = String(parsed["thinking"]).strip_edges().split("\n")
+		for i in range(lines.size() - 1, -1, -1):
+			var line = lines[i].strip_edges()
+			if line.length() > 5:
+				text = line
+				break
+
+	text = text.trim_prefix("\"").trim_suffix("\"").strip_edges()
+
+	var isPrefetchBatch: bool = _currentTag.begins_with("prefetch:")
+
+	# Чат: метку действия "[ДЕЙСТВИЕ: подойти]" вырезаем ДО всех чисток
+	# (обрезка по предложениям её бы потеряла) и передаём персонажу в начале
+	# текста как "<act:come>" - behavior.replyToPlayer выполнит действие.
+	var chatAction := ""
+	if _currentTag.ends_with(":chat"):
+		var actRe: RegEx = _actionRegexEn if Lang.isEn() else _actionRegex
+		var m := actRe.search(text)
+		if m:
+			chatAction = _chatActionFromLabel(m.get_string(1))
+			text = actRe.sub(text, "", true).strip_edges()
+
+	if not isPrefetchBatch:
+		var rawReply := text
+		text = _keepStarActions(text)
+		var rejectReason := ""
+
+		# The model's ENTIRE reply is sometimes meta-commentary instead of a
+		# line of dialogue (e.g. "(Note: the request asked for...)") - if it
+		# starts with a paren, there's no real content to salvage from it.
+		if text.begins_with("("):
+			rejectReason = "META_PAREN"
+			text = ""
+		else:
+			# A trailing self-explanation ("...(Это фраза в нужном тоне)")
+			# still has real content before the paren - keep just that part.
+			var parenStart := text.find("(")
+			if parenStart > 2:
+				text = text.substr(0, parenStart).strip_edges()
+
+		# Keep only the FIRST sentence - some models tack on a second,
+		# roleplay-style "action" sentence even when told not to
+		# ("надевает шляпу...", "вздрагиваю и..."). Cutting after the first
+		# terminator removes that second sentence outright, whatever it says.
+		if text != "":
+			var full := text
+			text = _cutToFirstSentence(full)
+			# в разговоре с игроком разрешаем и второе предложение - живее
+			if _currentTag.ends_with(":chat"):
+				var rest := full.substr(text.length()).strip_edges()
+				if rest != "":
+					text = text + " " + _cutToFirstSentence(rest)
+
+		# Only touch the ending if Ollama confirms num_predict actually cut
+		# generation short - a missing "." otherwise is a deliberate style
+		# choice as often as not (confirmed in the debug log: dropping the
+		# last word whenever there was no "." mangled correct, complete
+		# sentences far more often than it ever repaired a real cutoff).
+		if text != "" and _lastResponseWasTruncated:
+			var lastEnd := -1
+			for stopChar in [".", "!", "?", "…"]:
+				lastEnd = maxi(lastEnd, text.rfind(stopChar))
+			if lastEnd > 0:
+				var trimmed := text.substr(0, lastEnd + 1).strip_edges()
+				_logDebugLine(_currentTag, "TRIMMED_CUTOFF", rawReply + "  -->  " + trimmed)
+				text = trimmed
+			else:
+				# no punctuation anywhere to anchor on - at minimum, drop the
+				# trailing partial word so we never show a broken half-word.
+				var lastSpace := text.rfind(" ")
+				if lastSpace > 2:
+					var trimmed2 := text.substr(0, lastSpace).strip_edges()
+					_logDebugLine(_currentTag, "TRIMMED_CUTOFF", rawReply + "  -->  " + trimmed2)
+					text = trimmed2
+
+		# Last line of defense: if this is supposed to be Russian but came
+		# out mostly Latin letters, the model went off the rails entirely
+		# (e.g. started explaining itself in English) - discard rather than
+		# show garbage.
+		if text != "" and _looksLikeGarbage(text):
+			# K2: в разговоре с игроком - один переспрос, как в потоке, а не молчание
+			if _currentTag.ends_with(":chat") and int(_currentJob.get("retry", 0)) == 0:
+				_logDebugLine(_currentTag, "RETRY:GARBAGE", text)
+				var again0: Dictionary = _currentJob.duplicate()
+				again0["retry"] = 1
+				_queue.push_front(again0)
+				_processQueue()
+				return
+			rejectReason = "GARBAGE"
+			text = ""
+
+		if text != "" and _looksLikeRoleInversion(_currentTag, text):
+			rejectReason = "ROLE_INVERSION"
+			text = ""
+
+		# В разговоре с игроком повтор лучше молчания - не отбрасываем насовсем,
+		# но один раз переспрашиваем модель: 8B залипает на шаблоне своих же
+		# прошлых ответов из истории ("X - значит, ты снова в деле?" раз за разом).
+		if text != "" and _currentTag.ends_with(":chat") and int(_currentJob.get("retry", 0)) == 0 and _chatLooksStuck(_currentTag, text):
+			_logDebugLine(_currentTag, "RETRY:SAME_PATTERN", text)
+			var again: Dictionary = _currentJob.duplicate()
+			again["retry"] = 1
+			again["temperature"] = minf(1.2, creativity + 0.25)
+			again["prompt"] = _retryPrompt(String(again["prompt"]), _currentTag, text)
+			_queue.push_front(again)
+			_processQueue()
+			return
+		# переспрос тоже вернул затёртый оборот - отрезаем ту часть фразы, где он
+		if text != "" and _currentTag.ends_with(":chat") and int(_currentJob.get("retry", 0)) > 0:
+			var stripped := _stripWornClause(_currentTag, text)
+			stripped = _stripRepeatedTail(_currentTag, stripped)
+			if stripped != text:
+				_logDebugLine(_currentTag, "STRIPPED_WORN", text + "  -->  " + stripped)
+				text = stripped
+		# Фразы о состоянии и реакции на экран: раньше повтор просто
+		# выбрасывался, а модель раз за разом выдавала то же самое ("Мне немного
+		# грустно, но я всё ещё здесь...") - и перс молчал. Теперь один переспрос.
+		var isStateLike: bool = _currentTag.ends_with(":state") or _currentTag.ends_with(":screen")
+		if text != "" and isStateLike and int(_currentJob.get("retry", 0)) == 0 and _looksLikeRepeat(_currentTag, text):
+			_logDebugLine(_currentTag, "RETRY:REPEAT", text)
+			var again2: Dictionary = _currentJob.duplicate()
+			again2["retry"] = 1
+			again2["temperature"] = minf(1.2, creativity + 0.25)
+			again2["prompt"] = String(again2["prompt"]) + _g(_skinFromTag(_currentTag), "\nВНИМАНИЕ: ты {хотела|хотел} сказать \"") + text + "\" - но почти это же ты уже {говорила|говорил}. Скажи о СОВСЕМ другом: другая мысль, другие слова, другое начало и другая концовка."
+			_queue.push_front(again2)
+			_processQueue()
+			return
+		if text != "" and not _currentTag.ends_with(":chat") and _looksLikeRepeat(_currentTag, text):
+			rejectReason = "REPEAT"
+			text = ""
+
+		if text != "" and _containsBanWord(text):
+			rejectReason = "BANWORD"
+			text = ""
+
+		# раньше мат отсекался только в примерах, а не в ответе модели
+		# (у Velvet в чате проскочило "Бля...")
+		if text != "" and not gbData.settings.get("llmAllowProfanity", false) and _containsProfanity(text):
+			rejectReason = "PROFANITY"
+			text = ""
+
+		if text != "":
+			text = _fixOutputQuirks(text)
+		if text != "" and not isPrefetchBatch:
+			text = _thinAddresses(_currentTag, text)
+
+		_logDebugLine(_currentTag, "OK" if text != "" else "REJECTED:" + rejectReason, text if text != "" else rawReply)
+
+		if debugTags and _currentTag != "":
+			text = "[%s] %s" % [_currentTag, text]
+
+	if text != "" and not isPrefetchBatch:
+		_rememberLine(_currentTag, text.trim_prefix("[" + _currentTag + "] ") if debugTags and _currentTag != "" else text)
+
+	if text != "" and chatAction != "":
+		text = "<act:%s>%s" % [chatAction, text]
+
+	if text != "" and cb.is_valid():
+		cb.call(text)
+	elif text == "" and not isPrefetchBatch:
+		_failPiece() # K1: ответ отбракован целиком - персонаж перестаёт «думать» сразу
+
+	_processQueue()
+
+
+## K2: игрок написал персонажу - из очереди убираются ещё не начатые «заведу разговор»
+## (с игроком и между персами) и ответы в разговоре персов: иначе после ответа игроку
+## персонаж тут же заводил новую тему («Скучно стало...» посреди сцены, тест K1).
+func dropOpeners() -> void:
+	var kept: Array = []
+	for j in _queue:
+		if j.get("opener", false):
+			_logDebugLine(String(j.get("tag", "")), "DROPPED_OPENER", "игрок пишет персонажу")
+		else:
+			kept.append(j)
+	_queue = kept
+
+
+## K1: ответ игроку не придёт (сбой Ollama или ответ отбракован) - если персонаж
+## показывает точки «думает», убрать их сразу, а не держать очередь фраз до 3 минут.
+func _failPiece() -> void:
+	var op: Callable = _currentJob.get("onPiece", Callable())
+	if op.is_valid():
+		op.call("fail", "")
+
+
+## Метка «[ДЕЙСТВИЕ: подойти]» -> действие для behavior («come», «item:бургер»...).
+func _chatActionFromLabel(rawLabel: String) -> String:
+	var label := rawLabel.strip_edges().to_lower()
+	var action: String = Lang.pick(CHAT_ACTIONS, CHAT_ACTIONS_EN).get(label, "")
+	# 055.005: gemma пишет сама «к бургеру», «go to the banana» - это «к предмету»,
+	# а название - подсказка, к какому (behavior._goToItem)
+	if action == "":
+		for pre in Lang.pick(["к ", "пойти к ", "подойти к "], ["go to the ", "go to ", "get the ", "take the "]):
+			if label.begins_with(pre):
+				action = "item:" + label.trim_prefix(pre)
+				break
+	return action
+
+
+## Fires only if a request never completed at all within 75 sec - normal
+## requests (even slow batches) finish and stop this timer well before then.
+## Recovers from the exact failure mode seen in the wild: Ollama cancelling
+## a request server-side without Godot's HTTPRequest firing completion,
+## which left `busy` stuck and silenced the whole queue for 5+ minutes.
+func _onWatchdogTimeout() -> void:
+	print("LLMManager: watchdog - a request seems stuck, resetting the queue")
+	_noteFailure(-1)
+	busy = false
+	TransparentWindow.call("SetAiBusy", false)
+	_clearPendingIfPrefetch()
+	_processQueue()
+
+
+## Console command: toggleDebugTags - prefixes every AI line with its source
+## ([screen], [state], [pet], [getUp], [petReject], [drag], etc.) so you can
+## tell at a glance which trigger produced a given reaction.
+func setDebugTags(enabled: bool) -> void:
+	debugTags = enabled
+
+
+## Console command: toggleAiLog. Writes every generated line (kept or
+## rejected, with the reason) to user://ai_debug_log.txt - independent of
+## toggleDebugTags, since some issues show up even without the in-game
+## prefix. Send that file over instead of screenshots for batch debugging.
+func setLogAiLines(enabled: bool) -> void:
+	gbData.settings["logAiLines"] = enabled
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+
+
+## Console command: visionToggle
+func setEnabled(enabled: bool) -> void:
+	gbData.settings["llmVisionEnabled"] = enabled
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	if enabled:
+		_scheduleScreenTick()
+	aiEnabledChanged.emit(enabled)
+
+
+## Console command: toggleProfanity
+func setProfanityAllowed(enabled: bool) -> void:
+	gbData.settings["llmAllowProfanity"] = enabled
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	if not enabled:
+		_purgeProfaneLines() # drop only the stale lines that actually swear
+	print("LLMManager: profanity ", "allowed" if enabled else "forbidden")
+
+
+## Console command: toggleFlirt
+func setFlirtEnabled(enabled: bool) -> void:
+	gbData.settings["llmFlirtEnabled"] = enabled
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	print("LLMManager: flirt ", "enabled" if enabled else "disabled")
+
+
+## Интервал реакций на экран (сек). Консольной команды больше нет - поля в Settings.
+func setInterval(minSeconds: float, maxSeconds: float) -> void:
+	minScreenInterval = max(1.0, minSeconds)
+	maxScreenInterval = max(minScreenInterval, maxSeconds)
+	gbData.settings["llmMinInterval"] = str(minScreenInterval)
+	gbData.settings["llmMaxInterval"] = str(maxScreenInterval)
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	print("LLMManager: screen-reaction interval set to ", minScreenInterval, "-", maxScreenInterval, " seconds")
+
+
+## Console command: aiCreativity <0.0-1.5>
+## Готовые пулы фраз при смене НЕ сбрасываются (чтобы не ждать прогрев
+## заново) - новое значение применяется к пулам по мере их дозаполнения,
+## а к экранным реакциям - сразу, со следующего скриншота.
+func setCreativity(value: float) -> void:
+	creativity = clampf(value, 0.0, 1.5)
+	gbData.settings["llmCreativity"] = creativity
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+
+
+## Console command: aiRepetitionGuard <1.0-2.0>
+func setRepetitionGuard(value: float) -> void:
+	repetitionGuard = clampf(value, 1.0, 2.0)
+	gbData.settings["llmRepetitionGuard"] = repetitionGuard
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+
+
+## Console command: aiModel <name>
+## Console command: aiStatus calls this automatically. Lists models already
+## pulled locally via Ollama's own /api/tags - separate small HTTPRequest so
+## it doesn't interfere with the main dialogue queue. Prints asynchronously,
+## so this line can land slightly after the rest of aiStatus's output.
+## 054.996: подходит ли модель игре. Обязательно (проверено пользователем
+## многократно): зрение (vision - реакции на экран) и без режима размышлений
+## (thinking - модель "думает вслух", ответы медленные и ломают фразы).
+## callback(problem: String) - пустая строка, если подходит; иначе - почему нет.
+func checkModel(name: String, callback: Callable) -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.timeout = 15.0
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		http.queue_free()
+		if response_code != 200:
+			callback.call(Lang.t("Ollama не знает такую модель (код %d)") % response_code)
+			return
+		var parsed = JSON.parse_string(body.get_string_from_utf8())
+		var caps: Array = parsed.get("capabilities", []) if parsed is Dictionary else []
+		var problems: Array = []
+		if not caps.has("vision"):
+			problems.append(Lang.t("не умеет видеть картинки (нет vision)"))
+		# 055.002: размышления мешают, только если их нельзя выключить
+		# (Ollama: thinking.values без false). У Gemma 4 - [false, true], подходит.
+		if caps.has("thinking"):
+			var th = parsed.get("thinking", {})
+			var values: Array = th.get("values", []) if th is Dictionary else []
+			if not values.has(false):
+				problems.append(Lang.t("с режимом размышлений (thinking), который нельзя выключить"))
+		callback.call(", ".join(problems))
+	)
+	if http.request("http://127.0.0.1:11434/api/show", ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"model": name})) != OK:
+		http.queue_free()
+		callback.call(Lang.t("не удалось спросить Ollama"))
+
+
+## 054.995: список скачанных моделей для меню ai_model.
+## callback(names: Array, ok: bool) - ok=false, если Ollama не ответила.
+## Размеры (байты) - в modelSizes после ответа.
+var modelSizes: Dictionary = {}
+
+func fetchModels(callback: Callable) -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.timeout = 10.0
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		var names: Array = []
+		var ok := false
+		if response_code == 200:
+			var parsed = JSON.parse_string(body.get_string_from_utf8())
+			if parsed is Dictionary and parsed.has("models"):
+				ok = true
+				modelSizes.clear()
+				for m in parsed["models"]:
+					names.append(String(m.get("name", "?")))
+					modelSizes[names[-1]] = float(m.get("size", 0))
+		http.queue_free()
+		callback.call(names, ok)
+	)
+	if http.request("http://127.0.0.1:11434/api/tags") != OK:
+		http.queue_free()
+		callback.call([], false)
+
+
+## 054.999: скорость генерации. Во время стрима в Discord пакет фраз шёл 100 сек
+## вместо 10 (отчёт Alex 20.10). Две разные причины: модель не влезла в
+## видеопамять (часть ушла в обычную - в 5-10 раз медленнее) или влезла, но
+## видеокарту делит кодировщик стрима. Два медленных ответа подряд - спрашиваем
+## Ollama (/api/ps: size и size_vram) и пишем в консоль, что именно и что делать.
+const SLOW_TPS := 8.0                # qwen 8b на 8 ГБ даёт ~30 ток/с
+const SLOW_WARN_GAP_MS := 1800000    # не чаще раза в 30 минут
+var _slowStreak := 0
+var _lastSlowWarnMs := -SLOW_WARN_GAP_MS
+
+func _noteSpeed(parsed: Dictionary) -> float:
+	var count := int(parsed.get("eval_count", 0))
+	var dur := float(parsed.get("eval_duration", 0)) / 1e9
+	if count < 10 or dur <= 0.0:
+		return 0.0 # короткий ответ - скорость по нему не понять
+	var tps := count / dur
+	_trackTps(tps)
+	# K1: большая модель (31B) медленная сама по себе - это не перегруженная видеокарта
+	_slowStreak = _slowStreak + 1 if tps < SLOW_TPS and modelBillions() < 20.0 else 0
+	var now := Time.get_ticks_msec()
+	if _slowStreak >= 2 and now - _lastSlowWarnMs >= SLOW_WARN_GAP_MS:
+		_lastSlowWarnMs = now
+		_explainSlow(tps)
+	return tps
+
+
+func _explainSlow(tps: float) -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		http.queue_free()
+		var share := -1.0
+		if response_code == 200:
+			var parsed = JSON.parse_string(body.get_string_from_utf8())
+			if parsed is Dictionary:
+				for m in parsed.get("models", []):
+					if String(m.get("name", "")) == modelName and float(m.get("size", 0)) > 0.0:
+						share = float(m.get("size_vram", 0)) / float(m["size"])
+		var msg := ""
+		if share >= 0.0 and share < 0.97:
+			msg = Lang.t("ИИ отвечает медленно (%.0f ток/с): модель не влезла в видеопамять - на видеокарте только %d%%, остальное в обычной памяти. Видеопамять заняли другие программы: стрим или звонок в Discord, браузер, видеоплеер, игры. В Discord выключи аппаратное ускорение (Настройки - Расширенные), закрой лишнее и перезапусти DeskSaw - модель загрузится заново. Или выбери модель поменьше в model_manager (qwen3-vl:8b-instruct влезает в 8 ГБ).") % [tps, int(share * 100)]
+		elif share >= 0.97:
+			# Ollama видит 100%, но на Windows драйвер NVIDIA при нехватке видеопамяти тихо
+			# переносит часть в общую память - и тогда тоже в разы медленнее (20.10)
+			msg = Lang.t("ИИ отвечает медленно (%.0f ток/с). Ollama считает, что модель целиком в видеопамяти, но, скорее всего, видеопамяти впритык и драйвер тихо перенёс часть в обычную память. Проверь: Диспетчер задач - Производительность - GPU - \"Общая память графического процессора\": если там больше 0,3 ГБ, видеопамяти не хватает. Помогает закрыть или свернуть то, что держит видеокарту (браузер, плеер, второй стрим), выключить в Discord аппаратное ускорение и перезапустить DeskSaw. Или выбери модель поменьше в model_manager.") % tps
+		else:
+			msg = Lang.t("ИИ отвечает медленно (%.0f ток/с). Если идёт стрим или звонок в Discord - выключи в нём аппаратное ускорение (Настройки - Расширенные) и закрой лишние программы на видеокарте.") % tps
+		_logDebugLine("system", "SLOW", "%.1f tok/s, vram share %s" % [tps, ("%.0f%%" % (share * 100)) if share >= 0.0 else "?"])
+		Console.print("[color=YELLOW]" + msg + "[/color]")
+	)
+	if http.request("http://127.0.0.1:11434/api/ps") != OK:
+		http.queue_free()
+
+
+## 054.9991: ИИ-описание своего предмета (вкладка Предметы). Без лора, самая
+## большая установленная модель со зрением (решение Alex - точнее; у него 14b).
+## Если она не основная - Ollama на время подгрузит её вместо основной.
+const ITEM_DESCRIBE_PROMPT := "Это картинка предмета для игры. Назови предмет и коротко опиши то, что на картинке точно видно: одна фраза до 10 слов, только русскими словами, без вступлений, без кавычек и без точки в конце."
+## 054.9992: для картинок, положенных в папку руками, - ещё и название (было имя файла)
+const ITEM_NAME_PROMPT := "Это картинка предмета для игры. Ответь ровно двумя строками, только русскими словами, без кавычек:\nНазвание: 1-3 слова\nОписание: что на картинке точно видно, до 10 слов"
+var _describeModel := ""
+
+func _ollamaJson(path: String, body = null):
+	var http := HTTPRequest.new()
+	http.timeout = 240.0
+	add_child(http)
+	var err := http.request("http://127.0.0.1:11434" + path, ["Content-Type: application/json"],
+		HTTPClient.METHOD_POST if body != null else HTTPClient.METHOD_GET, JSON.stringify(body) if body != null else "")
+	if err != OK:
+		http.queue_free()
+		return null
+	var res: Array = await http.request_completed
+	http.queue_free()
+	if int(res[1]) != 200:
+		return null
+	return JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+
+
+func _largestVisionModel() -> String:
+	if _describeModel != "":
+		return _describeModel
+	var tags = await _ollamaJson("/api/tags")
+	if not (tags is Dictionary):
+		return ""
+	var models: Array = tags.get("models", [])
+	models.sort_custom(func(a, b): return float(a.get("size", 0)) > float(b.get("size", 0)))
+	for m in models:
+		var name := String(m.get("name", ""))
+		var info = await _ollamaJson("/api/show", {"model": name})
+		if info is Dictionary and (info.get("capabilities", []) as Array).has("vision"):
+			_describeModel = name
+			return name
+	return ""
+
+
+func describeItemImage(path: String, withName: bool, cb: Callable) -> void:
+	var img := Image.load_from_file(ProjectSettings.globalize_path(path))
+	if img == null or img.is_empty():
+		cb.call("", "")
+		return
+	var side := maxi(img.get_width(), img.get_height())
+	if side > 512:
+		var q := 512.0 / side
+		img.resize(maxi(1, int(img.get_width() * q)), maxi(1, int(img.get_height() * q)), Image.INTERPOLATE_BILINEAR)
+	elif side < 192:
+		# иконка 30x30 для модели - пара пикселей; увеличиваем без сглаживания
+		var k := int(ceil(256.0 / side))
+		img.resize(img.get_width() * k, img.get_height() * k, Image.INTERPOLATE_NEAREST)
+	var model := await _largestVisionModel()
+	if model == "":
+		_logDebugLine("items", "DESCRIBE", "нет установленной модели со зрением")
+		cb.call("", "")
+		return
+	var payload := {"model": model, "prompt": Lang.tp(ITEM_NAME_PROMPT if withName else ITEM_DESCRIBE_PROMPT), "images": [Marshalls.raw_to_base64(img.save_png_to_buffer())],
+		"stream": false, "think": false, "keep_alive": "1m", "options": {"temperature": 0.2, "num_predict": 40, "num_ctx": 4096}}
+	var parsed = await _ollamaJson("/api/generate", payload)
+	var desc := ""
+	var name := ""
+	if parsed is Dictionary:
+		var raw := String(parsed.get("response", ""))
+		if withName:
+			for line in raw.split("\n", false):
+				var l := line.strip_edges()
+				if l.to_lower().begins_with("название") or l.to_lower().begins_with("name"):
+					name = _cleanItemDescription(l.get_slice(":", 1)) if l.contains(":") else ""
+				elif l.to_lower().begins_with("описание") or l.to_lower().begins_with("description"):
+					desc = _cleanItemDescription(l.get_slice(":", 1)) if l.contains(":") else ""
+			name = name.get_slice("/", 0).get_slice("(", 0).strip_edges() # "Гном/Предмет игры" -> "Гном"
+			if name.split(" ", false).size() > 4:
+				name = " ".join(name.split(" ", false).slice(0, 4))
+			if name != "":
+				name = name.substr(0, 1).to_upper() + name.substr(1)
+		else:
+			desc = _cleanItemDescription(raw)
+	_logDebugLine("items", "DESCRIBE", "%s -> %s / %s (%s)" % [path.get_file(), name if name != "" else "-", desc if desc != "" else "(пусто)", model])
+	cb.call(desc, name)
+
+
+func _cleanItemDescription(text: String) -> String:
+	var t := _fixOutputQuirks(text.strip_edges()).get_slice("\n", 0).strip_edges()
+	for q in ["\"", "«", "»", "*"]:
+		t = t.replace(q, "")
+	t = t.strip_edges().trim_suffix(".").strip_edges()
+	var words := t.split(" ", false)
+	if words.size() > 12:
+		t = " ".join(words.slice(0, 12))
+	return t
+
+
+func listAvailableModels() -> void:
+	var http := HTTPRequest.new()
+	Engine.get_main_loop().root.add_child(http)
+	http.request_completed.connect(func(_result, response_code, _headers, body):
+		if response_code == 200:
+			var parsed = JSON.parse_string(body.get_string_from_utf8())
+			if parsed is Dictionary and parsed.has("models"):
+				var names: Array = []
+				for m in parsed["models"]:
+					names.append(String(m.get("name", "?")))
+				if names.is_empty():
+					Console.print(Lang.t("Доступные модели: [color=CYAN](ни одна ещё не скачана)[/color]"))
+				else:
+					Console.print(Lang.t("Доступные модели: [color=CYAN]%s[/color]") % ", ".join(names))
+			else:
+				Console.print(Lang.t("Не удалось разобрать список моделей от Ollama."))
+		else:
+			Console.print(Lang.t("Не удалось получить список моделей от Ollama (код ответа %d).") % response_code)
+		http.queue_free()
+	)
+	var err := http.request("http://127.0.0.1:11434/api/tags")
+	if err != OK:
+		Console.print(Lang.t("Не получилось запросить список моделей у Ollama."))
+		http.queue_free()
+
+
+## Подобранные вручную настройки под конкретные модели: [креативность,
+## защита от повторов]. При переключении модели (aiModel) применяются сами.
+## Для модели не из списка текущие значения не трогаем.
+const MODEL_PRESETS := {
+	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
+	"gemma4:12b": [0.8, 1.1], # 055.002: пока как у gemma3 - уточнить на стенде
+	"huihui_ai/gemma-4-abliterated:12b": [0.8, 1.1], # 0.56: третья в README (решение Alex - многие просили), как у gemma4
+	"satgeze/gemma4-12b-uncensored-1.5m:latest": [0.8, 1.1], # F2.7 (стенд 02.11): заменила 1m - то же, английских вставок вдвое меньше
+	"satgeze/gemma4-12b-uncensored-1m:latest": [0.8, 1.1], # 0.56: открытая модель (просили на стриме), как у gemma4
+	"eriktonon/gemma4-uncensored:12b": [0.8, 1.1], # 0.56: запасная открытая модель (стенд 29.10), как у gemma4
+	"gemma4-31b-heretic:iq3": [0.8, 1.1], # K1: большая открытая 31B, как у gemma4
+	"qwen3-vl:4b-instruct": [0.7, 1.2], # 0.56: ступень для видеокарт 6 ГБ (стенд 29.10), как у qwen3-vl:8b
+	"gemma3:12b": [0.8, 1.1], # 054.999: стенд talk 6 вариантов - 1.0 грубит ("псина"), 0.6 суше; 0.8/1.1 живее и связнее
+	"ministral-3:14b": [0.5, 1.1], # 054.99: было 0.6 - тест: 0.6 путала род, 0.45-0.5 точнее отвечает на вопрос
+}
+
+func setModel(name: String, pull: bool = true) -> void:
+	name = name.strip_edges() # в конфиге уже находили "ministral-3:14b\n"
+	var wasOpen := isOpenModel()
+	modelName = name
+	# 0.56 (решение Alex): мат - вместе с открытой моделью; ушёл с неё на обычную -
+	# мат выключается (наигрался - хочет «чистую» игру). Флирт не трогаем.
+	if isOpenModel() and not gbData.settings.get("llmAllowProfanity", false):
+		setProfanityAllowed(true)
+		Console.print(Lang.t("[color=ORANGE]Открытая (18+) модель: мат включён вместе с ней. При смене на обычную модель выключится сам.[/color]"))
+	elif wasOpen and not isOpenModel() and gbData.settings.get("llmAllowProfanity", false):
+		setProfanityAllowed(false)
+		Console.print(Lang.t("[color=ORANGE]Обычная модель: мат выключен.[/color]"))
+	gbData.settings["llmModelName"] = modelName
+	if weakModel():
+		Console.print(weakModelWarning())
+	if MODEL_PRESETS.has(name):
+		creativity = MODEL_PRESETS[name][0]
+		repetitionGuard = MODEL_PRESETS[name][1]
+		gbData.settings["llmCreativity"] = creativity
+		gbData.settings["llmRepetitionGuard"] = repetitionGuard
+		Console.print(Lang.t("Настройки под модель: креативность [color=CYAN]%s[/color], защита от повторов [color=CYAN]%s[/color]") % [creativity, repetitionGuard])
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	# 054.9991: смена модели видна в ИИ-логе (в отчёте 054.999 её угадывали по окну 8192)
+	_logDebugLine("SESSION", "MODEL", "model=%s creativity=%.2f repetitionGuard=%.2f" % [modelName, creativity, repetitionGuard])
+	# Раньше тут был _clearPrefetchPools() - специально убрал: часть тестеров
+	# и разработчик хотят прогреть пулы на одной модели, потом переключиться
+	# на другую (например для более живых screen-реакций) и НЕ терять уже
+	# прогретое - остальные пулы просто будут тихо дозаполняться новой
+	# моделью по мере естественного расхода, без принудительного сброса.
+	if pull:
+		pullModel(name)
+
+
+## Скачивание модели через Ollama (/api/pull, без ollama.exe в PATH).
+## 054.998: потоком - Ollama шлёт строку за строкой, сколько скачано, и в
+## консоли одна строка-полоска обновляется на месте:
+## "Установка модели 31% [====          ] 1,9 из 6,1 ГБ". Раньше было молча
+## до самого конца.
+const PULL_BAR_WIDTH := 20
+
+func pullModel(name: String, onDone: Callable = Callable()) -> void:
+	Console.print(Lang.t("Скачиваю модель [color=CYAN]%s[/color] через Ollama...") % name)
+	var client := HTTPClient.new()
+	var ok := false
+	var errText := ""
+	if client.connect_to_host("127.0.0.1", 11434) == OK:
+		while client.get_status() in [HTTPClient.STATUS_CONNECTING, HTTPClient.STATUS_RESOLVING]:
+			client.poll()
+			await get_tree().process_frame
+	if client.get_status() != HTTPClient.STATUS_CONNECTED:
+		errText = Lang.t("Ollama не отвечает - проверь, что она запущена (значок в трее)")
+	elif client.request(HTTPClient.METHOD_POST, "/api/pull", ["Content-Type: application/json"], JSON.stringify({"model": name, "stream": true})) != OK:
+		errText = Lang.t("не удалось отправить запрос")
+	else:
+		while client.get_status() == HTTPClient.STATUS_REQUESTING:
+			client.poll()
+			await get_tree().process_frame
+		var buffer := ""
+		var totals := {}
+		var completed := {}
+		var lastDraw := 0
+		var lastBar := ""
+		while client.get_status() == HTTPClient.STATUS_BODY:
+			client.poll()
+			var chunk := client.read_response_body_chunk()
+			if chunk.is_empty():
+				await get_tree().process_frame
+				continue
+			buffer += chunk.get_string_from_utf8()
+			while buffer.contains("\n"):
+				var line := buffer.get_slice("\n", 0)
+				buffer = buffer.substr(line.length() + 1)
+				var msg = JSON.parse_string(line)
+				if not (msg is Dictionary):
+					continue
+				if msg.has("error"):
+					errText = String(msg["error"])
+				elif String(msg.get("status", "")) == "success":
+					ok = true
+				elif msg.has("digest") and msg.has("total"):
+					totals[msg["digest"]] = float(msg["total"])
+					completed[msg["digest"]] = float(msg.get("completed", 0))
+					var bar := _pullBar(_sumValues(completed), _sumValues(totals))
+					if Time.get_ticks_msec() - lastDraw > 300 and bar != lastBar:
+						lastDraw = Time.get_ticks_msec()
+						lastBar = bar
+						Console.print_progress(bar)
+		if ok and not totals.is_empty():
+			Console.print_progress(_pullBar(_sumValues(totals), _sumValues(totals)))
+	client.close()
+	if ok:
+		Console.print(Lang.t("Модель [color=CYAN]%s[/color] скачана.") % name)
+	else:
+		Console.print(Lang.t("[color=RED]Не получилось скачать модель %s: %s.[/color]") % [name, errText if errText != "" else Lang.t("Ollama оборвала загрузку")])
+	if onDone.is_valid():
+		onDone.call(ok)
+
+
+func _sumValues(d: Dictionary) -> float:
+	var total := 0.0
+	for v in d.values():
+		total += float(v)
+	return total
+
+
+func _pullBar(done: float, total: float) -> String:
+	var frac := clampf(done / total, 0.0, 1.0) if total > 0.0 else 0.0
+	var filled := int(round(frac * PULL_BAR_WIDTH))
+	return Lang.t("Установка модели %d%% [%s%s] %s из %s") % [int(frac * 100.0), "=".repeat(filled), " ".repeat(PULL_BAR_WIDTH - filled), gbText(done), gbText(total)]
+
+
+## 6140415975 -> "6,1 ГБ", 91000000 -> "91 МБ"
+static func gbText(bytes: float) -> String:
+	if bytes < 1e9:
+		return Lang.t("%d МБ") % int(round(bytes / 1e6))
+	return (Lang.t("%.1f ГБ") % (bytes / 1e9)).replace(".", "," if not Lang.isEn() else ".")
+
+
+## 054.998: можно ли проверить модель ДО скачивания - по "паспорту" в реестре
+## Ollama (несколько КБ). Возвращает {"problem": текст или "", "sure": bool}.
+## sure=false - проверить заранее не вышло (модель не из библиотеки Ollama,
+## нет связи с реестром, незнакомое семейство) - тогда проверка после скачивания.
+## Зрение: отдельный блок зрения (projector), "clip" в семействах или семейство
+## со встроенным зрением. Размышления: renderer/parser "...thinking" или шаблон
+## с Think (так помечены qwen3:8b и даже qwen3-vl:8b без -instruct).
+const VISION_FAMILIES := ["qwen3vl", "qwen25vl", "qwen2vl", "mistral3", "gemma3", "gemma4", "mllama", "llava", "llama4", "minicpmv"]
+const TEXT_FAMILIES := ["llama", "qwen2", "qwen3", "qwen3moe", "gemma2", "gemma", "phi3", "phi4", "mistral", "deepseek2", "gptoss", "granite", "command-r", "starcoder2", "nomic-bert", "bert"]
+const REGISTRY := "https://registry.ollama.ai/v2/"
+
+func checkRegistry(name: String) -> Dictionary:
+	var unsure := {"problem": "", "sure": false}
+	var path := name.strip_edges()
+	var tag := "latest"
+	if path.contains(":"):
+		tag = path.get_slice(":", 1)
+		path = path.get_slice(":", 0)
+	if path.contains("/"):
+		if path.get_slice("/", 0).contains("."):
+			return unsure # hf.co/... и другие сайты - заранее не проверить
+	else:
+		path = "library/" + path
+	var manifest = await _registryJson(REGISTRY + path + "/manifests/" + tag, ["Accept: application/vnd.docker.distribution.manifest.v2+json"])
+	if manifest is int:
+		if manifest == 404:
+			return {"problem": Lang.t("такой модели нет в библиотеке Ollama - проверь имя"), "sure": true}
+		return unsure
+	var configDigest := ""
+	var templateDigest := ""
+	var hasProjector := false
+	if manifest.get("config") is Dictionary:
+		configDigest = String(manifest["config"].get("digest", ""))
+	for layer in manifest.get("layers", []):
+		var media := String(layer.get("mediaType", ""))
+		if media.ends_with(".projector"):
+			hasProjector = true
+		elif media.ends_with(".template"):
+			templateDigest = String(layer.get("digest", ""))
+	var config = {}
+	if configDigest != "":
+		config = await _registryJson(REGISTRY + path + "/blobs/" + configDigest)
+	if config is int:
+		return unsure
+	var families: Array = config.get("model_families", [config.get("model_family", "")])
+	var family := String(config.get("model_family", ""))
+	var thinking := String(config.get("renderer", "")).contains("thinking") or String(config.get("parser", "")).contains("thinking")
+	if not thinking and templateDigest != "":
+		var tpl = await _registryText(REGISTRY + path + "/blobs/" + templateDigest)
+		thinking = tpl is String and tpl.to_lower().contains("think")
+	var vision := hasProjector or families.has("clip") or VISION_FAMILIES.has(family)
+	var problems: Array = []
+	# 055.002: по паспорту не видно, выключаются ли размышления (у Gemma 4 - да) -
+	# не отклоняем заранее, а проверяем после скачивания (checkModel).
+	if thinking and vision:
+		return unsure
+	if thinking:
+		problems.append(Lang.t("с режимом размышлений (thinking)"))
+	if not vision and TEXT_FAMILIES.has(family):
+		problems.append(Lang.t("не умеет видеть картинки (нет vision)"))
+	elif not vision:
+		return {"problem": ", ".join(problems), "sure": not problems.is_empty()} # незнакомое семейство - зрение проверим после
+	return {"problem": ", ".join(problems), "sure": true}
+
+
+## JSON с адреса; при ошибке - код ответа (int).
+func _registryJson(url: String, headers: Array = []):
+	var res = await _httpGet(url, headers)
+	if res[0] != 200:
+		return res[0]
+	var parsed = JSON.parse_string(res[1].get_string_from_utf8())
+	return parsed if parsed is Dictionary else 0
+
+
+func _registryText(url: String):
+	var res = await _httpGet(url, [])
+	return res[1].get_string_from_utf8() if res[0] == 200 else res[0]
+
+
+func _httpGet(url: String, headers: Array) -> Array:
+	var http := HTTPRequest.new()
+	http.timeout = 15.0
+	add_child(http)
+	if http.request(url, PackedStringArray(headers)) != OK:
+		http.queue_free()
+		return [0, PackedByteArray()]
+	var res: Array = await http.request_completed
+	http.queue_free()
+	return [res[1], res[3]]
+
+
+## 054.998: удалить скачанную модель из Ollama (освободить место).
+func deleteModel(name: String) -> bool:
+	var http := HTTPRequest.new()
+	http.timeout = 30.0
+	add_child(http)
+	if http.request("http://127.0.0.1:11434/api/delete", ["Content-Type: application/json"], HTTPClient.METHOD_DELETE, JSON.stringify({"model": name})) != OK:
+		http.queue_free()
+		return false
+	var res: Array = await http.request_completed
+	http.queue_free()
+	return res[1] == 200
+
+
+## Console command: banwords
+func setBanWords(words: Array) -> void:
+	banWords = words
+	gbData.settings["llmBanWords"] = words
+	gbData.savetodisk("user://CONFIG.json", gbData.settings)
+	_purgeBannedLines() # drop only the stale lines that actually contain a banned word
+
+
+func _purgeBannedLines() -> void:
+	for category in _prefetchPools.keys():
+		var pool: Array = _prefetchPools[category]
+		var kept: Array = []
+		for line in pool:
+			if not _containsBanWord(String(line)):
+				kept.append(line)
+		_prefetchPools[category] = kept
+
+
+func _containsBanWord(text: String) -> bool:
+	var lower := text.to_lower()
+	for w in banWords:
+		var wl: String = String(w).strip_edges().to_lower()
+		if wl != "" and lower.find(wl) != -1:
+			return true
+	return false
+
+
+# ---------------- F2.9: запас фраз между запусками ----------------
+## Alex: «фразы уже запоминаются игрой? Вояджер, Роза, Вельвет должны быть готовы» - раньше
+## наборы жили только в памяти и создавались заново каждый запуск. Теперь НЕсказанные фразы
+## лежат в user://phrase_cache.json (не в ИИ-логе - его удаляют). Сказанная фраза вынимается
+## из набора и файл переписывается сразу, поэтому в сохранённое она не попадает. Плюс список
+## недавно сказанных (по скину, 300) - новая фраза, совпавшая 1 в 1, отбрасывается.
+## Набор скина недействителен, если поменялись лор/паспорт (обновление textVersion, правка
+## руками), модель или язык. Мат/запрещённые слова - чистятся при загрузке по текущим настройкам.
+const PHRASE_CACHE_PATH := "user://phrase_cache.json"
+const SPENT_MAX := 300
+var _spentLines: Dictionary = {} # скин -> [нормализованные сказанные фразы]
+## F2.12: скин -> подпись текстов (_skinTextSig), по которым сейчас делаются его фразы: запоминается при
+## первом чтении лора/паспорта и при загрузке запаса. Нужна reload_lore (к моменту команды файл на диске
+## уже поправлен - сравнивать надо с тем, что было в памяти) и сохранению запаса (наборы по старому лору
+## не должны получить подпись нового - иначе после перезапуска старые фразы шли бы с новым лором).
+var _usedSig: Dictionary = {}
+
+func _noteUsedSig(skin: String) -> void:
+	if not _usedSig.has(skin):
+		_usedSig[skin] = _skinTextSig(skin)
+var _phraseCacheSaveQueued := false
+var _phraseCacheLazyQueued := false
+
+func _phraseNorm(text: String) -> String:
+	var t := RegEx.create_from_string("\\[[^\\]]*\\]").sub(text, "", true).to_lower()
+	t = RegEx.create_from_string("[^a-zа-яё0-9 ]").sub(t, "", true)
+	return " ".join(t.split(" ", false))
+
+func _noteSpent(tag: String, text: String) -> void:
+	var skin := _skinFromTag(tag)
+	var list: Array = _spentLines.get(skin, [])
+	list.append(_phraseNorm(text))
+	while list.size() > SPENT_MAX:
+		list.pop_front()
+	_spentLines[skin] = list
+	_phraseCacheChanged(true)
+
+func _isSpent(tag: String, text: String) -> bool:
+	return (_spentLines.get(_skinFromTag(tag), []) as Array).has(_phraseNorm(text))
+
+func _skinTextSig(skin: String) -> String:
+	return str((_readText("user://skin/%s/lore.txt" % skin) + "|" + _readText("user://skin/%s/lore_lite.txt" % skin) + "|" + _readText("user://skin/%s/character.json" % skin)).hash())
+
+func _cacheable(category: String) -> bool:
+	return category.contains(":") and not category.ends_with(":pet") # разговоры персов - о тех, кто сейчас на столе
+
+## urgent: фразу только что сказали - переписать в конце кадра; иначе - не чаще раза в 10 с.
+func _phraseCacheChanged(urgent: bool) -> void:
+	if urgent:
+		if not _phraseCacheSaveQueued:
+			_phraseCacheSaveQueued = true
+			_savePhraseCache.call_deferred()
+		return
+	if not _phraseCacheLazyQueued:
+		_phraseCacheLazyQueued = true
+		get_tree().create_timer(10.0).timeout.connect(func():
+			_phraseCacheLazyQueued = false
+			_savePhraseCache())
+
+func _savePhraseCache() -> void:
+	_phraseCacheSaveQueued = false
+	var pools := {}
+	var sigs := {}
+	for cat in _prefetchPools.keys():
+		var pool: Array = _prefetchPools[cat]
+		if pool.is_empty() or not _cacheable(String(cat)):
+			continue
+		pools[cat] = pool
+		var skin := _skinFromTag(String(cat))
+		if not sigs.has(skin):
+			sigs[skin] = String(_usedSig.get(skin, _skinTextSig(skin)))
+	var data := {"v": 1, "model": modelName, "lang": "en" if Lang.isEn() else "ru", "skins": sigs, "pools": pools, "spent": _spentLines}
+	var tmp := PHRASE_CACHE_PATH + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify(data))
+	f.close()
+	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(PHRASE_CACHE_PATH))
+
+func _loadPhraseCache() -> void:
+	var txt := _readText(PHRASE_CACHE_PATH)
+	if txt == "":
+		return
+	var data = JSON.parse_string(txt)
+	if not data is Dictionary:
+		return
+	var spent = data.get("spent", {})
+	if spent is Dictionary:
+		_spentLines = spent # сказанное помним и при смене модели
+	if String(data.get("model", "")) != modelName or String(data.get("lang", "")) != ("en" if Lang.isEn() else "ru"):
+		print("PHRASE CACHE: другая модель или язык - наборы создадутся заново")
+		return
+	var sigs: Dictionary = data.get("skins", {})
+	var pools = data.get("pools", {})
+	if not pools is Dictionary:
+		return
+	var noMat: bool = not gbData.settings.get("llmAllowProfanity", false)
+	var loaded := 0
+	var lines := 0
+	for cat in pools.keys():
+		var skin := _skinFromTag(String(cat))
+		if String(sigs.get(skin, "")) != _skinTextSig(skin) or not _cacheable(String(cat)):
+			continue # лор/паспорт поменялся - набор устарел
+		var kept: Array = []
+		for line in pools[cat]:
+			var l := String(line)
+			if (noMat and _containsProfanity(l)) or _containsBanWord(l) or _isSpent(String(cat), l):
+				continue
+			kept.append(l)
+		if not kept.is_empty():
+			_prefetchPools[cat] = kept
+			_usedSig[skin] = String(sigs.get(skin, ""))
+			loaded += 1
+			lines += kept.size()
+	print("PHRASE CACHE: загружено наборов %d, фраз %d" % [loaded, lines])
+	if gbData.settings.get("logAiLines", false):
+		_logDebugLine("SESSION", "PHRASE_CACHE", "наборов %d, фраз %d" % [loaded, lines])
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		if _phraseCacheSaveQueued or not _prefetchPools.is_empty():
+			_savePhraseCache()

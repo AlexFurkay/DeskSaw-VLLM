@@ -1,0 +1,14 @@
+.godot/
+.nuget
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Visual Studio Code preferences
+.vscode/
+
+# Binary files (i like building here!)
+.bin/
+# стенд промптов (временная копия на время прогона)
+_stand_prompts.gd
+_stand_prompts.gd.uid

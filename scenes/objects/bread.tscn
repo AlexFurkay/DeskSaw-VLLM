@@ -1,0 +1,67 @@
+[gd_scene format=3 uid="uid://dmpbcbjvxippc"]
+
+[ext_resource type="Shader" uid="uid://b1x03c3wn85hg" path="res://assets/shaders/outline.gdshader" id="1_caxkv"]
+[ext_resource type="Texture2D" uid="uid://dx0rd87oda18s" path="res://assets/objectSpr/Bread.png" id="2_caxkv"]
+[ext_resource type="Script" uid="uid://cbm2skouhq87k" path="res://Scripts/impo/dragObj.gd" id="3_sui5a"]
+[ext_resource type="Script" uid="uid://byi06muelj7dr" path="res://Scripts/nimpo/properties.gd" id="4_j5isv"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_12xxv"]
+radius = 16.0
+height = 64.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_xu5n6"]
+shader = ExtResource("1_caxkv")
+shader_parameter/thickness = 0.0
+shader_parameter/ring_count = 4
+shader_parameter/ring_offset = 0.0
+shader_parameter/outline_color = Color(0, 0, 0.22745098, 1)
+shader_parameter/border_clipping_fix = true
+shader_parameter/aspect_ratio = 1.0
+shader_parameter/square_border = true
+shader_parameter/offset = Vector2(0, 0)
+shader_parameter/max_or_add = false
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_caxkv"]
+radius = 8.0
+height = 32.0
+
+[node name="Body" type="RigidBody2D" unique_id=371602465]
+mass = 0.001
+metadata/Category = "object"
+
+[node name="Detector" type="Area2D" parent="." unique_id=1866926148]
+scale = Vector2(0.5, 0.5)
+
+[node name="Yeah" type="CollisionShape2D" parent="Detector" unique_id=213965145]
+rotation = -1.5707964
+scale = Vector2(1.3308971, 1.360098)
+shape = SubResource("CapsuleShape2D_12xxv")
+
+[node name="Sprite" type="Sprite2D" parent="." unique_id=673930975]
+texture_filter = 1
+material = SubResource("ShaderMaterial_xu5n6")
+position = Vector2(0, -4.7683716e-07)
+scale = Vector2(4.2588706, 3.8082743)
+texture = ExtResource("2_caxkv")
+
+[node name="draggable" type="Node" parent="." unique_id=786882799 node_paths=PackedStringArray("sprite")]
+script = ExtResource("3_sui5a")
+sprite = NodePath("../Sprite")
+metadata/_custom_type_script = "uid://cbm2skouhq87k"
+
+[node name="properties" type="Node" parent="." unique_id=399788717]
+script = ExtResource("4_j5isv")
+propertyTable = {
+"consumable": true,
+"danger": 0,
+"interest": 2,
+"moodBoostIfConsumable": 0.0,
+"object": true,
+"replenishIfConsumable": 9.0,
+"tasteIfConsumable": 5
+}
+
+[node name="Yeah" type="CollisionShape2D" parent="." unique_id=1639607262]
+rotation = -1.5707964
+scale = Vector2(1.3308971, 1.360098)
+shape = SubResource("CapsuleShape2D_caxkv")

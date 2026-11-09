@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://c5tuv3hsjyl02"]
+
+[ext_resource type="Theme" uid="uid://bl462l5byyohh" path="res://assets/themes/ConsoleTheme.tres" id="1_yx70c"]
+
+[node name="Control" type="Control" unique_id=101072280]
+layout_mode = 3
+anchors_preset = 0
+offset_left = -16.0
+offset_top = -104.0
+offset_right = 16.0
+offset_bottom = -48.0
+
+[node name="ColorRect" type="ColorRect" parent="." unique_id=842929755]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.78039217)
+
+[node name="ItemList" type="VBoxContainer" parent="." unique_id=1894071501]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+
+[node name="stat" type="RichTextLabel" parent="ItemList" unique_id=600548670]
+visible = false
+layout_mode = 2
+theme = ExtResource("1_yx70c")
+theme_override_font_sizes/normal_font_size = 4
+text = "Nickname"
+fit_content = true
+scroll_active = false
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true

@@ -1,0 +1,147 @@
+[gd_scene format=3 uid="uid://g6u2oy10y4g4"]
+
+[ext_resource type="Script" uid="uid://xackby3m6jh5" path="res://Scripts/ui/widgets/wgExpie.gd" id="1_lefqh"]
+[ext_resource type="Texture2D" uid="uid://bf2iadk2axgb" path="res://assets/Body/experimentTail.png" id="2_slvs8"]
+[ext_resource type="Texture2D" uid="uid://dhkms6gypjiue" path="res://assets/Body/experimentThigh.png" id="3_tndfj"]
+[ext_resource type="Texture2D" uid="uid://c557lrjd8td3v" path="res://assets/Body/experimentCrus.png" id="4_lmu88"]
+[ext_resource type="Texture2D" uid="uid://b6o3pul4wqtq8" path="res://assets/Body/experimentFoot.png" id="5_l28xc"]
+[ext_resource type="Texture2D" uid="uid://dv1nydk5gghtv" path="res://assets/Body/experimentUpArm.png" id="6_lnxms"]
+[ext_resource type="Texture2D" uid="uid://uxi4iwfwumtx" path="res://assets/Body/experimentDownArm.png" id="7_dyytx"]
+[ext_resource type="Texture2D" uid="uid://b3v011olhkgp8" path="res://assets/Body/experimentHandF.png" id="8_altj4"]
+[ext_resource type="Texture2D" uid="uid://beqtgy3lxleol" path="res://assets/Body/experimentDownTorso.png" id="9_8cuvl"]
+[ext_resource type="Texture2D" uid="uid://enceuim30717" path="res://assets/Body/experimentUpTorso.png" id="10_8ylx5"]
+[ext_resource type="Texture2D" uid="uid://bjta7yk5pd8fh" path="res://assets/Body/experimentHeadBack.png" id="11_gi5ux"]
+[ext_resource type="Texture2D" uid="uid://b0630p6hqbjso" path="res://assets/Body/experimentEyeOpen.png" id="12_dtodt"]
+
+[node name="wgExpie" type="Control" unique_id=1858619098]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("1_lefqh")
+
+[node name="Tail" type="Sprite2D" parent="." unique_id=380620509]
+texture_filter = 1
+position = Vector2(29.000046, 18.999908)
+rotation = -1.1779506e-05
+scale = Vector2(4, 4)
+texture = ExtResource("2_slvs8")
+
+[node name="Thigh" type="Sprite2D" parent="." unique_id=2126869934]
+modulate = Color(0.6706895, 0.6706895, 0.6706895, 1)
+texture_filter = 1
+position = Vector2(23.735361, 32.64214)
+rotation = 0.11844414
+scale = Vector2(3.9999998, 3.9999998)
+texture = ExtResource("3_tndfj")
+
+[node name="Crus" type="Sprite2D" parent="." unique_id=1548602061]
+modulate = Color(0.6706895, 0.6706895, 0.6706895, 1)
+texture_filter = 1
+position = Vector2(5.96945, 54.069088)
+rotation = 1.0985774
+scale = Vector2(3.9999995, 3.9999995)
+texture = ExtResource("4_lmu88")
+
+[node name="Foot" type="Sprite2D" parent="." unique_id=11807561]
+modulate = Color(0.6706895, 0.6706895, 0.6706895, 1)
+texture_filter = 1
+position = Vector2(1.1076622, 77.757965)
+rotation = -0.2923498
+scale = Vector2(3.999999, 3.999999)
+texture = ExtResource("5_l28xc")
+
+[node name="UpArm" type="Sprite2D" parent="." unique_id=629743127]
+modulate = Color(0.6706895, 0.6706895, 0.6706895, 1)
+texture_filter = 1
+position = Vector2(22.030783, -22.03363)
+rotation = -0.064477436
+scale = Vector2(4, 4)
+texture = ExtResource("6_lnxms")
+
+[node name="DownArm" type="Sprite2D" parent="." unique_id=442363898]
+modulate = Color(0.6706895, 0.6706895, 0.6706895, 1)
+texture_filter = 1
+position = Vector2(23.834572, 5.9082108)
+rotation = -0.06447744
+scale = Vector2(4, 4)
+texture = ExtResource("7_dyytx")
+
+[node name="HandB" type="Sprite2D" parent="." unique_id=829069375]
+modulate = Color(0.6706895, 0.6706895, 0.6706895, 1)
+texture_filter = 1
+position = Vector2(25.639307, 33.86541)
+rotation = -0.06447744
+scale = Vector2(4, 4)
+texture = ExtResource("8_altj4")
+
+[node name="DownTorso" type="Sprite2D" parent="." unique_id=748475379]
+texture_filter = 1
+position = Vector2(24.999996, 7)
+rotation = -1.1779506e-05
+scale = Vector2(4, 4)
+texture = ExtResource("9_8cuvl")
+
+[node name="UpTorso" type="Sprite2D" parent="." unique_id=1109055006]
+texture_filter = 1
+position = Vector2(25.000015, -25.000313)
+rotation = -1.1779506e-05
+scale = Vector2(4, 4)
+texture = ExtResource("10_8ylx5")
+
+[node name="HeadBack" type="Sprite2D" parent="." unique_id=7524365]
+texture_filter = 1
+position = Vector2(24.093637, -68.821045)
+rotation = 0.029473484
+scale = Vector2(3.9999995, 3.9999995)
+texture = ExtResource("11_gi5ux")
+
+[node name="EyeOpen" type="Sprite2D" parent="." unique_id=1493814126]
+texture_filter = 1
+position = Vector2(24.352476, -68.674194)
+rotation = 0.029473484
+scale = Vector2(3.9999995, 3.9999995)
+texture = ExtResource("12_dtodt")
+
+[node name="Thigh2" type="Sprite2D" parent="." unique_id=1158303066]
+texture_filter = 1
+position = Vector2(217, -28)
+rotation = 0.0011907379
+scale = Vector2(3.9999988, 3.9999988)
+texture = ExtResource("3_tndfj")
+offset = Vector2(-47.78695, 15.107168)
+
+[node name="Crus2" type="Sprite2D" parent="." unique_id=1517687475]
+texture_filter = 1
+position = Vector2(9.13061, 51.172924)
+rotation = 1.2214578
+scale = Vector2(3.9999979, 3.9999979)
+texture = ExtResource("4_lmu88")
+
+[node name="Foot2" type="Sprite2D" parent="." unique_id=121285020]
+texture_filter = 1
+position = Vector2(3.2726746, 76.6615)
+rotation = -0.16946939
+scale = Vector2(3.9999974, 3.9999974)
+texture = ExtResource("5_l28xc")
+
+[node name="UpArm2" type="Sprite2D" parent="." unique_id=1892553400]
+texture_filter = 1
+position = Vector2(23.61201, -22.215057)
+rotation = -0.16399351
+scale = Vector2(3.9999967, 3.9999967)
+texture = ExtResource("6_lnxms")
+
+[node name="DownArm2" type="Sprite2D" parent="." unique_id=1620968075]
+texture_filter = 1
+position = Vector2(28.18295, 5.4093018)
+rotation = -0.16399373
+scale = Vector2(3.9999967, 3.9999967)
+texture = ExtResource("7_dyytx")
+
+[node name="HandF" type="Sprite2D" parent="." unique_id=162973056]
+texture_filter = 1
+position = Vector2(32.756363, 33.04889)
+rotation = -0.16399373
+scale = Vector2(3.9999967, 3.9999967)
+texture = ExtResource("8_altj4")
