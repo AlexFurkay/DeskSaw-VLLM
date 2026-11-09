@@ -36,6 +36,12 @@
 
    >   настройки по умолчанию: ai_creativity 0.8, ai_repetition_guard 1.1
 
+3) `gemma4:26b-a4b-it-qat` - большая модель от Google, для мощных ПК. Умнее и разнообразнее 12B, реже повторяет одни и те же начала фраз. Вес модели на диске - 15 ГБ: на видеокарте с 12 ГБ около 60% модели в видеопамяти, остальное - в оперативной памяти (нужно от 32 ГБ ОЗУ). Ответы примерно в 1,5 раза дольше, чем у 12B.
+
+   >   команда для скачивания: ollama pull gemma4:26b-a4b-it-qat
+
+   >   настройки по умолчанию: ai_creativity 0.8, ai_repetition_guard 1.1
+
 
 **Какую модель выбрать под свою видеокарту** (замер 29.10: сколько модель занимает в видеопамяти во время игры):
 
@@ -44,6 +50,7 @@
 | 10-12 ГБ | `gemma4:12b` | ~8.7 ГБ | лучшие фразы |
 | 8 ГБ | `gemma4:12b` | ~8.7 ГБ | медленнее (включается режим картошки), но фразы лучше |
 | 6-8 ГБ | `qwen3-vl:8b-instruct` / `qwen3-vl:4b-instruct` | ~6.9 / ~4.5 ГБ | только если gemma не тянет. У этой модели часть функций выключена |
+| 12 ГБ + 32 ГБ ОЗУ | `gemma4:26b-a4b-it-qat` | ~9 ГБ + ~6 ГБ в ОЗУ | умнее и разнообразнее, ответы примерно в 1,5 раза дольше |
 
 > **qwen3-vl:8b-instruct - для совсем слабых видеокарт. Подробнее см.: [«Частые проблемы»](#частые-проблемы-и-их-решения) → «Слабая видеокарта».**
 
@@ -373,6 +380,22 @@ Rex/
 
 0.56.0 подводит итог всей серии 055: всё ниже - новое или изменённое по сравнению с 0.55.
 
+## Что нового в 0.56.1 (патч первого дня)
+
+> **- При выключенном ИИ погибший персонаж больше не продолжает говорить по таймеру и когда его таскают (спасибо DD, автору DeskSaw)**
+>
+> **- Експи реже вспоминает лабораторию и клетку, а в хорошем настроении - почти никогда. Если увидит такое на экране - по-прежнему пугается**
+>
+> **- Вельвет говорит о крови к месту, а не в каждой фразе**
+>
+> **- Если модель посреди ответа «передумывает» и пишет служебное по-английски («Wait, let me try again…»), это больше не попадает в речь**
+>
+> **- Перс-игрок без сознания: управление и чат выключаются сами**
+>
+> **- Новая третья модель для мощных ПК - `gemma4:26b-a4b-it-qat` (см. «Требования»), при смене модели консоль предупреждает, что первая фраза может идти 30-60 секунд**
+>
+> **- `ai_status` показывает версию игры**
+
 ### Главное
 
 - Языки: Русский и English (Настройки → Отладка → «Язык игры»), у каждого языка свои сохранения.
@@ -654,6 +677,12 @@ Models that work in the game and what they need (stronger model = better lines =
 
    >   default settings: ai_creativity 0.8, ai_repetition_guard 1.1
 
+3) `gemma4:26b-a4b-it-qat` - a big model by Google, for powerful PCs. Smarter and more varied than 12B, repeats the same line openings less often. 15 GB on disk: on a 12 GB graphics card about 60% of the model sits in video memory and the rest in RAM (32 GB of RAM or more needed). Replies take about 1.5 times longer than on 12B.
+
+   >   download command: ollama pull gemma4:26b-a4b-it-qat
+
+   >   default settings: ai_creativity 0.8, ai_repetition_guard 1.1
+
 
 **Which model to pick for your graphics card** (measured 29.10: how much video memory the model takes while playing):
 
@@ -662,6 +691,7 @@ Models that work in the game and what they need (stronger model = better lines =
 | 10-12 GB | `gemma4:12b` | ~8.7 GB | the best lines |
 | 8 GB | `gemma4:12b` | ~8.7 GB | slower (potato mode turns on), but better lines |
 | 6-8 GB | `qwen3-vl:8b-instruct` / `qwen3-vl:4b-instruct` | ~6.9 / ~4.5 GB | only if gemma is too heavy. Some features are off on this model |
+| 12 GB + 32 GB RAM | `gemma4:26b-a4b-it-qat` | ~9 GB + ~6 GB in RAM | smarter and more varied, replies about 1.5 times longer |
 
 > **qwen3-vl:8b-instruct - for very weak graphics cards. More: ["Common problems"](#common-problems-and-fixes) → "Weak graphics card".**
 
@@ -990,6 +1020,22 @@ The `help` list has pixel icons: toggles show ON/OFF, clicking a command toggles
 ## What's new in 0.56
 
 0.56.0 wraps up the whole 055 series: everything below is new or changed since 0.55.
+
+## What's new in 0.56.1 (first-day patch)
+
+> **- With the AI turned off, a dead character no longer keeps talking on a timer or while being dragged (thanks to DD, the author of DeskSaw)**
+>
+> **- Expie brings up the lab and the cage less often, and in a good mood almost never. If he sees something like that on the screen, he still gets scared**
+>
+> **- Velvet talks about blood when it fits, not in every line**
+>
+> **- If the model "changes its mind" mid-reply and writes service text ("Wait, let me try again…"), it no longer gets into speech**
+>
+> **- The player character is unconscious: control and chat turn off by themselves**
+>
+> **- A new third model for powerful PCs - `gemma4:26b-a4b-it-qat` (see "Requirements"), when you switch models the console warns that the first line may take 30-60 seconds**
+>
+> **- `ai_status` shows the game version**
 
 ### The main things
 

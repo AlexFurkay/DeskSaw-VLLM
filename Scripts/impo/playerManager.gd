@@ -174,6 +174,15 @@ func _applyCapture() -> void:
 
 
 func _process(_delta: float) -> void:
+	# 056.001 (чек-лист Alex): игрок погиб - управление и чат выключаются (раньше сообщения уходили
+	# от мёртвого, а Милки на них отвечал)
+	if controlled and hasPlayer() and player.isUnconscious:
+		controlled = false
+		if chatOpen:
+			_closeChat()
+		player.setPlayerControlled(false)
+		_applyCapture()
+		_showStatus(Lang.t("Игрок без сознания"))
 	if controlled and not hasPlayer():
 		controlled = false # игрока удалили (despawnPet и т.п.)
 		chatOpen = false
@@ -207,7 +216,7 @@ func _anyDown(keys: Array) -> bool:
 # ---------------- Чат ----------------
 
 func _onEnter() -> void:
-	if not controlled or not hasPlayer():
+	if not controlled or not hasPlayer() or player.isUnconscious:
 		return
 	if chatOpen:
 		_submitChat()

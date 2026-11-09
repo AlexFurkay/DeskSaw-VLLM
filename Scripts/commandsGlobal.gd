@@ -532,6 +532,8 @@ func _print_toggle_state(label: String, on: bool) -> void:
 	_statesChanged()
 
 func _cmd_aiStatus() -> void:
+	# 056.001 (чек-лист Alex: «где посмотреть версию?») - первой строкой
+	Console.print(Lang.t("Версия игры: [color=CYAN]%s[/color]") % GlobalVariable.BUILD)
 	_print_toggle_state("AI (toggle_ai)", gbData.settings.get("llmVisionEnabled", true))
 	_print_toggle_state("Profanity (toggle_profanity)", gbData.settings.get("llmAllowProfanity", false))
 	_print_toggle_state("Flirt (toggle_flirt)", gbData.settings.get("llmFlirtEnabled", false))

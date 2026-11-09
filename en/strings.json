@@ -434,5 +434,7 @@
  "Если игра тебе нравится и хочется сказать спасибо - вот куда можно. Игра бесплатная и такой останется, это только по желанию. Спасибо, что играешь!": "If you enjoy the game and want to say thanks - here's where. The game is free and will stay free, this is entirely optional. Thank you for playing!",
  "отчёт диагностики для тестов: при запуске пишет diagnostics.txt в папку сохранений и раз в 10 минут - строку состояния (без аргументов = переключить)": "diagnostics report for testing: writes diagnostics.txt to the save folder at startup and a status line every 10 minutes (no arguments = toggle)",
  "[color=CYAN]Лор перечитан. Ничего не изменилось - готовые фразы сохранены.[/color]": "[color=CYAN]Lore reloaded. Nothing changed - the ready phrases are kept.[/color]",
- "[color=CYAN]Лор перечитан. Фразы создадутся заново только у: %s.[/color]": "[color=CYAN]Lore reloaded. New phrases will be generated only for: %s.[/color]"
+ "[color=CYAN]Лор перечитан. Фразы создадутся заново только у: %s.[/color]": "[color=CYAN]Lore reloaded. New phrases will be generated only for: %s.[/color]",
+ "[color=CYAN]Модель загружается в видеопамять: первая фраза на ней может прийти через 30-60 секунд, дальше - как обычно.[/color]": "[color=CYAN]The model is loading into video memory: its first line may take 30-60 seconds, then it's back to normal.[/color]",
+ "Версия игры: [color=CYAN]%s[/color]": "Game version: [color=CYAN]%s[/color]"
 }

@@ -218,6 +218,10 @@ func send(cooldown: float = 0.0, ignoreCooldown: bool = true) -> void:
 	if self.get_parent().isSleeping:
 		print("sleeping")
 		return
+	# 056.001 (DD, автор DeskSaw): при выключенном ИИ погибший продолжал говорить по таймеру
+	# (фразы состояний и «меня тащат» шли сюда мимо проверки в _say). Без сознания - молчит.
+	if self.get_parent().isUnconscious:
+		return
 	if pool.size() > 0:
 		var text: String = pool.pick_random()
 		var effectiveSpeed = speedMod

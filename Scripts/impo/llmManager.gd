@@ -540,6 +540,35 @@ const _META_MARKERS_EN := [
 ]
 ## Число + "строк"/"фраз" ("15 строк", "10 фраз") - отчёт модели о задании.
 var _metaCountRegex := RegEx.create_from_string(Lang.pick("\\d+\\s*(строк|фраз|реплик)", "\\d+\\s*(lines|phrases|sentences|replies)"))
+## 056.001 (чек-лист Alex, скрин): модель посреди ответа «передумала» и написала служебное
+## «Wait, let me try again for the prompt's specific request:» и второй вариант. Ищем начало такого
+## разворота: в русской игре - любые английские «wait, let me / let me try / the prompt», в английской -
+## только явные (try again / rewrite / rephrase / the prompt), чтобы не резать живое «Wait, let me see».
+var _metaPivotRe := RegEx.create_from_string("(?i)(\\bwait\\b[,.!]?\\s+let me|\\blet me (try|rewrite|redo|rephrase|start over)|\\bi('ll| will) (try|rewrite|rephrase)|\\btry again\\b|\\bthe prompt|\\bprompt's\\b|\\brevised (version|line|reply))")
+var _metaPivotReEn := RegEx.create_from_string("(?i)(\\blet me (try again|rewrite|redo|rephrase|start over)|\\btry again for\\b|\\bthe prompt|\\bprompt's\\b|\\brevised (version|line|reply)|\\bi('ll| will) (rewrite|rephrase))")
+func _metaPivotAt(text: String) -> int:
+	var m: RegExMatch = (_metaPivotReEn if Lang.isEn() else _metaPivotRe).search(text)
+	return m.get_start() if m else -1
+
+
+## Оставить ответ ДО разворота; если до него пусто - вариант ПОСЛЕ служебной строки (после «:» или «.»).
+func _stripMetaRetry(text: String) -> String:
+	var at := _metaPivotAt(text)
+	if at < 0:
+		return text
+	var before := text.substr(0, at).strip_edges()
+	if before.length() >= 6:
+		return before
+	var rest := text.substr(at)
+	var cut := -1
+	for ch in [":", ".", "!", "?", "\n"]:
+		var i := rest.find(ch)
+		if i != -1 and (cut == -1 or i < cut):
+			cut = i
+	var after := rest.substr(cut + 1).strip_edges() if cut != -1 else ""
+	return after if after.length() >= 6 and _metaPivotAt(after) < 0 else ""
+
+
 func _looksLikeMetaCommentary(text: String) -> bool:
 	var lower := text.to_lower().strip_edges()
 	for marker in Lang.pick(_META_MARKERS, _META_MARKERS_EN):
@@ -3415,6 +3444,13 @@ func _streamCheckUnit(tag: String, unit: String, first: bool, retry: int) -> Dic
 		stopAfter = true
 	elif paren != -1:
 		return {"v": "reject" if first else "stop", "why": "META_PAREN", "text": u}
+	var pivot := _metaPivotAt(u)
+	if pivot != -1:
+		var before := u.substr(0, pivot).strip_edges()
+		if before.length() < 6:
+			return {"v": "reject" if first else "stop", "why": "META_RETRY", "text": u}
+		u = before
+		stopAfter = true
 	var bad := ""
 	if u == "":
 		bad = "EMPTY"
@@ -3720,6 +3756,10 @@ func _on_request_completed(_result: int, response_code: int, _headers: PackedStr
 
 	if not isPrefetchBatch:
 		var rawReply := text
+		var noMeta := _stripMetaRetry(text)
+		if noMeta != text:
+			_logDebugLine(_currentTag, "META_RETRY", text + "  -->  " + noMeta)
+			text = noMeta
 		text = _keepStarActions(text)
 		var rejectReason := ""
 
@@ -4224,6 +4264,7 @@ func listAvailableModels() -> void:
 const MODEL_PRESETS := {
 	"qwen3-vl:8b-instruct": [0.7, 1.2], # 0.8 давал много странных метафор (лог 2026-10-14)
 	"gemma4:12b": [0.8, 1.1], # 055.002: пока как у gemma3 - уточнить на стенде
+	"gemma4:26b-a4b-it-qat": [0.8, 1.1], # 056.001: третья в README вместо 31B (стенд 09.11), как у gemma4:12b
 	"huihui_ai/gemma-4-abliterated:12b": [0.8, 1.1], # 0.56: третья в README (решение Alex - многие просили), как у gemma4
 	"satgeze/gemma4-12b-uncensored-1.5m:latest": [0.8, 1.1], # F2.7 (стенд 02.11): заменила 1m - то же, английских вставок вдвое меньше
 	"satgeze/gemma4-12b-uncensored-1m:latest": [0.8, 1.1], # 0.56: открытая модель (просили на стриме), как у gemma4
@@ -4247,6 +4288,8 @@ func setModel(name: String, pull: bool = true) -> void:
 		setProfanityAllowed(false)
 		Console.print(Lang.t("[color=ORANGE]Обычная модель: мат выключен.[/color]"))
 	gbData.settings["llmModelName"] = modelName
+	# 056.001 (чек-лист Alex): первая фраза на новой модели идёт долго - Ollama грузит её в видеопамять
+	Console.print(Lang.t("[color=CYAN]Модель загружается в видеопамять: первая фраза на ней может прийти через 30-60 секунд, дальше - как обычно.[/color]"))
 	if weakModel():
 		Console.print(weakModelWarning())
 	if MODEL_PRESETS.has(name):
