@@ -14,10 +14,12 @@
 
 ***Это некоммерческий фанатский проект. Персонажи и часть ассетов взяты из игры Gunsaw***.
 
+### **`Друзья! Если вы прочтёте описание целиком, в нём есть ответы на 999 из 1000 вопросов!`**
+
 ## **Требования**
 - Windows (macOS/Linux сборки будут позже),
 - Установленная и запущенная ollama *https://ollama.com/download*  (можно свернуть её в трей),
-- Видеокарта с 8+ ГБ видеопамяти для комфортной работы модели по умолчанию (*gemma4:12b* занимает около 7,5 ГБ, остальное нужно системе). На 8 ГБ она работает примерно вдвое медленнее, чем на 10-12 ГБ (включается режим картошки), но фразы лучше.
+- Видеокарта с 8+ ГБ видеопамяти для комфортной работы модели по умолчанию (*gemma4:12b* занимает около 7,5 ГБ, остальное нужно системе). На 8 ГБ она работает примерно вдвое медленнее, чем на 10-12 ГБ (включается режим картошки, про него будет написано далее).
 
 Модель можно скачать вручную одной командой в командной строке Windows, либо также одной командой в игре.
 Список моделей, которые будут работать в игре и их характеристики (мощнее модель = лучше фразы = нужен ПК мощнее):
@@ -654,6 +656,8 @@ A desktop pet from the Gunsaw universe - a companion to talk to, watch movies wi
 and it speaks in unique, non-repeating lines rather than pre-written ones. You can also talk to it, and if there are several characters on one screen, they can talk to each other.
 
 ***This is a non-commercial fan project. The characters and some assets come from the game Gunsaw***.
+
+### **Hello friends! Please, read the entire description, it contains answers to 999 out of 1000 questions!**
 
 ## **Requirements**
 - Windows (macOS/Linux builds will come later),
